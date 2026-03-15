@@ -21,49 +21,38 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-## 核心命令
+## 常用入口
 
-```bash
-.venv/bin/python henu_cli.py setup_account --student_id "<学号>" --password "<密码>"
-.venv/bin/python henu_cli.py sync_schedule
-.venv/bin/python henu_cli.py schedule_query --view week
-.venv/bin/python henu_cli.py schedule_query --view current
-.venv/bin/python henu_cli.py library_query --view locations
-.venv/bin/python henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>" --preferred_time "10:30"
-.venv/bin/python henu_cli.py library_query --view current
-.venv/bin/python henu_cli.py library_auto_signin
-.venv/bin/python henu_cli.py library_query --view records
-.venv/bin/python henu_cli.py library_cancel --record_id "<记录ID>"
-.venv/bin/python henu_cli.py seminar_group --action save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>"
-.venv/bin/python henu_cli.py seminar_group --action list
-.venv/bin/python henu_cli.py seminar_query --view filters
-.venv/bin/python henu_cli.py seminar_query --view records --record_type 1 --mode books
-.venv/bin/python henu_cli.py seminar_query --view rooms --target_date "2026-03-14" --members 0 --library_names "<馆舍名>"
-.venv/bin/python henu_cli.py seminar_query --view detail --area_id "<房间ID>" --target_date "2026-03-14"
-.venv/bin/python henu_cli.py seminar_reserve --area_id "<房间ID>" --target_date "2026-03-14" --start_time "14:00" --end_time "16:00" --group_name "<组名>" --title "<主题>" --content "<超过10字的申请说明>" --mobile "<手机号>"
-.venv/bin/python henu_cli.py seminar_signin --auto_scan
-.venv/bin/python henu_cli.py seminar_cancel --record_id "<记录ID>"
-.venv/bin/python henu_cli.py set_calibration_source --data "<DATA>" --cookie "<COOKIE>"
-.venv/bin/python henu_cli.py system_status
-```
+- `setup_account`：保存账号并验证登录
+- `sync_schedule`：同步最新课表
+- `schedule_query --view current|week|full`：查当前课程、本周课表或完整课表
+- `library_query --view locations|current|records`：查图书馆区域、当前预约或历史记录
+- `library_reserve` / `library_auto_signin` / `library_cancel`：图书馆写操作
+- `seminar_group --action list|save|delete`：管理研讨室 group
+- `seminar_query --view filters|rooms|detail|records|signin_tasks`：查研讨室筛选项、房间、详情、记录和签到任务
+- `seminar_reserve` / `seminar_signin` / `seminar_cancel`：研讨室写操作
+- `system_status`：查当前时间和系统状态
+- `set_calibration_source`：更新节次校准源
 
-## 关键文件
+## 最短流程
 
-- `henu_cli.py`：Skill CLI 入口
-- `scripts/henu_campus_mcp.py`：Skill 调用包装层
-- `mcp_server.py`：核心能力实现
-- `course_schedule.py` / `schedule_cleaner.py`：课表抓取与清洗
-- `library_core/henu_core.py`：图书馆/研讨室核心（内置）
+图书馆：
+- 先执行 `system_status`
+- 再执行 `library_query --view locations`
+- 然后 `library_reserve`
+- 后续用 `library_query --view current` / `library_query --view records`
+
+研讨室：
+- 先执行 `system_status`
+- 可先用 `seminar_group --action save` 保存成员
+- 按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 查询
+- 然后 `seminar_reserve`
+- 后续用 `seminar_query --view records`、`seminar_signin`、`seminar_cancel`
 
 ## 说明
 
-- Skill CLI 已统一为 14 个入口：`setup_account`、`sync_schedule`、`schedule_query`、`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`、`seminar_group`、`seminar_query`、`seminar_signin`、`seminar_reserve`、`seminar_cancel`、`set_calibration_source`、`system_status`
-- 不依赖外部 `../图书馆自动预约/web`
+- Skill CLI 统一为 14 个入口，避免重复命令
 - 账号与 Cookie 仅本地保存
-- 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先调用 `system_status`
-- 研讨室 `group` 保存的是同行成员学号，不含自己；建议保存 3-9 个学号，预约时会自动去重并排除当前登录账号
-- 研讨室预约会按房间限制校验总人数，通常为 4-5 人起、最多 10 人
-- 研讨室申请内容会强制校验为多于 10 个字
-- 研讨室取消通过 `/v4/seminar/cancel`，可先用 `seminar_query --view records` 查到记录 `id`
-- 相关分支：`mcp-server`、`main`
+- 研讨室 `group` 不含自己，建议保存 3-9 个同行成员
+- 研讨室申请内容必须多于 10 个字
 - Ubuntu/Debian 不要直接执行系统级 `pip3 install -r requirements.txt`
