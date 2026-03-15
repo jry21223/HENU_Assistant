@@ -74,18 +74,19 @@ python3 diagnose_mcp.py
 | 类别 | 工具 |
 | --- | --- |
 | 账号与系统 | `setup_account`, `system_status` |
-| 课表 | `sync_schedule`, `latest_schedule_current_week`, `latest_schedule`, `current_course` |
-| 图书馆 | `library_locations`, `library_reserve`, `library_current`, `library_auto_signin`, `library_records`, `library_cancel` |
-| 研讨室 | `seminar_groups`, `seminar_group_save`, `seminar_group_delete`, `seminar_filters`, `seminar_rooms`, `seminar_room_detail`, `seminar_reserve`, `seminar_records`, `seminar_cancel`, `seminar_signin_tasks`, `seminar_signin`, `seminar_auto_signin` |
+| 课表 | `sync_schedule`, `schedule_query` |
+| 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
+| 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 节次校准 | `set_calibration_source` |
 
 ## 推荐流程
 
 1. 首次使用先调用 `setup_account` 保存账号并验证登录。
 2. 调用 `sync_schedule` 拉取最新课表。
-3. 图书馆流程通常是：`library_locations` -> `library_reserve` -> `library_current` / `library_auto_signin` -> `library_records` / `library_cancel`。
-4. 研讨室流程通常是：`seminar_group_save` -> `seminar_rooms` -> `seminar_room_detail` -> `seminar_reserve` -> `seminar_records` / `seminar_cancel`。
-5. 研讨室预约成功后会自动登记“开始前 10 分钟签到”任务；常驻 `mcp_server.py` 进程会后台扫描，也可以手动调用 `seminar_auto_signin` 补扫。
+3. 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先调用 `system_status` 确认当前时间。
+4. 图书馆流程通常是：`library_query(view="locations")` -> `library_reserve` -> `system_status` -> `library_query(view="current")` / `library_auto_signin` -> `library_query(view="records")` / `library_cancel`。
+5. 研讨室流程通常是：`seminar_group(action="save")` -> `seminar_query(view="filters")` / `seminar_query(view="rooms")` -> `seminar_query(view="detail")` -> `seminar_reserve` -> `system_status` -> `seminar_query(view="records")` / `seminar_cancel`。
+6. 研讨室预约成功后会自动登记“开始前 10 分钟签到”任务；常驻 `mcp_server.py` 进程会后台扫描，也可以手动调用 `seminar_signin(auto_scan=true)` 补扫。
 
 ## 关键文件
 
