@@ -901,6 +901,198 @@ def _seminar_task_summary(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _seminar_minutes_from_dt_text(value: Any) -> tuple[int | None, int]:
+    parsed = _parse_dt_text(value)
+    if parsed is None:
+        return None, 0
+    local = parsed.astimezone(ZoneInfo("Asia/Shanghai"))
+    return local.hour * 60 + local.minute, local.second
+
+
+def _seminar_slot_start_minutes(slot: dict[str, Any]) -> int | None:
+    raw = slot.get("begin_num")
+    try:
+        if raw is not None and str(raw).strip() != "":
+            return int(raw)
+    except (TypeError, ValueError):
+        pass
+    minutes, _ = _seminar_minutes_from_dt_text(slot.get("begin_timestamp"))
+    return minutes
+
+
+def _seminar_slot_end_boundary_minutes(slot: dict[str, Any]) -> int | None:
+    raw = slot.get("end_num")
+    seconds = 0
+    parsed_minutes, parsed_seconds = _seminar_minutes_from_dt_text(slot.get("end_timestamp"))
+    if parsed_minutes is not None:
+        seconds = parsed_seconds
+    try:
+        if raw is not None and str(raw).strip() != "":
+            value = int(raw)
+            return value + 1 if seconds >= 59 else value
+    except (TypeError, ValueError):
+        pass
+    if parsed_minutes is None:
+        return None
+    return parsed_minutes + 1 if seconds >= 59 else parsed_minutes
+
+
+def _seminar_format_slot_label(start_min: int, end_min: int) -> str:
+    return f"{_minutes_to_hhmm(start_min)}-{_minutes_to_hhmm(end_min)}"
+
+
+def _seminar_day_text_from_timestamp(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.split(" ")[0].strip()
+
+
+def _seminar_attach_day_to_slots(slots: list[dict[str, Any]], day_text: str, area_id: str = "") -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        start_time = str(slot.get("start_time") or "").strip()
+        end_time = str(slot.get("end_time") or "").strip()
+        begin_num = slot.get("begin_num")
+        end_num = slot.get("end_num")
+        item = {
+            **slot,
+            "areaId": area_id,
+            "begin_timestamp": f"{day_text} {start_time}:00".strip() if day_text and start_time else "",
+            "end_timestamp": f"{day_text} {end_time}:00".strip() if day_text and end_time else "",
+        }
+        if begin_num is None and start_time:
+            item["begin_num"] = _to_minutes(start_time)
+        if end_num is None and end_time:
+            item["end_num"] = _to_minutes(end_time)
+        items.append(item)
+    return items
+
+
+def _seminar_normalize_occupied_slots(raw_slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for slot in raw_slots:
+        if not isinstance(slot, dict):
+            continue
+        start_min = _seminar_slot_start_minutes(slot)
+        end_boundary = _seminar_slot_end_boundary_minutes(slot)
+        if start_min is None or end_boundary is None or start_min >= end_boundary:
+            continue
+        items.append(
+            {
+                "start_time": _minutes_to_hhmm(start_min),
+                "end_time": _minutes_to_hhmm(end_boundary),
+                "label": _seminar_format_slot_label(start_min, end_boundary),
+                "begin_timestamp": str(slot.get("begin_timestamp") or ""),
+                "end_timestamp": str(slot.get("end_timestamp") or ""),
+                "begin_num": start_min,
+                "end_num": end_boundary,
+            }
+        )
+    items.sort(key=lambda item: (item.get("begin_num", 0), item.get("end_num", 0)))
+    return items
+
+
+def _seminar_compute_available_slots(
+    open_start_min: int | None,
+    open_end_min: int | None,
+    occupied_slots: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if open_start_min is None or open_end_min is None or open_start_min >= open_end_min:
+        return []
+
+    merged: list[tuple[int, int]] = []
+    for slot in occupied_slots:
+        try:
+            start_min = int(slot.get("begin_num"))
+            end_min = int(slot.get("end_num"))
+        except (TypeError, ValueError):
+            continue
+        start_min = max(open_start_min, start_min)
+        end_min = min(open_end_min, end_min)
+        if start_min >= end_min:
+            continue
+        if not merged or start_min > merged[-1][1]:
+            merged.append((start_min, end_min))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end_min))
+
+    free: list[dict[str, Any]] = []
+    cursor = open_start_min
+    for start_min, end_min in merged:
+        if cursor < start_min:
+            free.append(
+                {
+                    "start_time": _minutes_to_hhmm(cursor),
+                    "end_time": _minutes_to_hhmm(start_min),
+                    "label": _seminar_format_slot_label(cursor, start_min),
+                }
+            )
+        cursor = max(cursor, end_min)
+    if cursor < open_end_min:
+        free.append(
+            {
+                "start_time": _minutes_to_hhmm(cursor),
+                "end_time": _minutes_to_hhmm(open_end_min),
+                "label": _seminar_format_slot_label(cursor, open_end_min),
+            }
+        )
+    return free
+
+
+def _seminar_room_summary(room: dict[str, Any]) -> dict[str, Any]:
+    raw_occupied = room.get("date") or []
+    occupied_slots = _seminar_normalize_occupied_slots(raw_occupied if isinstance(raw_occupied, list) else [])
+
+    open_start_min = None
+    open_end_min = None
+    try:
+        raw_start = room.get("begin_num")
+        if raw_start is not None and str(raw_start).strip() != "":
+            open_start_min = int(raw_start)
+    except (TypeError, ValueError):
+        pass
+    try:
+        raw_end = room.get("end_num")
+        if raw_end is not None and str(raw_end).strip() != "":
+            open_end_min = int(raw_end)
+    except (TypeError, ValueError):
+        pass
+    if open_start_min is None:
+        open_start_min, _ = _seminar_minutes_from_dt_text(room.get("start_timestamp"))
+    if open_end_min is None:
+        open_end_min, _ = _seminar_minutes_from_dt_text(room.get("end_timestamp"))
+
+    day_text = (
+        _seminar_day_text_from_timestamp(room.get("start_timestamp"))
+        or _seminar_day_text_from_timestamp(room.get("end_timestamp"))
+    )
+    area_id = str(room.get("id") or "")
+    available_slots = _seminar_compute_available_slots(open_start_min, open_end_min, occupied_slots)
+    available_slots = _seminar_attach_day_to_slots(available_slots, day_text, area_id=area_id)
+    open_label = ""
+    if open_start_min is not None and open_end_min is not None and open_start_min < open_end_min:
+        open_label = _seminar_format_slot_label(open_start_min, open_end_min)
+
+    return {
+        **room,
+        "date": available_slots,
+        "date_semantics": "available_slots",
+        "time_field_warning": "date/available_slots 表示可预约时段；occupied_slots 表示已占用时段",
+        "open_time_range": {
+            "start_time": _minutes_to_hhmm(open_start_min) if open_start_min is not None else "",
+            "end_time": _minutes_to_hhmm(open_end_min) if open_end_min is not None else "",
+            "label": open_label,
+        },
+        "raw_occupied_date": raw_occupied,
+        "occupied_slots": occupied_slots,
+        "available_slots": available_slots,
+        "is_fully_available": bool(not occupied_slots and available_slots),
+    }
+
+
 def _normalize_compare_text(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "")).lower()
 
@@ -2126,6 +2318,17 @@ def _seminar_rooms_impl(
 
     result = bot.seminar_list(payload)
     _save_library_cookies(bot.get_cookies())
+    rooms = result.get("rooms") or []
+    normalized_rooms = [_seminar_room_summary(room) for room in rooms if isinstance(room, dict)]
+    result["rooms"] = normalized_rooms
+    result["time_field_semantics"] = {
+        "rooms.date": "可预约时段（兼容主字段）",
+        "rooms.raw_occupied_date": "已占用时段（原始字段）",
+        "rooms.occupied_slots": "已占用时段（规范化）",
+        "rooms.available_slots": "根据开放时间减去已占用时段推导出的空闲时段",
+        "warning": "rooms.date/available_slots 才是可预约时段；rooms.raw_occupied_date/occupied_slots 是已占用时段",
+    }
+    result["msg"] = str(result.get("msg") or "操作成功") + "；rooms.date 已转换为可预约时段"
     result["resolved_query"] = {
         "library_ids": library_id_list,
         "floor_ids": resolved_floor_ids,
@@ -2625,7 +2828,8 @@ def seminar_query(
     规则：
     1) 查询 `records` 前必须先调用 `system_status` 确认当前日期时间。
     2) 预约前通常先按 `filters` -> `rooms` -> `detail` 逐步查询。
-    3) 回复仅可基于本次返回结果，不得编造。
+    3) `rooms` 返回中的 `date`/`available_slots` 表示可预约时段；`raw_occupied_date`/`occupied_slots` 表示已占用时段。
+    4) 回复仅可基于本次返回结果，不得编造。
     """
     normalized_view = str(view or "rooms").strip().lower()
     if normalized_view == "filters":
