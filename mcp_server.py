@@ -87,108 +87,6 @@ def _to_minutes(hhmm: str) -> int:
     return int(hour) * 60 + int(minute)
 
 
-def _parse_week_range(time_str: str) -> tuple[set[int], list[int]]:
-    """
-    解析课程时间字符串，返回(周次集合, 节次列表)
-    
-    示例:
-    - "1-18[3-4]" -> ({1,2,3,...,18}, [3,4])
-    - "1-9,11-18[1-2]" -> ({1,2,...,9,11,12,...,18}, [1,2])
-    - "1,3,5,7[6-7]" -> ({1,3,5,7}, [6,7])
-    """
-    weeks = set()
-    periods = []
-    
-    # 提取周次部分和节次部分
-    match = re.match(r'(.+?)\[(.+?)\]', time_str)
-    if not match:
-        return weeks, periods
-    
-    week_part, period_part = match.groups()
-    
-    # 解析周次
-    for segment in week_part.split(','):
-        segment = segment.strip()
-        if '-' in segment:
-            try:
-                start, end = segment.split('-')
-                weeks.update(range(int(start), int(end) + 1))
-            except Exception:
-                pass
-        else:
-            try:
-                weeks.add(int(segment))
-            except Exception:
-                pass
-    
-    # 解析节次
-    if '-' in period_part:
-        try:
-            start, end = period_part.split('-')
-            periods = list(range(int(start), int(end) + 1))
-        except Exception:
-            pass
-    else:
-        try:
-            periods = [int(period_part)]
-        except Exception:
-            pass
-    
-    return weeks, periods
-
-
-def _get_current_week(timezone: str = "Asia/Shanghai") -> int:
-    """
-    获取当前周次（基于学期开始日期）
-    
-    从semester_config.json读取学期开始日期，默认为2024-09-02
-    """
-    config_file = BASE_DIR / "semester_config.json"
-    semester_start = "2024-09-02"  # 默认学期开始日期
-    
-    if config_file.exists():
-        try:
-            config = json.loads(config_file.read_text(encoding="utf-8"))
-            semester_start = config.get("semester_start", semester_start)
-        except Exception:
-            pass
-    
-    try:
-        start_date = datetime.strptime(semester_start, "%Y-%m-%d").date()
-        now = _now_dt(timezone).date()
-        days_diff = (now - start_date).days
-        current_week = (days_diff // 7) + 1
-        return max(1, current_week)  # 至少返回第1周
-    except Exception:
-        return 1  # 出错时返回第1周
-
-
-def _filter_courses_by_week(schedule: dict[str, list[dict[str, Any]]], current_week: int) -> dict[str, list[dict[str, Any]]]:
-    """
-    根据当前周次过滤课程，只保留在当前周次有课的课程
-    """
-    filtered = {}
-    for day, courses in schedule.items():
-        filtered[day] = []
-        for course in courses:
-            time_str = course.get("time", "")
-            if not time_str:
-                # 没有时间信息，保留
-                filtered[day].append(course)
-                continue
-            
-            weeks, periods = _parse_week_range(time_str)
-            if current_week in weeks:
-                # 当前周有这门课
-                course_copy = course.copy()
-                course_copy["current_week"] = current_week
-                course_copy["weeks"] = sorted(list(weeks))
-                course_copy["total_weeks"] = len(weeks)
-                filtered[day].append(course_copy)
-        
-    return filtered
-
-
 def _normalize_teaching_period_times(
     period_times: dict[str, dict[str, str]],
 ) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
@@ -1914,34 +1812,6 @@ def _latest_schedule_impl() -> dict[str, Any]:
         return {"success": False, "msg": f"获取课表失败: {e}"}
 
 
-def _latest_schedule_current_week_impl(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
-    """
-    【必须调用】获取本周课表 - 只返回本周真正在上的课程
-    
-    功能：
-    - 自动计算当前周次
-    - 过滤掉本周没有的课程
-    - 返回本周实际的课程安排
-    
-    重要：这个工具会根据课程的周次信息（如"1-18[3-4]"）过滤课程。
-    """
-    try:
-        data = load_latest_clean_schedule(OUTPUT_DIR)
-        schedule = data.get("schedule", {})
-        
-        current_week = _get_current_week(timezone)
-        filtered_schedule = _filter_courses_by_week(schedule, current_week)
-        
-        return {
-            "success": True,
-            "current_week": current_week,
-            "schedule": filtered_schedule,
-            "msg": f"当前第{current_week}周的课表"
-        }
-    except Exception as e:
-        return {"success": False, "msg": f"获取本周课表失败: {e}"}
-
-
 def _current_course_impl(
     timezone: str = "Asia/Shanghai",
     auto_calibrate: bool = True,
@@ -2948,7 +2818,6 @@ def schedule_query(
 
     view:
     - current: 当前正在上的课 + 下一节课
-    - week: 本周有效课表
     - full: 最新完整课表
 
     规则：
@@ -2959,10 +2828,13 @@ def schedule_query(
     if normalized_view == "current":
         return _current_course_impl(timezone=timezone, auto_calibrate=auto_calibrate)
     if normalized_view == "week":
-        return _latest_schedule_current_week_impl(timezone=timezone)
+        return {
+            "success": False,
+            "msg": "week 视图已下线：当前周次无法从教务系统稳定获取，已停止提供本周课表过滤。",
+        }
     if normalized_view == "full":
         return _latest_schedule_impl()
-    return {"success": False, "msg": "view 仅支持 current/week/full"}
+    return {"success": False, "msg": "view 仅支持 current/full；week 视图已下线"}
 
 
 @mcp.tool()
