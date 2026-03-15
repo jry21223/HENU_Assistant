@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--no_auto_calibrate", action="store_true", help="同步前不执行自动节次校准")
 
     schedule_parser = subparsers.add_parser("schedule_query", help="统一查询课表")
-    schedule_parser.add_argument("--view", default="current", choices=["current", "week", "full"], help="查询视图")
+    schedule_parser.add_argument("--view", default="current", choices=["current", "full"], help="查询视图")
     schedule_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
     schedule_parser.add_argument("--no_auto_calibrate", action="store_true", help="查询当前课程前不执行自动节次校准")
 

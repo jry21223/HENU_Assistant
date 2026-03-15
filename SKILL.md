@@ -27,7 +27,6 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `setup_account --student_id "<学号>" --password "<密码>"`
 - `sync_schedule`
 - `schedule_query --view current`
-- `schedule_query --view week`
 - `schedule_query --view full`
 - `library_query --view locations`
 - `library_query --view current`
