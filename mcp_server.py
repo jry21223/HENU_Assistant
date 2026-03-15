@@ -2463,24 +2463,33 @@ def sync_schedule(
 
 
 @mcp.tool()
-def library_locations() -> dict[str, Any]:
+def library_query(
+    view: str = "current",
+    record_type: str = "1",
+    page: int = 1,
+    limit: int = 20,
+) -> dict[str, Any]:
     """
-    【必须调用】查看图书馆区域列表 - 获取所有可预约的图书馆区域
-    
-    【执行协议（必须遵守）】
-    1) 预约前必须先调用本工具确认区域，不得凭记忆列举。
-    2) 回复时只允许使用本工具返回的 locations 列表。
-    3) 未调用或调用失败时，必须明确说明无法确认区域。
-    
-    功能：返回图书馆所有区域的名称和ID
-    返回格式：{"success": true, "locations": [{"location": "区域名", "area_id": "ID"}]}
-    
-    ⚠️ 严禁编造区域信息！
-    - 不要凭空列举区域名称，必须调用此工具获取
-    - 只有此工具返回的区域列表才是准确的
-    - 预约前必须先调用此工具确认可用区域
+    统一查询图书馆信息。
+
+    view:
+    - locations: 图书馆区域列表
+    - current: 当前预约
+    - records: 历史预约记录
+
+    规则：
+    1) 查询 `current` 或 `records` 前必须先调用 `system_status` 确认当前日期时间。
+    2) 预约前应先查询 `locations`，不得凭记忆列举区域。
+    3) 回复仅可基于本次返回结果，不得编造。
     """
-    return _library_locations_impl()
+    normalized_view = str(view or "current").strip().lower()
+    if normalized_view == "locations":
+        return _library_locations_impl()
+    if normalized_view == "current":
+        return _library_current_impl()
+    if normalized_view == "records":
+        return _library_records_impl(record_type=record_type, page=page, limit=limit)
+    return {"success": False, "msg": "view 仅支持 locations/current/records"}
 
 
 @mcp.tool()
@@ -2520,39 +2529,6 @@ def library_reserve(
 
 
 @mcp.tool()
-def library_records(record_type: str = "1", page: int = 1, limit: int = 20) -> dict[str, Any]:
-    """
-    【必须调用】查询图书馆预约记录 - 获取真实的预约历史
-    
-    【执行协议（必须遵守）】
-    1) 禁止“猜你有预约记录”，必须先调用本工具。
-    2) 回复仅可基于本次 records 返回，不得编造记录项。
-    3) 失败时必须明确说明查询失败与原因。
-    
-    功能：从图书馆系统查询预约记录
-    record_type: 1(普通) / 3(研习) / 4(考研)
-    
-    重要：不要编造预约记录，必须调用此工具获取真实数据。
-    """
-    return _library_records_impl(record_type=record_type, page=page, limit=limit)
-
-
-@mcp.tool()
-def library_current() -> dict[str, Any]:
-    """
-    【必须调用】查询图书馆当前预约 - 获取当前可操作的实时预约状态
-
-    【执行协议（必须遵守）】
-    1) 禁止凭猜测说“你当前有/没有预约”，必须先调用本工具。
-    2) 回复必须基于本次返回中的 appointments。
-    3) 如查询失败，必须明确说明失败原因。
-
-    功能：返回当前有效预约列表，可用于判断是否存在可签到记录。
-    """
-    return _library_current_impl()
-
-
-@mcp.tool()
 def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     """
     【必须调用】图书馆自动签到 - 对当前预约执行真实签到操作
@@ -2563,6 +2539,7 @@ def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     3) 若没有可签到记录或签到失败，必须如实说明原因。
 
     功能：自动查找当前可签到的图书馆座位预约并执行签到。
+    建议先通过 `library_query(view="current")` 查看当前预约。
     record_id 留空时自动选择当前可签到记录；传入后只对指定记录尝试签到。
     """
     return _library_auto_signin_impl(record_id=record_id)
@@ -2587,99 +2564,33 @@ def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
 
 
 @mcp.tool()
-def seminar_groups() -> dict[str, Any]:
-    """
-    查看已保存的研讨室 group。
-
-    功能：返回本地保存的各个 group 名称及成员学号列表。
-    """
-    return _seminar_groups_impl()
-
-
-@mcp.tool()
-def seminar_group_save(group_name: str, member_ids: str, note: str = "") -> dict[str, Any]:
-    """
-    保存研讨室预约 group。
-
-    参数：
-    - group_name: group 名称
-    - member_ids: 学号列表，支持逗号/空格/换行分隔
-    - note: 备注
-
-    功能：把一组成员学号保存到本地，后续研讨室预约可直接引用 group_name。
-    """
-    return _seminar_group_save_impl(group_name=group_name, member_ids=member_ids, note=note)
-
-
-@mcp.tool()
-def seminar_group_delete(group_name: str) -> dict[str, Any]:
-    """
-    删除已保存的研讨室 group。
-    """
-    return _seminar_group_delete_impl(group_name=group_name)
-
-
-@mcp.tool()
-def seminar_filters() -> dict[str, Any]:
-    """
-    查询研讨室筛选项。
-
-    功能：返回馆舍、楼层、分类、特色标签等筛选项，用于后续查房间。
-    """
-    return _seminar_filters_impl()
-
-
-@mcp.tool()
-def seminar_records(
-    record_type: str = "1",
-    page: int = 1,
-    limit: int = 20,
-    mode: str = "books",
+def seminar_group(
+    action: str = "list",
+    group_name: str = "",
+    member_ids: str = "",
+    note: str = "",
 ) -> dict[str, Any]:
     """
-    查询研讨室预约记录。
+    统一管理研讨室 group。
 
-    参数：
-    - record_type: 1(普通空间) / 2(大型空间)
-    - mode: books(当前/历史预约) / reneges(违约/取消记录)
-    - page/limit: 分页参数
+    action:
+    - list: 查看已保存 group
+    - save: 保存/覆盖 group
+    - delete: 删除 group
     """
-    return _seminar_records_impl(record_type=record_type, page=page, limit=limit, mode=mode)
+    normalized_action = str(action or "list").strip().lower()
+    if normalized_action == "list":
+        return _seminar_groups_impl()
+    if normalized_action == "save":
+        return _seminar_group_save_impl(group_name=group_name, member_ids=member_ids, note=note)
+    if normalized_action == "delete":
+        return _seminar_group_delete_impl(group_name=group_name)
+    return {"success": False, "msg": "action 仅支持 list/save/delete"}
 
 
 @mcp.tool()
-def seminar_signin_tasks(status: str = "") -> dict[str, Any]:
-    """
-    查看研讨室自动签到任务。
-
-    参数：
-    - status: 可选，按状态过滤，支持逗号分隔，如 `pending,success`
-    """
-    return _seminar_signin_tasks_impl(status=status)
-
-
-@mcp.tool()
-def seminar_signin(record_id: str) -> dict[str, Any]:
-    """
-    对指定研讨室预约记录执行真实签到。
-
-    建议先通过 seminar_records 或 seminar_signin_tasks 获取 record_id。
-    """
-    return _seminar_signin_impl(record_id=record_id)
-
-
-@mcp.tool()
-def seminar_auto_signin() -> dict[str, Any]:
-    """
-    扫描所有已到点的研讨室自动签到任务并执行签到。
-
-    预约成功后会自动登记任务；该工具可用于手动触发一次补扫。
-    """
-    return _seminar_auto_signin_impl()
-
-
-@mcp.tool()
-def seminar_rooms(
+def seminar_query(
+    view: str = "rooms",
     target_date: str = "",
     members: int = 0,
     name: str = "",
@@ -2695,39 +2606,74 @@ def seminar_rooms(
     boutique_ids: str = "",
     boutique_names: str = "",
     page: int = 1,
+    area_id: str = "",
+    record_type: str = "1",
+    limit: int = 20,
+    mode: str = "books",
+    status: str = "",
 ) -> dict[str, Any]:
     """
-    查询可预约的研讨室列表。
+    统一查询研讨室信息。
 
-    参数均为可选：
-    - target_date: 日期 YYYY-MM-DD
-    - members: 人数，默认 5
-    - name: 房间名称关键词
-    - room: 房型/房间筛选值
-    - start_time/end_time: 时间范围 HH:MM
-    - library_ids/library_names: 馆舍筛选
-    - floor_ids/floor_names: 楼层筛选
-    - category_ids/category_names: 分类筛选
-    - boutique_ids/boutique_names: 特色标签筛选
-    - page: 页码
+    view:
+    - filters: 筛选项
+    - rooms: 可预约房间列表
+    - detail: 房间详情和预约参数
+    - records: 预约记录
+    - signin_tasks: 自动签到任务
+
+    规则：
+    1) 查询 `records` 前必须先调用 `system_status` 确认当前日期时间。
+    2) 预约前通常先按 `filters` -> `rooms` -> `detail` 逐步查询。
+    3) 回复仅可基于本次返回结果，不得编造。
     """
-    return _seminar_rooms_impl(
-        target_date=target_date,
-        members=members,
-        name=name,
-        room=room,
-        start_time=start_time,
-        end_time=end_time,
-        library_ids=library_ids,
-        library_names=library_names,
-        floor_ids=floor_ids,
-        floor_names=floor_names,
-        category_ids=category_ids,
-        category_names=category_names,
-        boutique_ids=boutique_ids,
-        boutique_names=boutique_names,
-        page=page,
-    )
+    normalized_view = str(view or "rooms").strip().lower()
+    if normalized_view == "filters":
+        return _seminar_filters_impl()
+    if normalized_view == "rooms":
+        return _seminar_rooms_impl(
+            target_date=target_date,
+            members=members,
+            name=name,
+            room=room,
+            start_time=start_time,
+            end_time=end_time,
+            library_ids=library_ids,
+            library_names=library_names,
+            floor_ids=floor_ids,
+            floor_names=floor_names,
+            category_ids=category_ids,
+            category_names=category_names,
+            boutique_ids=boutique_ids,
+            boutique_names=boutique_names,
+            page=page,
+        )
+    if normalized_view == "detail":
+        if not str(area_id or "").strip():
+            return {"success": False, "msg": "view=detail 时 area_id 不能为空"}
+        return _seminar_room_detail_impl(area_id=area_id, target_date=target_date)
+    if normalized_view == "records":
+        return _seminar_records_impl(record_type=record_type, page=page, limit=limit, mode=mode)
+    if normalized_view == "signin_tasks":
+        return _seminar_signin_tasks_impl(status=status)
+    return {"success": False, "msg": "view 仅支持 filters/rooms/detail/records/signin_tasks"}
+
+
+@mcp.tool()
+def seminar_signin(record_id: str = "", auto_scan: bool = False) -> dict[str, Any]:
+    """
+    对研讨室预约执行签到。
+
+    - 传 `record_id` 时：对指定记录签到
+    - 传 `auto_scan=true` 时：扫描所有已到点任务并自动签到
+
+    建议先通过 `seminar_query(view="records")` 或 `seminar_query(view="signin_tasks")` 获取上下文。
+    """
+    if auto_scan:
+        return _seminar_auto_signin_impl()
+    if not str(record_id or "").strip():
+        return {"success": False, "msg": "record_id 不能为空；如需自动补扫请传 auto_scan=true"}
+    return _seminar_signin_impl(record_id=record_id)
 
 
 @mcp.tool()
@@ -2736,19 +2682,9 @@ def seminar_cancel(record_id: str) -> dict[str, Any]:
     取消研讨室预约。
 
     功能：对指定研讨室预约记录执行真实取消。
-    建议先通过 seminar_records 获取记录 id。
+    建议先通过 `seminar_query(view="records")` 获取记录 id。
     """
     return _seminar_cancel_impl(record_id=record_id)
-
-
-@mcp.tool()
-def seminar_room_detail(area_id: str, target_date: str = "") -> dict[str, Any]:
-    """
-    查询研讨室详情和预约参数。
-
-    功能：返回房间详情、可选日期、时间段、主题选项和人数限制。
-    """
-    return _seminar_room_detail_impl(area_id=area_id, target_date=target_date)
 
 
 @mcp.tool()
@@ -2798,55 +2734,31 @@ def seminar_reserve(
 
 
 @mcp.tool()
-def current_course(
+def schedule_query(
+    view: str = "current",
     timezone: str = "Asia/Shanghai",
     auto_calibrate: bool = True,
 ) -> dict[str, Any]:
     """
-    获取“当前正在上的课 + 下一节课”。
-    
-    【执行协议（必须遵守）】
-    1) 禁止直接猜测当前课程，必须先调用本工具。
-    2) 回复必须基于本次返回中的 current_courses/next_course。
-    """
-    return _current_course_impl(timezone=timezone, auto_calibrate=auto_calibrate)
+    统一查询课表信息。
 
+    view:
+    - current: 当前正在上的课 + 下一节课
+    - week: 本周有效课表
+    - full: 最新完整课表
 
-@mcp.tool()
-def latest_schedule() -> dict[str, Any]:
+    规则：
+    1) 禁止凭记忆输出课程信息，必须调用本工具。
+    2) 回复仅可基于本次返回的课程数据。
     """
-    【必须调用】获取完整课表 - 返回一周的所有课程安排
-    
-    【执行协议（必须遵守）】
-    1) 禁止凭历史记忆输出课表，必须调用本工具获取最新数据。
-    2) 回复时应以本次返回 schedule 为准，不得编造课程。
-    
-    功能：返回结构化的课表数据，按星期组织
-    
-    重要：不要编造课表，必须调用此工具获取真实的课程安排。
-    """
-    return _latest_schedule_impl()
-
-
-@mcp.tool()
-def latest_schedule_current_week(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
-    """
-    【推荐使用】获取本周课表 - 只显示本周真正在上的课程
-    
-    【执行协议（必须遵守）】
-    1) 禁止不经调用就声称“这是你本周课表”。
-    2) 回复必须基于本次返回的 current_week 与 schedule。
-    3) 失败时必须明确说明无法获取本周课表。
-    
-    功能：
-    - 自动计算当前周次（基于学期开始日期）
-    - 根据课程周次信息（如"1-18[3-4]"）过滤课程
-    - 只返回本周实际有课的课程
-    
-    重要：这个工具比latest_schedule更准确，因为它会过滤掉本周没有的课程。
-    例如：如果某门课是"1-9周"，而现在是第10周，这门课不会出现在结果中。
-    """
-    return _latest_schedule_current_week_impl(timezone=timezone)
+    normalized_view = str(view or "current").strip().lower()
+    if normalized_view == "current":
+        return _current_course_impl(timezone=timezone, auto_calibrate=auto_calibrate)
+    if normalized_view == "week":
+        return _latest_schedule_current_week_impl(timezone=timezone)
+    if normalized_view == "full":
+        return _latest_schedule_impl()
+    return {"success": False, "msg": "view 仅支持 current/week/full"}
 
 
 @mcp.tool()
@@ -2879,6 +2791,11 @@ def set_calibration_source(
 def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     """
     查看系统状态：账号、时间、节次配置、最近校准状态、输出文件。
+
+    【执行协议（必须遵守）】
+    1) 当用户提到“现在/今天/明天/当前/待签到/是否过期”等相对时间时，必须先调用本工具。
+    2) 在查询图书馆或研讨室预约前，也必须先调用本工具确认当前日期时间。
+    3) 回复中的时间判断只允许基于本次返回的 `server_time`。
     """
     return {
         "success": True,

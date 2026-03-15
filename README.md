@@ -13,7 +13,6 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant
 sudo apt update
 sudo apt install -y python3-venv
 
-# 使用项目虚拟环境安装依赖
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
@@ -27,21 +26,22 @@ source .venv/bin/activate
 ```bash
 .venv/bin/python henu_cli.py setup_account --student_id "<学号>" --password "<密码>"
 .venv/bin/python henu_cli.py sync_schedule
-.venv/bin/python henu_cli.py latest_schedule_current_week
-.venv/bin/python henu_cli.py current_course
-.venv/bin/python henu_cli.py library_locations
+.venv/bin/python henu_cli.py schedule_query --view week
+.venv/bin/python henu_cli.py schedule_query --view current
+.venv/bin/python henu_cli.py library_query --view locations
 .venv/bin/python henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>" --preferred_time "10:30"
-.venv/bin/python henu_cli.py library_current
+.venv/bin/python henu_cli.py library_query --view current
 .venv/bin/python henu_cli.py library_auto_signin
-.venv/bin/python henu_cli.py library_records
+.venv/bin/python henu_cli.py library_query --view records
 .venv/bin/python henu_cli.py library_cancel --record_id "<记录ID>"
-.venv/bin/python henu_cli.py seminar_group_save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>"
-.venv/bin/python henu_cli.py seminar_groups
-.venv/bin/python henu_cli.py seminar_filters
-.venv/bin/python henu_cli.py seminar_records --record_type 1 --mode books
-.venv/bin/python henu_cli.py seminar_rooms --target_date "2026-03-14" --members 0 --library_names "<馆舍名>"
-.venv/bin/python henu_cli.py seminar_room_detail --area_id "<房间ID>" --target_date "2026-03-14"
+.venv/bin/python henu_cli.py seminar_group --action save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>"
+.venv/bin/python henu_cli.py seminar_group --action list
+.venv/bin/python henu_cli.py seminar_query --view filters
+.venv/bin/python henu_cli.py seminar_query --view records --record_type 1 --mode books
+.venv/bin/python henu_cli.py seminar_query --view rooms --target_date "2026-03-14" --members 0 --library_names "<馆舍名>"
+.venv/bin/python henu_cli.py seminar_query --view detail --area_id "<房间ID>" --target_date "2026-03-14"
 .venv/bin/python henu_cli.py seminar_reserve --area_id "<房间ID>" --target_date "2026-03-14" --start_time "14:00" --end_time "16:00" --group_name "<组名>" --title "<主题>" --content "<超过10字的申请说明>" --mobile "<手机号>"
+.venv/bin/python henu_cli.py seminar_signin --auto_scan
 .venv/bin/python henu_cli.py seminar_cancel --record_id "<记录ID>"
 .venv/bin/python henu_cli.py set_calibration_source --data "<DATA>" --cookie "<COOKIE>"
 .venv/bin/python henu_cli.py system_status
@@ -57,11 +57,13 @@ source .venv/bin/activate
 
 ## 说明
 
+- Skill CLI 已统一为 14 个入口：`setup_account`、`sync_schedule`、`schedule_query`、`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`、`seminar_group`、`seminar_query`、`seminar_signin`、`seminar_reserve`、`seminar_cancel`、`set_calibration_source`、`system_status`
 - 不依赖外部 `../图书馆自动预约/web`
 - 账号与 Cookie 仅本地保存
+- 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先调用 `system_status`
 - 研讨室 `group` 保存的是同行成员学号，不含自己；建议保存 3-9 个学号，预约时会自动去重并排除当前登录账号
 - 研讨室预约会按房间限制校验总人数，通常为 4-5 人起、最多 10 人
 - 研讨室申请内容会强制校验为多于 10 个字
-- 研讨室取消通过 `/v4/seminar/cancel`，可先用 `seminar_records` 查到记录 `id`
+- 研讨室取消通过 `/v4/seminar/cancel`，可先用 `seminar_query --view records` 查到记录 `id`
 - 相关分支：`mcp-server`、`main`
 - Ubuntu/Debian 不要直接执行系统级 `pip3 install -r requirements.txt`
