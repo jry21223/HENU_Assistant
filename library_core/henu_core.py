@@ -11,6 +11,20 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
+# Windows 时区支持
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+def _now_dt() -> dt.datetime:
+    """获取当前北京时间（带时区信息）"""
+    try:
+        return dt.datetime.now(ZoneInfo("Asia/Shanghai"))
+    except Exception:
+        # 如果时区信息不可用，使用 UTC+8 手动计算
+        return dt.datetime.utcnow() + dt.timedelta(hours=8)
+
 
 class HenuLibraryBot:
     # 常用区域映射（可继续补充）；不在映射内时会尝试按当天区域列表模糊匹配
@@ -134,7 +148,7 @@ class HenuLibraryBot:
         return base64.b64encode(cipher.encrypt(pad(text.encode("utf-8"), AES.block_size))).decode("utf-8")
 
     def _api_aes_key(self) -> bytes:
-        date_text = dt.datetime.now().strftime("%Y%m%d")
+        date_text = _now_dt().strftime("%Y%m%d")
         return f"{date_text}{date_text[::-1]}".encode("utf-8")
 
     def _encrypt_api_payload(self, data: dict[str, Any]) -> str:
@@ -428,7 +442,7 @@ class HenuLibraryBot:
             normalized[key] = value
 
         if ("lat" in normalized or "lng" in normalized) and "time" not in normalized:
-            normalized["time"] = int(dt.datetime.now().timestamp())
+            normalized["time"] = int(_now_dt().timestamp())
 
         return normalized
 

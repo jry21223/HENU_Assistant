@@ -2,3 +2,5 @@ requests
 pycryptodome
 mcp
 lxml
+tzdata; platform_system=='Windows'
+backports.zoneinfo; python_version<'3.9'
