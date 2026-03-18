@@ -49,9 +49,9 @@ class BaseHenuTool(Tool):
         if not isinstance(query_vars, dict):
             return {}
 
-        sender_id = query_vars.get("henu_sender_id")
-        launcher_id = query_vars.get("henu_launcher_id")
-        launcher_type = query_vars.get("henu_launcher_type")
+        sender_id = query_vars.get("henu_sender_id") or query_vars.get("sender_id")
+        launcher_id = query_vars.get("henu_launcher_id") or query_vars.get("launcher_id")
+        launcher_type = query_vars.get("henu_launcher_type") or query_vars.get("launcher_type")
 
         result: dict[str, Any] = {}
         if sender_id not in (None, "", 0, "0"):

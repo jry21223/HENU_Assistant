@@ -98,6 +98,56 @@ class HenuPluginService:
             "system_status": self._system_status,
         }
 
+    def get_sender_account_context(
+        self,
+        session: provider_session.Session,
+        identity_hint: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        identity = self._resolve_identity(session, identity_hint=identity_hint or {})
+        paths = self._build_storage_paths(identity)
+
+        try:
+            with self._activate_user_storage(paths):
+                account_wrapper = mcp_server.show_account()
+        except Exception as exc:
+            return {
+                "success": False,
+                "msg": f"读取账号绑定失败: {exc}",
+                "binding": {
+                    "qq": identity.qq,
+                    "storage_key": identity.storage_key,
+                    "launcher_type": identity.launcher_type,
+                    "launcher_id": identity.launcher_id,
+                    "sender_id": identity.sender_id,
+                },
+                "account": {},
+            }
+
+        account = account_wrapper.get("account") if isinstance(account_wrapper, dict) else {}
+        if not isinstance(account, dict):
+            account = {}
+
+        student_id = _text(account.get("student_id"))
+        return {
+            "success": True,
+            "binding": {
+                "qq": identity.qq,
+                "storage_key": identity.storage_key,
+                "launcher_type": identity.launcher_type,
+                "launcher_id": identity.launcher_id,
+                "sender_id": identity.sender_id,
+            },
+            "account": {
+                "student_id": student_id,
+                "is_bound": bool(student_id),
+                "has_password": bool(account.get("has_password")),
+                "library_default_location": _text(account.get("library_default_location")),
+                "library_default_seat_no": _text(account.get("library_default_seat_no")),
+                "has_seminar_mobile": bool(account.get("has_seminar_mobile")),
+                "profile_file": _text(account.get("profile_file"), strip=False),
+            },
+        }
+
     def run_tool(
         self,
         tool_name: str,
