@@ -23,6 +23,7 @@ MANIFEST
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
 
@@ -40,6 +41,11 @@ Thumbs.db
 *.json
 output/
 logs/
+data/
+.tmp_inspect/
+.env
+build_out/
+*.lbpkg
 
 # Sensitive data
 henu_cookies.json

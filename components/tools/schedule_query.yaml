@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: schedule_query
+  label:
+    en_US: ScheduleQuery
+    zh_Hans: 查询课表
+  description:
+    en_US: "Query current/day/week/full schedule for the current QQ account."
+    zh_Hans: "查询当前 QQ 账号对应用户的当前课程、某天课表、整周课表或完整课表。"
+spec:
+  parameters:
+    type: object
+    properties:
+      view:
+        type: string
+        enum: [current, day, week, full]
+        description: 查询视图，默认 current
+      timezone:
+        type: string
+        description: 时区，默认 Asia/Shanghai
+      target_date:
+        type: string
+        description: 当 view=day 时使用，格式 YYYY-MM-DD
+      auto_calibrate:
+        type: boolean
+        description: 当 view=current 时是否自动校准节次时间，默认 true
+  llm_prompt: "读取当前 QQ 账号对应的课表缓存并按指定视图返回结果。不要编造课程信息。"
+execution:
+  python:
+    path: schedule_query.py
+    attr: ScheduleQuery

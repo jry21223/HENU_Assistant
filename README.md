@@ -1,90 +1,69 @@
-# 河大校园助手（MCP 服务器版）
+# 河大校园助手（Langbot 插件版）
 
-河南大学校园助手的 MCP 实现，集成了课表查询、图书馆预约、研讨室预约、节次校准和系统状态能力。
+把原来的 `HENU_MCP` `mcp-server` 分支能力改造成了 Langbot 插件，保留课表、图书馆、研讨室、节次校准和系统状态能力，并新增了按 QQ 账号隔离保存账号配置的存储层。
 
-## 安装
+## 功能
+
+- 当前 QQ 账号绑定河大学号和密码：`setup_account`
+- 同步并查询课表：`sync_schedule`、`schedule_query`
+- 图书馆查询 / 预约 / 签到 / 取消：`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`
+- 研讨室分组 / 查询 / 预约 / 签到 / 取消：`seminar_group`、`seminar_query`、`seminar_reserve`、`seminar_signin`、`seminar_cancel`
+- 节次校准源：`set_calibration_source`
+- 系统状态：`system_status`
+
+## 账号隔离
+
+插件会按当前发消息的 QQ 账号隔离保存数据：
+
+- 群聊优先使用 `sender_id`
+- 私聊回退到 `launcher_id`
+- 每个 QQ 账号都有独立目录：`data/users/<qq>/`
+
+每个账号目录下会保存：
+
+- `profile.json`：学号、密码、默认图书馆参数、研讨室分组等
+- `xk_cookies.json`：教务系统 Cookie
+- `library_cookies.json`：图书馆 Cookie
+- `seminar_signin_tasks.json`：研讨室签到任务
+- `output/`：该账号自己的课表抓取结果
+
+共享数据放在 `data/shared/`：
+
+- `period_time_config.json`
+- `period_time_calibration_state.json`
+- `xiqueer_period_time_request.json`
+
+## 安装依赖
 
 ```bash
-git clone https://github.com/jry21223/HENU_MCP.git
-cd HENU_MCP
-git checkout mcp-server
-chmod +x install.sh
-./install.sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-## 启动
+## 本地调试
 
 ```bash
-./run.sh
+cp .env.example .env
+.venv/bin/lbp run
 ```
 
-## 诊断
+## 构建插件包
 
-### macOS / Linux
 ```bash
-source venv/bin/activate
-python3 diagnose_mcp.py
+.venv/bin/lbp build
 ```
 
-### Windows
-```cmd
-venv\Scripts\activate
-python diagnose_mcp.py
-```
+## 目录说明
 
-## MCP 客户端配置
-
-### Cherry Studio
-
-#### macOS / Linux
-```json
-{
-  "mcpServers": {
-    "henu-campus": {
-      "command": "bash",
-      "args": [
-        "-lc",
-        "cd \"<YOUR_PROJECT_PATH>\" && source venv/bin/activate && python3 mcp_server.py --transport stdio"
-      ]
-    }
-  }
-}
-```
-
-#### Windows
-```json
-{
-  "mcpServers": {
-    "henu-campus": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "cd /d \"<YOUR_PROJECT_PATH>\" && venv\\Scripts\\activate && python mcp_server.py --transport stdio"
-      ]
-    }
-  }
-}
-```
-
-其他支持 `stdio` 的客户端也可以复用同一条启动命令。
-
-## 常用工具
-
-| 类别 | 工具 |
-| --- | --- |
-| 账号与系统 | `setup_account`, `system_status` |
-| 课表 | `sync_schedule`, `schedule_query` |
-| 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
-| 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
-| 节次校准 | `set_calibration_source` |
-
-课表查询补充说明：
-- `schedule_query(view="current")` 只查“当前正在上的课 + 下一节课”
-- `schedule_query(view="day", target_date="2026-03-19")` 查某一天课表
-- `schedule_query(view="week")` 为兼容旧客户端，返回未按教学周过滤的完整周课表
+- `manifest.yaml`：Langbot 插件清单
+- `main.py`：插件入口
+- `components/tools/`：Langbot Tool 组件
+- `henu_plugin/service.py`：工具分发和按 QQ 隔离的存储上下文
+- `mcp_server.py` / `course_schedule.py` / `library_core/`：复用的原始业务逻辑
 
 ## 说明
 
-- OpenClaw Skill 版本在 `openclaw-skill` 分支
-- 如果无法连接，先运行 `python3 diagnose_mcp.py`
-- 账号与 Cookie 只保存在本地
+- 账号和 Cookie 仍然只保存在本地
+- 研讨室预约成功后会保存签到任务，但插件版不会启动后台自动签到线程
+- 需要签到时，请再次调用 `seminar_signin(auto_scan=true)` 或 `seminar_signin(record_id=...)`
+- 如果需要查看当前账号绑定和路径信息，调用 `system_status`

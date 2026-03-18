@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Plugin
+metadata:
+  author: jry21223
+  name: henu_assistant
+  repository: "https://github.com/jry21223/HENU_MCP"
+  version: 0.1.0
+  description:
+    en_US: "Henan University assistant for Langbot with per-QQ account isolation."
+    zh_Hans: "河南大学校园助手 Langbot 插件版，支持按 QQ 账号隔离保存学号和密码。"
+  label:
+    en_US: HENU Assistant
+    zh_Hans: 河大校园助手
+  icon: assets/icon.svg
+spec:
+  config: []
+  components:
+    Tool:
+      fromDirs:
+        - path: components/tools/
+execution:
+  python:
+    path: main.py
+    attr: HenuAssistantPlugin

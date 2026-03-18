@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: seminar_reserve
+  label:
+    en_US: SeminarReserve
+    zh_Hans: 预约研讨室
+  description:
+    en_US: "Reserve a seminar room."
+    zh_Hans: "为当前 QQ 账号绑定用户预约研讨室。"
+spec:
+  parameters:
+    type: object
+    properties:
+      area_id:
+        type: string
+        description: 房间 area_id
+      target_date:
+        type: string
+        description: 开始日期 YYYY-MM-DD
+      start_time:
+        type: string
+        description: 开始时间 HH:MM
+      end_time:
+        type: string
+        description: 结束时间 HH:MM
+      end_date:
+        type: string
+        description: 结束日期 YYYY-MM-DD
+      title:
+        type: string
+        description: 主题标题，普通房间使用
+      title_id:
+        type: string
+        description: 预设主题 ID，主题房间使用
+      content:
+        type: string
+        description: 申请内容，必须多于 10 个字
+      mobile:
+        type: string
+        description: 11 位手机号
+      group_name:
+        type: string
+        description: 已保存分组名
+      member_ids:
+        type: string
+        description: 成员学号列表，逗号或空格分隔
+      is_open:
+        type: integer
+        description: 是否公开，默认 0
+      cate_id:
+        type: string
+        description: 部分类别房间所需的 cate_id
+      time_ranges_json:
+        type: string
+        description: 多时间段 JSON 数组字符串
+    required:
+      - area_id
+  llm_prompt: "执行真实的研讨室预约。插件版会保存签到任务，但不会启动后台自动签到线程。"
+execution:
+  python:
+    path: seminar_reserve.py
+    attr: SeminarReserve

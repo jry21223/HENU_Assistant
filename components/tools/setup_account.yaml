@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: setup_account
+  label:
+    en_US: SetupAccount
+    zh_Hans: 绑定河大账号
+  description:
+    en_US: "Bind the current QQ account to a HENU student ID and password."
+    zh_Hans: "为当前发消息的 QQ 账号绑定河大学号和密码，并可选验证登录。"
+spec:
+  parameters:
+    type: object
+    properties:
+      student_id:
+        type: string
+        description: 河大学号
+      password:
+        type: string
+        description: 统一认证密码
+      library_location:
+        type: string
+        description: 默认图书馆区域名称，可留空
+      library_seat_no:
+        type: string
+        description: 默认图书馆座位号，可留空
+      verify_login:
+        type: boolean
+        description: 是否立即验证账号密码，默认 true
+      calibrate_period_time:
+        type: boolean
+        description: 是否自动校准节次时间，默认 true
+    required:
+      - student_id
+      - password
+  llm_prompt: "为当前 QQ 账号保存河大学号和密码。不同 QQ 账号会保存到不同本地目录，不会互相覆盖。"
+execution:
+  python:
+    path: setup_account.py
+    attr: SetupAccount

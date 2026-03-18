@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: library_reserve
+  label:
+    en_US: LibraryReserve
+    zh_Hans: 图书馆预约
+  description:
+    en_US: "Reserve a library seat for the current QQ account."
+    zh_Hans: "为当前 QQ 账号绑定用户预约图书馆座位。"
+spec:
+  parameters:
+    type: object
+    properties:
+      location:
+        type: string
+        description: 图书馆区域名称，可留空使用默认值
+      seat_no:
+        type: string
+        description: 座位号，可留空使用默认值
+      target_date:
+        type: string
+        description: 日期，格式 YYYY-MM-DD，默认明天
+      preferred_time:
+        type: string
+        description: 首选时间，格式 HH:MM，默认 08:00
+  llm_prompt: "执行真实的图书馆座位预约。只有返回 success=true 才代表预约成功。"
+execution:
+  python:
+    path: library_reserve.py
+    attr: LibraryReserve

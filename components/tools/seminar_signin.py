@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+from components.tools._base import BaseHenuTool
+
+
+class SeminarSignin(BaseHenuTool):
+    tool_name = "seminar_signin"

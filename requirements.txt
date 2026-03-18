@@ -1,3 +1,4 @@
+langbot-plugin
 requests
 pycryptodome
 mcp
