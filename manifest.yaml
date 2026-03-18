@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   author: jry21223
   name: henu_assistant
-  repository: "https://github.com/jry21223/HENU_MCP"
+  repository: "https://github.com/jry21223/HENU_Assistant"
   version: 0.1.0
   description:
     en_US: "Henan University assistant for Langbot with per-QQ account isolation."
