@@ -602,12 +602,27 @@ def get_current_course_status(
 
     future_courses.sort(key=lambda x: x[0])
     next_course = future_courses[0][1] if future_courses else None
+    if current_courses:
+        msg = f"当前共有 {len(current_courses)} 门正在上的课程"
+    elif next_course:
+        msg = (
+            "当前没有正在上的课，下一节是"
+            f"{next_course.get('clock_start', '')}-{next_course.get('clock_end', '')} "
+            f"{next_course.get('course', '')}"
+        ).strip()
+    elif day_courses:
+        msg = "当前没有正在上的课，且今天后续没有课程"
+    else:
+        msg = "今天课表为空"
 
     return {
         "success": True,
         "now": now.strftime("%Y-%m-%d %H:%M:%S"),
         "timezone": timezone,
         "weekday": weekday_cn,
+        "msg": msg,
+        "day_schedule": day_courses,
+        "day_schedule_count": len(day_courses),
         "current_courses": current_courses,
         "next_course": next_course,
         "period_times": period_times,
@@ -1571,6 +1586,21 @@ def get_server_time(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     }
 
 
+def _resolve_schedule_target_date(
+    target_date: str = "",
+    timezone: str = "Asia/Shanghai",
+) -> tuple[datetime.date, str]:
+    text = str(target_date or "").strip()
+    if not text:
+        value = _now_dt(timezone).date()
+        return value, value.strftime("%Y-%m-%d")
+    try:
+        value = datetime.strptime(text, "%Y-%m-%d").date()
+    except Exception as exc:
+        raise ValueError("target_date 格式必须为 YYYY-MM-DD") from exc
+    return value, text
+
+
 def get_period_time_config() -> dict[str, Any]:
     """读取节次时间映射配置（第几节 -> 开始/结束时间）。"""
     period_times = _load_period_times()
@@ -1810,6 +1840,64 @@ def _latest_schedule_impl() -> dict[str, Any]:
         return {"success": True, "schedule": data.get("schedule", {})}
     except Exception as e:
         return {"success": False, "msg": f"获取课表失败: {e}"}
+
+
+def _day_schedule_impl(
+    target_date: str = "",
+    timezone: str = "Asia/Shanghai",
+) -> dict[str, Any]:
+    """
+    获取某一天的课表。
+
+    注意：当前视图按星期几从完整周课表中提取，不按教学周做额外过滤。
+    """
+    try:
+        target_day, date_text = _resolve_schedule_target_date(target_date=target_date, timezone=timezone)
+    except ValueError as exc:
+        return {"success": False, "msg": str(exc)}
+
+    try:
+        data = load_latest_clean_schedule(OUTPUT_DIR)
+    except Exception as exc:
+        return {"success": False, "msg": f"获取课表失败: {exc}"}
+
+    weekday_cn = WEEKDAY_CN[target_day.weekday()]
+    schedule = data.get("schedule", {}) or {}
+    day_courses = list(schedule.get(weekday_cn, []) or [])
+    today = _now_dt(timezone).date()
+    day_offset = (target_day - today).days
+
+    if day_courses:
+        msg = f"{date_text} {weekday_cn} 共 {len(day_courses)} 门课（未按教学周过滤）"
+    else:
+        msg = f"{date_text} {weekday_cn} 课表为空（按星期提取，未按教学周过滤）"
+
+    return {
+        "success": True,
+        "date": date_text,
+        "weekday": weekday_cn,
+        "schedule": day_courses,
+        "schedule_count": len(day_courses),
+        "day_offset": day_offset,
+        "is_today": day_offset == 0,
+        "is_tomorrow": day_offset == 1,
+        "week_filter_applied": False,
+        "msg": msg,
+    }
+
+
+def _week_schedule_compat_impl() -> dict[str, Any]:
+    """
+    兼容旧客户端的 week 视图。
+
+    由于当前周次无法从教务系统稳定获取，此处返回未按教学周过滤的完整周课表。
+    """
+    result = _latest_schedule_impl()
+    if not result.get("success"):
+        return result
+    result["week_filter_applied"] = False
+    result["msg"] = "week 视图已降级为完整周课表：当前周次无法稳定获取，结果未按教学周过滤。"
+    return result
 
 
 def _current_course_impl(
@@ -2811,6 +2899,7 @@ def seminar_reserve(
 def schedule_query(
     view: str = "current",
     timezone: str = "Asia/Shanghai",
+    target_date: str = "",
     auto_calibrate: bool = True,
 ) -> dict[str, Any]:
     """
@@ -2818,7 +2907,12 @@ def schedule_query(
 
     view:
     - current: 当前正在上的课 + 下一节课
+    - day: 某一天的课表（按星期提取，不按教学周过滤）
+    - week: 兼容旧客户端，返回未按教学周过滤的完整周课表
     - full: 最新完整课表
+
+    参数：
+    - target_date: 当 view=day 时使用，格式 YYYY-MM-DD；为空时默认今天
 
     规则：
     1) 禁止凭记忆输出课程信息，必须调用本工具。
@@ -2827,14 +2921,13 @@ def schedule_query(
     normalized_view = str(view or "current").strip().lower()
     if normalized_view == "current":
         return _current_course_impl(timezone=timezone, auto_calibrate=auto_calibrate)
+    if normalized_view == "day":
+        return _day_schedule_impl(target_date=target_date, timezone=timezone)
     if normalized_view == "week":
-        return {
-            "success": False,
-            "msg": "week 视图已下线：当前周次无法从教务系统稳定获取，已停止提供本周课表过滤。",
-        }
+        return _week_schedule_compat_impl()
     if normalized_view == "full":
         return _latest_schedule_impl()
-    return {"success": False, "msg": "view 仅支持 current/full；week 视图已下线"}
+    return {"success": False, "msg": "view 仅支持 current/day/week/full"}
 
 
 @mcp.tool()

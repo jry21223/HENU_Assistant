@@ -51,8 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--no_auto_calibrate", action="store_true", help="同步前不执行自动节次校准")
 
     schedule_parser = subparsers.add_parser("schedule_query", help="统一查询课表")
-    schedule_parser.add_argument("--view", default="current", choices=["current", "full"], help="查询视图")
+    schedule_parser.add_argument("--view", default="current", choices=["current", "day", "week", "full"], help="查询视图")
     schedule_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
+    schedule_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD，仅 view=day 时使用")
     schedule_parser.add_argument("--no_auto_calibrate", action="store_true", help="查询当前课程前不执行自动节次校准")
 
     library_query_parser = subparsers.add_parser("library_query", help="统一查询图书馆信息")
@@ -174,6 +175,7 @@ def main() -> None:
             result = schedule_query(
                 view=args.view,
                 timezone=args.timezone,
+                target_date=args.target_date,
                 auto_calibrate=not args.no_auto_calibrate,
             )
         elif args.command == "library_query":

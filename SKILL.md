@@ -27,6 +27,8 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `setup_account --student_id "<学号>" --password "<密码>"`
 - `sync_schedule`
 - `schedule_query --view current`
+- `schedule_query --view day --target_date "2026-03-19"`
+- `schedule_query --view week`
 - `schedule_query --view full`
 - `library_query --view locations`
 - `library_query --view current`
@@ -53,6 +55,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 
 - 首次使用先执行 `setup_account`
 - 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先执行 `system_status`
+- 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
 - 图书馆预约前先用 `library_query --view locations` 确认区域
 - 图书馆查看当前预约或历史记录时，用 `library_query --view current` / `library_query --view records`
 - 研讨室通常先按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 逐步查询

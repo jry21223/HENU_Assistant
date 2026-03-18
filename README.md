@@ -25,7 +25,7 @@ source .venv/bin/activate
 
 - `setup_account`：保存账号并验证登录
 - `sync_schedule`：同步最新课表
-- `schedule_query --view current|full`：查当前课程或完整课表
+- `schedule_query --view current|day|week|full`：查当前课程、某一天课表、周课表或完整课表
 - `library_query --view locations|current|records`：查图书馆区域、当前预约或历史记录
 - `library_reserve` / `library_auto_signin` / `library_cancel`：图书馆写操作
 - `seminar_group --action list|save|delete`：管理研讨室 group
@@ -33,6 +33,11 @@ source .venv/bin/activate
 - `seminar_reserve` / `seminar_signin` / `seminar_cancel`：研讨室写操作
 - `system_status`：查当前时间和系统状态
 - `set_calibration_source`：更新节次校准源
+
+课表查询补充说明：
+- `schedule_query --view current` 只查“当前正在上的课 + 下一节课”
+- `schedule_query --view day --target_date "2026-03-19"` 查某一天课表
+- `schedule_query --view week` 为兼容旧调用，返回未按教学周过滤的完整周课表
 
 ## 最短流程
 
