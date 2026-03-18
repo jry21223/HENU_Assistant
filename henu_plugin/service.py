@@ -104,12 +104,13 @@ class HenuPluginService:
         params: dict[str, Any],
         session: provider_session.Session,
         query_id: int,
+        identity_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         handler = self._tool_dispatch.get(tool_name)
         if handler is None:
             return {"success": False, "msg": f"未知工具: {tool_name}"}
 
-        identity = self._resolve_identity(session)
+        identity = self._resolve_identity(session, identity_hint=identity_hint or {})
         paths = self._build_storage_paths(identity)
 
         try:
@@ -122,9 +123,14 @@ class HenuPluginService:
             self._decorate_result(result, tool_name, identity, paths, query_id)
         return result
 
-    def _resolve_identity(self, session: provider_session.Session) -> SessionIdentity:
-        sender_id = _clean_session_id(session.sender_id)
-        launcher_id = _clean_session_id(session.launcher_id)
+    def _resolve_identity(
+        self,
+        session: provider_session.Session,
+        identity_hint: dict[str, Any] | None = None,
+    ) -> SessionIdentity:
+        hint = identity_hint or {}
+        sender_id = _clean_session_id(hint.get("sender_id")) or _clean_session_id(session.sender_id)
+        launcher_id = _clean_session_id(hint.get("launcher_id")) or _clean_session_id(session.launcher_id)
         qq = sender_id or launcher_id or "unknown"
 
         storage_key = re.sub(r"[^0-9A-Za-z._-]+", "_", qq).strip("._-")

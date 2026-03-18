@@ -15,6 +15,9 @@ metadata:
 spec:
   config: []
   components:
+    EventListener:
+      fromDirs:
+        - path: components/event_listener/
     Tool:
       fromDirs:
         - path: components/tools/

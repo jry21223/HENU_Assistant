@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: EventListener
+metadata:
+  name: identity_capture
+  label:
+    en_US: IdentityCapture
+    zh_Hans: IdentityCapture
+spec:
+execution:
+  python:
+    path: identity_capture.py
+    attr: IdentityCaptureListener
