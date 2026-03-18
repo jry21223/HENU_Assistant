@@ -78,6 +78,11 @@ python diagnose_mcp.py
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 节次校准 | `set_calibration_source` |
 
+课表查询补充说明：
+- `schedule_query(view="current")` 只查“当前正在上的课 + 下一节课”
+- `schedule_query(view="day", target_date="2026-03-19")` 查某一天课表
+- `schedule_query(view="week")` 为兼容旧客户端，返回未按教学周过滤的完整周课表
+
 ## 说明
 
 - OpenClaw Skill 版本在 `openclaw-skill` 分支
