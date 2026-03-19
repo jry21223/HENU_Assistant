@@ -15,7 +15,7 @@ spec:
       record_id:
         type: string
         description: 指定预约记录 ID，可留空自动选择当前可签到记录
-  llm_prompt: "执行真实的图书馆签到操作，不要假装签到成功。"
+  llm_prompt: "执行前先确认当前 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。执行真实的图书馆签到操作，不要假装签到成功。"
 execution:
   python:
     path: library_auto_signin.py

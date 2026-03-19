@@ -10,6 +10,11 @@ from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
 class BaseHenuTool(Tool):
     tool_name = ""
+    _TIME_PREFLIGHT_EXEMPT_TOOLS = {
+        "system_status",
+        "setup_account",
+        "set_calibration_source",
+    }
 
     async def call(
         self,
@@ -25,8 +30,14 @@ class BaseHenuTool(Tool):
             return {"success": False, "msg": "插件服务未初始化"}
 
         identity_hint = await self._load_identity_hint(query_id)
+        runtime_context = await self._ensure_runtime_context(
+            query_id,
+            session,
+            identity_hint,
+            service,
+        )
 
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             service.run_tool,
             self.tool_name,
             params,
@@ -34,6 +45,13 @@ class BaseHenuTool(Tool):
             query_id,
             identity_hint,
         )
+        if isinstance(result, dict) and isinstance(runtime_context, dict):
+            server_time = runtime_context.get("server_time")
+            if isinstance(server_time, dict) and server_time:
+                result.setdefault("server_time_snapshot", server_time)
+
+        await self._refresh_after_sensitive_success(query_id, params, result)
+        return result
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
@@ -61,3 +79,96 @@ class BaseHenuTool(Tool):
         if launcher_type not in (None, ""):
             result["launcher_type"] = launcher_type
         return result
+
+    async def _ensure_runtime_context(
+        self,
+        query_id: int,
+        session: provider_session.Session,
+        identity_hint: dict[str, Any],
+        service: Any,
+    ) -> dict[str, Any] | None:
+        handler = getattr(self.plugin, "plugin_runtime_handler", None)
+        if handler is None:
+            return None
+
+        proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=handler)
+        query_vars: dict[str, Any]
+        try:
+            query_vars = await proxy.get_query_vars()
+        except Exception:
+            query_vars = {}
+
+        cached = query_vars.get("_henu_runtime_context") if isinstance(query_vars, dict) else None
+        if isinstance(cached, dict) and cached.get("server_time"):
+            return cached
+
+        if self.tool_name in self._TIME_PREFLIGHT_EXEMPT_TOOLS:
+            return None
+
+        timezone = self._resolve_timezone(query_vars)
+        runtime_context = await asyncio.to_thread(
+            service.get_runtime_context,
+            session,
+            identity_hint,
+            timezone,
+        )
+        if isinstance(runtime_context, dict):
+            try:
+                await proxy.set_query_var("_henu_runtime_context", runtime_context)
+            except Exception:
+                pass
+            return runtime_context
+
+        return None
+
+    def _resolve_timezone(self, query_vars: dict[str, Any]) -> str:
+        if not isinstance(query_vars, dict):
+            return "Asia/Shanghai"
+        timezone = query_vars.get("timezone") or query_vars.get("henu_timezone")
+        text = str(timezone or "").strip()
+        return text or "Asia/Shanghai"
+
+    async def _refresh_after_sensitive_success(
+        self,
+        query_id: int,
+        params: dict[str, Any],
+        result: Any,
+    ) -> None:
+        if self.tool_name != "setup_account":
+            return
+        if not isinstance(result, dict) or not result.get("success"):
+            return
+        if not self._as_bool(params.get("verify_login"), True):
+            return
+
+        handler = getattr(self.plugin, "plugin_runtime_handler", None)
+        if handler is None:
+            return
+
+        proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=handler)
+        try:
+            await proxy.create_new_conversation()
+        except Exception:
+            result["conversation_refreshed"] = False
+            result["security_notice"] = (
+                "账号已验证登录成功，但自动刷新对话失败。为避免上下文泄露，请手动开始新对话后再继续。"
+            )
+            return
+
+        result["conversation_refreshed"] = True
+        result["security_notice"] = (
+            "账号已验证登录成功，插件已自动刷新对话上下文，避免后续沿用旧上下文。"
+        )
+
+    def _as_bool(self, value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        if value is None:
+            return default
+        return bool(value)

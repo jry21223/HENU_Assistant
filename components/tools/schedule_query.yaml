@@ -25,7 +25,7 @@ spec:
       auto_calibrate:
         type: boolean
         description: 当 view=current 时是否自动校准节次时间，默认 true
-  llm_prompt: "读取当前 QQ 账号对应的课表缓存并按指定视图返回结果。不要编造课程信息。"
+  llm_prompt: "如需判断今天、明天、现在、当前课程等相对时间，先调用 system_status 获取 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。读取当前 QQ 账号对应的课表缓存并按指定视图返回结果。不要编造课程信息。"
 execution:
   python:
     path: schedule_query.py

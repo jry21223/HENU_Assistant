@@ -8,10 +8,10 @@ from langbot_plugin.api.entities.builtin.platform import message as platform_mes
 from langbot_plugin.api.entities.builtin.provider import message as provider_message
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.entities import context, events
-from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
 
 class IdentityCaptureListener(EventListener):
+    _DEFAULT_TIMEZONE = "Asia/Shanghai"
     _ACCOUNT_QUERY_PATTERNS = (
         re.compile(r"(我的|当前|现在|本账号).{0,8}(账号|绑定|学号|信息)"),
         re.compile(r"(账号|绑定).{0,6}(信息|状态|情况|详情)"),
@@ -33,10 +33,12 @@ class IdentityCaptureListener(EventListener):
         @self.handler(events.PersonNormalMessageReceived)
         async def on_person_normal_message(ctx: context.EventContext):
             await self._persist_identity(ctx)
+            await self._alter_user_message(ctx)
 
         @self.handler(events.GroupNormalMessageReceived)
         async def on_group_normal_message(ctx: context.EventContext):
             await self._persist_identity(ctx)
+            await self._alter_user_message(ctx)
             await self._maybe_reply_account_status(ctx)
 
         @self.handler(events.PersonCommandSent)
@@ -60,70 +62,41 @@ class IdentityCaptureListener(EventListener):
         await ctx.set_query_var("henu_sender_name", self._extract_sender_name(event))
 
     async def _inject_current_sender_context(self, ctx: context.EventContext) -> None:
-        service = getattr(self.plugin, "service", None)
-        handler = getattr(self.plugin, "plugin_runtime_handler", None)
-        if service is None or handler is None:
+        runtime_context = await self._get_or_create_runtime_context(ctx)
+        if not isinstance(runtime_context, dict):
             return
 
-        try:
-            api = QueryBasedAPIProxy(query_id=ctx.query_id, plugin_runtime_handler=handler)
-            query_vars = await api.get_query_vars()
-        except Exception:
-            return
-
-        if not isinstance(query_vars, dict):
-            return
-
-        launcher_type = self._normalize_launcher_type(
-            query_vars.get("launcher_type") or query_vars.get("henu_launcher_type")
-        )
-        launcher_id = str(query_vars.get("launcher_id") or query_vars.get("henu_launcher_id") or "").strip()
-        sender_id = str(query_vars.get("sender_id") or query_vars.get("henu_sender_id") or "").strip()
-        sender_name = str(query_vars.get("sender_name") or query_vars.get("henu_sender_name") or "").strip()
-        if launcher_type not in {"group", "person"} or not launcher_id or not sender_id:
-            return
-
-        try:
-            session = provider_session.Session(
-                launcher_type=provider_session.LauncherTypes(launcher_type),
-                launcher_id=launcher_id,
-                sender_id=sender_id,
-            )
-        except Exception:
-            return
-
-        identity_hint = {
-            "sender_id": sender_id,
-            "launcher_id": launcher_id,
-            "launcher_type": launcher_type,
-        }
-        account_context = await asyncio.to_thread(
-            service.get_sender_account_context,
-            session,
-            identity_hint,
-        )
-        if not isinstance(account_context, dict):
-            return
-
-        await api.set_query_var(
-            "_henu_identity_context",
-            {
-                "speaker": {
-                    "id": sender_id,
-                    "name": sender_name,
-                },
-                "binding": account_context.get("binding") or {},
-                "account": account_context.get("account") or {},
-            },
-        )
-
-        prompt_block = self._format_sender_prompt_block(account_context, sender_name)
+        query_vars = await self._safe_get_query_vars(ctx)
+        sender_name = self._resolve_sender_name_from_query_vars(query_vars, runtime_context)
+        prompt_block = self._format_runtime_prompt_block(runtime_context, sender_name)
         if not prompt_block:
             return
 
         ctx.event.default_prompt.append(
             provider_message.Message(role="system", content=prompt_block)
         )
+
+    async def _alter_user_message(self, ctx: context.EventContext) -> None:
+        if getattr(ctx.event, "user_message_alter", None) is not None:
+            return
+
+        original_text = str(getattr(ctx.event, "text_message", "") or "").strip()
+        if not original_text:
+            return
+
+        runtime_context = await self._get_or_create_runtime_context(ctx)
+        if not isinstance(runtime_context, dict):
+            return
+
+        query_vars = await self._safe_get_query_vars(ctx)
+        sender_name = self._resolve_sender_name_from_query_vars(query_vars, runtime_context)
+        altered = self._format_user_message_with_context(
+            runtime_context,
+            sender_name,
+            original_text,
+        )
+        if altered:
+            ctx.event.user_message_alter = altered
 
     async def _maybe_reply_account_status(self, ctx: context.EventContext) -> None:
         event = ctx.event
@@ -219,13 +192,16 @@ class IdentityCaptureListener(EventListener):
 
         return "\n".join(lines)
 
-    def _format_sender_prompt_block(self, account_context: dict, sender_name: str) -> str:
-        binding = account_context.get("binding") if isinstance(account_context, dict) else {}
-        account = account_context.get("account") if isinstance(account_context, dict) else {}
+    def _format_runtime_prompt_block(self, runtime_context: dict, sender_name: str) -> str:
+        binding = runtime_context.get("binding") if isinstance(runtime_context, dict) else {}
+        account = runtime_context.get("account") if isinstance(runtime_context, dict) else {}
+        server_time = runtime_context.get("server_time") if isinstance(runtime_context, dict) else {}
         if not isinstance(binding, dict):
             binding = {}
         if not isinstance(account, dict):
             account = {}
+        if not isinstance(server_time, dict):
+            server_time = {}
 
         sender_id = str(binding.get("sender_id") or binding.get("qq") or "").strip()
         launcher_type = str(binding.get("launcher_type") or "").strip()
@@ -235,37 +211,184 @@ class IdentityCaptureListener(EventListener):
         seat_no = str(account.get("library_default_seat_no") or "").strip()
         has_password = bool(account.get("has_password"))
         has_mobile = bool(account.get("has_seminar_mobile"))
+        now_text = str(server_time.get("now_text") or "").strip()
+        weekday_cn = str(server_time.get("weekday_cn") or "").strip()
+        timezone = str(server_time.get("timezone") or self._DEFAULT_TIMEZONE).strip()
 
         if not sender_id:
             return ""
 
         lines = [
-            "# HENU Current Speaker Context",
+            "# HENU 当前会话上下文",
             "",
-            "This turn may come from a different user than previous turns. For account, schedule, library, and seminar operations, only use the current speaker information below.",
+            "群聊历史里可能混有其他人的提问。处理账号、课表、图书馆、研讨室时，只能以当前提问人和当前服务器时间为准。",
             "",
-            "## Current Speaker",
+            "## 当前提问人",
         ]
         if sender_name:
-            lines.append(f"- Name: {sender_name}")
+            lines.append(f"- 昵称: {sender_name}")
         lines.append(f"- QQ: {sender_id}")
         if launcher_type and launcher_id:
-            lines.append(f"- Chat Scope: {launcher_type}_{launcher_id}")
-        lines.append(f"- Bound Student ID: {student_id or 'unbound'}")
-        lines.append(f"- Password Saved: {'yes' if has_password else 'no'}")
-        lines.append(f"- Library Default Location: {location or 'unset'}")
-        lines.append(f"- Library Default Seat: {seat_no or 'unset'}")
-        lines.append(f"- Seminar Mobile Saved: {'yes' if has_mobile else 'no'}")
+            lines.append(f"- 会话: {launcher_type}_{launcher_id}")
+        lines.append(f"- 绑定学号: {student_id or '未绑定'}")
+        lines.append(f"- 已保存密码: {'是' if has_password else '否'}")
+        lines.append(f"- 图书馆默认区域: {location or '未设置'}")
+        lines.append(f"- 图书馆默认座位: {seat_no or '未设置'}")
+        lines.append(f"- 研讨室手机号已保存: {'是' if has_mobile else '否'}")
+        if now_text:
+            lines.extend(
+                [
+                    "",
+                    "## 当前服务器时间",
+                    f"- 时间: {now_text}",
+                    f"- 星期: {weekday_cn or '未知'}",
+                    f"- 时区: {timezone}",
+                ]
+            )
         lines.extend(
             [
                 "",
-                "## Rules",
-                "- Never reuse another user's bound account from earlier group messages.",
-                "- If the current speaker is unbound, ask them to run setup_account before account-specific actions.",
-                "- If the user asks about their own account or schedule, interpret it as the current speaker above.",
+                "## 执行规则",
+                "- 绝对不要沿用其他群成员之前绑定的学号、账号状态、预约记录或签到状态。",
+                "- 用户说“我的账号、我的课表、明天课表、今天、明天、现在、当前、待签到、是否过期”等时，默认都指当前提问人，并且时间判断只能以上面的服务器时间为准。",
+                "- 如果当前提问人未绑定学号，先要求其执行 setup_account，再进行账号相关操作。",
+                "- 调用课表、图书馆、研讨室工具前，优先参考上面的服务器时间快照；如果还需要完整状态，再调用 system_status。",
             ]
         )
         return "\n".join(lines)
+
+    def _format_user_message_with_context(
+        self,
+        runtime_context: dict,
+        sender_name: str,
+        original_text: str,
+    ) -> str:
+        binding = runtime_context.get("binding") if isinstance(runtime_context, dict) else {}
+        account = runtime_context.get("account") if isinstance(runtime_context, dict) else {}
+        server_time = runtime_context.get("server_time") if isinstance(runtime_context, dict) else {}
+        if not isinstance(binding, dict):
+            binding = {}
+        if not isinstance(account, dict):
+            account = {}
+        if not isinstance(server_time, dict):
+            server_time = {}
+
+        sender_id = str(binding.get("sender_id") or binding.get("qq") or "").strip()
+        launcher_type = str(binding.get("launcher_type") or "").strip()
+        launcher_id = str(binding.get("launcher_id") or "").strip()
+        student_id = str(account.get("student_id") or "").strip() or "未绑定"
+        now_text = str(server_time.get("now_text") or "").strip()
+        weekday_cn = str(server_time.get("weekday_cn") or "").strip()
+
+        if not sender_id:
+            return original_text
+
+        lines = [
+            f"【当前提问人】QQ={sender_id}",
+        ]
+        if sender_name:
+            lines[-1] += f"，昵称={sender_name}"
+        if launcher_type and launcher_id:
+            lines.append(f"【当前会话】{launcher_type}_{launcher_id}")
+        lines.append(f"【当前绑定学号】{student_id}")
+        if now_text:
+            lines.append(f"【当前服务器时间】{now_text} {weekday_cn}".strip())
+        lines.append("【规则】回答“我的/今天/明天/现在/当前”时，只能按以上当前提问人与当前服务器时间理解。")
+        lines.append(f"【用户原始问题】{original_text}")
+        return "\n".join(lines)
+
+    async def _get_or_create_runtime_context(self, ctx: context.EventContext) -> dict | None:
+        cached = await self._safe_get_query_var(ctx, "_henu_runtime_context")
+        if isinstance(cached, dict) and cached.get("binding") and cached.get("server_time"):
+            return cached
+
+        service = getattr(self.plugin, "service", None)
+        if service is None:
+            return None
+
+        query_vars = await self._safe_get_query_vars(ctx)
+        launcher_type = self._normalize_launcher_type(
+            query_vars.get("launcher_type") or query_vars.get("henu_launcher_type")
+        )
+        launcher_id = str(query_vars.get("launcher_id") or query_vars.get("henu_launcher_id") or "").strip()
+        sender_id = str(query_vars.get("sender_id") or query_vars.get("henu_sender_id") or "").strip()
+        if launcher_type not in {"group", "person"} or not launcher_id or not sender_id:
+            return None
+
+        try:
+            session = provider_session.Session(
+                launcher_type=provider_session.LauncherTypes(launcher_type),
+                launcher_id=launcher_id,
+                sender_id=sender_id,
+            )
+        except Exception:
+            return None
+
+        identity_hint = {
+            "sender_id": sender_id,
+            "launcher_id": launcher_id,
+            "launcher_type": launcher_type,
+        }
+        timezone = self._resolve_timezone(query_vars)
+        runtime_context = await asyncio.to_thread(
+            service.get_runtime_context,
+            session,
+            identity_hint,
+            timezone,
+        )
+        if not isinstance(runtime_context, dict):
+            return None
+
+        sender_name = self._resolve_sender_name_from_query_vars(query_vars, runtime_context)
+        binding = runtime_context.get("binding") if isinstance(runtime_context.get("binding"), dict) else {}
+        account = runtime_context.get("account") if isinstance(runtime_context.get("account"), dict) else {}
+        server_time = runtime_context.get("server_time") if isinstance(runtime_context.get("server_time"), dict) else {}
+
+        await ctx.set_query_var("_henu_runtime_context", runtime_context)
+        await ctx.set_query_var(
+            "_henu_identity_context",
+            {
+                "speaker": {
+                    "id": sender_id,
+                    "name": sender_name,
+                },
+                "binding": binding,
+                "account": account,
+            },
+        )
+        await ctx.set_query_var("_henu_time_context", server_time)
+        return runtime_context
+
+    async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
+        try:
+            return await ctx.get_query_var(key)
+        except Exception:
+            return None
+
+    async def _safe_get_query_vars(self, ctx: context.EventContext) -> dict[str, object]:
+        try:
+            query_vars = await ctx.get_query_vars()
+        except Exception:
+            return {}
+        return query_vars if isinstance(query_vars, dict) else {}
+
+    def _resolve_sender_name_from_query_vars(
+        self,
+        query_vars: dict[str, object],
+        runtime_context: dict,
+    ) -> str:
+        sender_name = str(query_vars.get("sender_name") or query_vars.get("henu_sender_name") or "").strip()
+        if sender_name:
+            return sender_name
+
+        binding = runtime_context.get("binding") if isinstance(runtime_context, dict) else {}
+        if not isinstance(binding, dict):
+            return ""
+        return str(binding.get("sender_name") or "").strip()
+
+    def _resolve_timezone(self, query_vars: dict[str, object]) -> str:
+        timezone = str(query_vars.get("timezone") or query_vars.get("henu_timezone") or "").strip()
+        return timezone or self._DEFAULT_TIMEZONE
 
     @staticmethod
     def _normalize_launcher_type(value: object) -> str:

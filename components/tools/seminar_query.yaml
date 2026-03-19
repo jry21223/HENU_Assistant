@@ -68,7 +68,7 @@ spec:
       status:
         type: string
         description: signin_tasks 视图筛选状态
-  llm_prompt: "查询当前 QQ 账号对应用户的研讨室可预约信息和记录。"
+  llm_prompt: "如需判断今天、明天、现在、待签到、是否过期等相对时间，先调用 system_status 获取 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。查询当前 QQ 账号对应用户的研讨室可预约信息和记录。"
 execution:
   python:
     path: seminar_query.py

@@ -148,6 +148,34 @@ class HenuPluginService:
             },
         }
 
+    def get_time_snapshot(self, timezone: str = "Asia/Shanghai") -> dict[str, Any]:
+        snapshot = mcp_server.get_server_time(timezone=timezone)
+        if not isinstance(snapshot, dict):
+            return {
+                "success": False,
+                "timezone": timezone,
+                "msg": "获取服务器时间失败",
+            }
+        return snapshot
+
+    def get_runtime_context(
+        self,
+        session: provider_session.Session,
+        identity_hint: dict[str, Any] | None = None,
+        timezone: str = "Asia/Shanghai",
+    ) -> dict[str, Any]:
+        account_context = self.get_sender_account_context(
+            session,
+            identity_hint=identity_hint,
+        )
+        server_time = self.get_time_snapshot(timezone=timezone)
+        return {
+            "success": bool(account_context.get("success", True) and server_time.get("success", True)),
+            "binding": account_context.get("binding") or {},
+            "account": account_context.get("account") or {},
+            "server_time": server_time,
+        }
+
     def run_tool(
         self,
         tool_name: str,

@@ -25,7 +25,7 @@ spec:
       limit:
         type: integer
         description: 每页数量，默认 20
-  llm_prompt: "查询当前 QQ 账号绑定用户的图书馆相关信息。"
+  llm_prompt: "如需判断今天、明天、现在、当前预约、是否过期等相对时间，先调用 system_status 获取 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。查询当前 QQ 账号绑定用户的图书馆相关信息。"
 execution:
   python:
     path: library_query.py

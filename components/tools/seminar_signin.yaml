@@ -18,7 +18,7 @@ spec:
       auto_scan:
         type: boolean
         description: 是否扫描当前账号保存的待签到任务，默认 false
-  llm_prompt: "执行真实的研讨室签到。插件版支持手动扫描当前 QQ 账号保存的签到任务。"
+  llm_prompt: "执行前先确认当前 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。执行真实的研讨室签到。插件版支持手动扫描当前 QQ 账号保存的签到任务。"
 execution:
   python:
     path: seminar_signin.py

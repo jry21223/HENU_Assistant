@@ -56,7 +56,7 @@ spec:
         description: 多时间段 JSON 数组字符串
     required:
       - area_id
-  llm_prompt: "执行真实的研讨室预约。插件版会保存签到任务，但不会启动后台自动签到线程。"
+  llm_prompt: "执行前先确认当前 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。执行真实的研讨室预约。插件版会保存签到任务，但不会启动后台自动签到线程。"
 execution:
   python:
     path: seminar_reserve.py

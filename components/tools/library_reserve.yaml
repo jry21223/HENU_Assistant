@@ -24,7 +24,7 @@ spec:
       preferred_time:
         type: string
         description: 首选时间，格式 HH:MM，默认 08:00
-  llm_prompt: "执行真实的图书馆座位预约。只有返回 success=true 才代表预约成功。"
+  llm_prompt: "执行前先确认当前 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。执行真实的图书馆座位预约。只有返回 success=true 才代表预约成功。"
 execution:
   python:
     path: library_reserve.py
