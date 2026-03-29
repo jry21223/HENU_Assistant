@@ -12,10 +12,23 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 
 import course_schedule
 import mcp_server
+from henu_plugin.cache import (
+    ACCOUNT_CONTEXT_CACHE,
+    LIBRARY_QUERY_CACHE,
+    RUNTIME_CONTEXT_CACHE,
+    SCHEDULE_CACHE,
+    SEMINAR_QUERY_CACHE,
+    SERVER_TIME_CACHE,
+    get_cache_stats,
+    invalidate_account_cache,
+    invalidate_schedule_cache,
+    invalidate_user_cache,
+)
 from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
+_CURRENT_IDENTITY: threading.local = threading.local()
 
 
 @dataclass(frozen=True)
@@ -106,13 +119,19 @@ class HenuPluginService:
         identity_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         identity = self._resolve_identity(session, identity_hint=identity_hint or {})
+        cache_key = f"user:{identity.storage_key}:account_context"
+
+        cached = ACCOUNT_CONTEXT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         paths = self._build_storage_paths(identity)
 
         try:
             with self._activate_user_storage(paths):
                 account_wrapper = mcp_server.show_account()
         except Exception as exc:
-            return {
+            result = {
                 "success": False,
                 "msg": f"读取账号绑定失败: {exc}",
                 "binding": {
@@ -124,13 +143,15 @@ class HenuPluginService:
                 },
                 "account": {},
             }
+            ACCOUNT_CONTEXT_CACHE.set(cache_key, result, ttl_seconds=60.0)
+            return result
 
         account = account_wrapper.get("account") if isinstance(account_wrapper, dict) else {}
         if not isinstance(account, dict):
             account = {}
 
         student_id = _text(account.get("student_id"))
-        return {
+        result = {
             "success": True,
             "binding": {
                 "qq": identity.qq,
@@ -149,16 +170,28 @@ class HenuPluginService:
                 "profile_file": _text(account.get("profile_file"), strip=False),
             },
         }
+        ACCOUNT_CONTEXT_CACHE.set(cache_key, result)
+        return result
 
     def get_time_snapshot(self, timezone: str = "Asia/Shanghai") -> dict[str, Any]:
+        cache_key = f"server_time:{timezone}"
+
+        cached = SERVER_TIME_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         snapshot = mcp_server.get_server_time(timezone=timezone)
         if not isinstance(snapshot, dict):
-            return {
+            result = {
                 "success": False,
                 "timezone": timezone,
                 "msg": "获取服务器时间失败",
             }
-        return snapshot
+        else:
+            result = snapshot
+
+        SERVER_TIME_CACHE.set(cache_key, result)
+        return result
 
     def get_runtime_context(
         self,
@@ -166,17 +199,30 @@ class HenuPluginService:
         identity_hint: dict[str, Any] | None = None,
         timezone: str = "Asia/Shanghai",
     ) -> dict[str, Any]:
+        identity = self._resolve_identity(session, identity_hint=identity_hint or {})
+        cache_key = f"user:{identity.storage_key}:runtime_context:{timezone}"
+
+        cached = RUNTIME_CONTEXT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         account_context = self.get_sender_account_context(
             session,
             identity_hint=identity_hint,
         )
         server_time = self.get_time_snapshot(timezone=timezone)
-        return {
+        result = {
             "success": bool(account_context.get("success", True) and server_time.get("success", True)),
             "binding": account_context.get("binding") or {},
             "account": account_context.get("account") or {},
             "server_time": server_time,
         }
+        RUNTIME_CONTEXT_CACHE.set(cache_key, result)
+        return result
+
+    def get_cache_statistics(self) -> dict[str, Any]:
+        """Get cache statistics for monitoring."""
+        return get_cache_stats()
 
     def run_tool(
         self,
@@ -194,10 +240,25 @@ class HenuPluginService:
         paths = self._build_storage_paths(identity)
 
         try:
+            _CURRENT_IDENTITY.value = identity
             with self._activate_user_storage(paths):
                 result = handler(params or {})
         except Exception as exc:
             return {"success": False, "msg": f"{tool_name} 执行异常: {exc}"}
+        finally:
+            _CURRENT_IDENTITY.value = None
+
+        # Cache invalidation after successful writes
+        if isinstance(result, dict) and result.get("success"):
+            effective_tool = _text(result.get("_resolved_tool_name")) or tool_name
+            if effective_tool in {"setup_account"}:
+                invalidate_account_cache(identity.storage_key)
+            elif effective_tool in {"sync_schedule"}:
+                invalidate_schedule_cache(identity.storage_key)
+            elif effective_tool in {"library_reserve", "library_auto_signin", "library_cancel"}:
+                LIBRARY_QUERY_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
+            elif effective_tool in {"seminar_reserve", "seminar_signin", "seminar_cancel"}:
+                SEMINAR_QUERY_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
 
         if isinstance(result, dict):
             self._decorate_result(result, tool_name, identity, paths, query_id)
@@ -419,27 +480,68 @@ class HenuPluginService:
         )
 
     def _sync_schedule(self, params: dict[str, Any]) -> dict[str, Any]:
-        return mcp_server.sync_schedule(
+        result = mcp_server.sync_schedule(
             xn=_text(params.get("xn")) or None,
             xq=_text(params.get("xq")) or None,
             auto_calibrate=_bool(params.get("auto_calibrate"), True),
         )
+        # Invalidate schedule cache after sync
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        if result.get("success") and identity:
+            SCHEDULE_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
+        return result
 
     def _schedule_query(self, params: dict[str, Any]) -> dict[str, Any]:
-        return mcp_server.schedule_query(
-            view=_text(params.get("view")) or "current",
-            timezone=_text(params.get("timezone")) or "Asia/Shanghai",
-            target_date=_text(params.get("target_date")),
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        view = _text(params.get("view")) or "current"
+        timezone = _text(params.get("timezone")) or "Asia/Shanghai"
+        target_date = _text(params.get("target_date")) or ""
+
+        # Try cache for read-only views
+        if identity and view in {"current", "now", "week", "full"}:
+            cache_key = f"user:{identity.storage_key}:schedule:{view}:{target_date}"
+            cached = SCHEDULE_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+
+        result = mcp_server.schedule_query(
+            view=view,
+            timezone=timezone,
+            target_date=target_date,
             auto_calibrate=_bool(params.get("auto_calibrate"), True),
         )
 
+        # Cache successful read-only queries
+        if result.get("success") and identity and view in {"current", "now", "week", "full"}:
+            SCHEDULE_CACHE.set(cache_key, result)
+
+        return result
+
     def _library_query(self, params: dict[str, Any]) -> dict[str, Any]:
-        return mcp_server.library_query(
-            view=_text(params.get("view")) or "current",
-            record_type=_text(params.get("record_type")) or "1",
-            page=_int(params.get("page"), 1),
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        view = _text(params.get("view")) or "current"
+        record_type = _text(params.get("record_type")) or "1"
+        page = _int(params.get("page"), 1)
+
+        # Try cache for read operations
+        if identity:
+            cache_key = f"user:{identity.storage_key}:library:{view}:{record_type}:{page}"
+            cached = LIBRARY_QUERY_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+
+        result = mcp_server.library_query(
+            view=view,
+            record_type=record_type,
+            page=page,
             limit=_int(params.get("limit"), 20),
         )
+
+        # Cache successful queries
+        if result.get("success") and identity:
+            LIBRARY_QUERY_CACHE.set(cache_key, result)
+
+        return result
 
     def _library_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.library_reserve(
@@ -469,9 +571,21 @@ class HenuPluginService:
         )
 
     def _seminar_query(self, params: dict[str, Any]) -> dict[str, Any]:
-        return mcp_server.seminar_query(
-            view=_text(params.get("view")) or "rooms",
-            target_date=_text(params.get("target_date")),
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        view = _text(params.get("view")) or "rooms"
+        target_date = _text(params.get("target_date")) or ""
+        page = _int(params.get("page"), 1)
+
+        # Try cache for read operations
+        if identity and view in {"rooms", "filters", "detail"}:
+            cache_key = f"user:{identity.storage_key}:seminar:{view}:{target_date}:{page}"
+            cached = SEMINAR_QUERY_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+
+        result = mcp_server.seminar_query(
+            view=view,
+            target_date=target_date,
             members=_int(params.get("members"), 0),
             name=_text(params.get("name")),
             room=_text(params.get("room")),
@@ -485,13 +599,19 @@ class HenuPluginService:
             category_names=_text(params.get("category_names")),
             boutique_ids=_text(params.get("boutique_ids")),
             boutique_names=_text(params.get("boutique_names")),
-            page=_int(params.get("page"), 1),
+            page=page,
             area_id=_text(params.get("area_id")),
             record_type=_text(params.get("record_type")) or "1",
             limit=_int(params.get("limit"), 20),
             mode=_text(params.get("mode")) or "books",
             status=_text(params.get("status")),
         )
+
+        # Cache successful queries
+        if result.get("success") and identity and view in {"rooms", "filters", "detail"}:
+            SEMINAR_QUERY_CACHE.set(cache_key, result)
+
+        return result
 
     def _seminar_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.seminar_reserve(
