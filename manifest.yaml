@@ -20,7 +20,7 @@ spec:
         - path: components/event_listener/
     Tool:
       fromDirs:
-        - path: components/tools/
+        - path: components/cli_tools/
 execution:
   python:
     path: main.py

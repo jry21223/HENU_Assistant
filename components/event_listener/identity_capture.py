@@ -18,6 +18,42 @@ class IdentityCaptureListener(EventListener):
         re.compile(r"(我).{0,6}(绑了|绑定了).{0,8}(什么|谁|哪个|哪一个)"),
         re.compile(r"(查|查看|看看|显示).{0,6}(账号|绑定|学号)"),
     )
+    _ENRICH_KEYWORDS = (
+        "河大",
+        "学号",
+        "账号",
+        "绑定",
+        "课表",
+        "课程",
+        "上课",
+        "图书馆",
+        "座位",
+        "预约",
+        "签到",
+        "研讨室",
+        "节次",
+        "校准",
+        "xiqueer",
+        "今天",
+        "明天",
+        "现在",
+        "当前",
+        "下节",
+        "下一节",
+        "待签到",
+        "过期",
+    )
+    _CLI_PREFIXES = (
+        "help",
+        "account",
+        "schedule",
+        "library",
+        "seminar",
+        "calibration",
+        "status",
+        "system",
+        "whoami",
+    )
 
     async def initialize(self):
         await super().initialize()
@@ -62,6 +98,8 @@ class IdentityCaptureListener(EventListener):
         await ctx.set_query_var("henu_sender_name", self._extract_sender_name(event))
 
     async def _inject_current_sender_context(self, ctx: context.EventContext) -> None:
+        if not self._should_enrich_event(ctx.event):
+            return
         runtime_context = await self._get_or_create_runtime_context(ctx)
         if not isinstance(runtime_context, dict):
             return
@@ -82,6 +120,8 @@ class IdentityCaptureListener(EventListener):
 
         original_text = str(getattr(ctx.event, "text_message", "") or "").strip()
         if not original_text:
+            return
+        if not self._should_enrich_text(original_text):
             return
 
         runtime_context = await self._get_or_create_runtime_context(ctx)
@@ -221,7 +261,7 @@ class IdentityCaptureListener(EventListener):
         lines = [
             "# HENU 当前会话上下文",
             "",
-            "群聊历史里可能混有其他人的提问。处理账号、课表、图书馆、研讨室时，只能以当前提问人和当前服务器时间为准。",
+            "只按当前提问人与当前服务器时间处理河大相关请求。",
             "",
             "## 当前提问人",
         ]
@@ -249,10 +289,10 @@ class IdentityCaptureListener(EventListener):
             [
                 "",
                 "## 执行规则",
-                "- 绝对不要沿用其他群成员之前绑定的学号、账号状态、预约记录或签到状态。",
-                "- 用户说“我的账号、我的课表、明天课表、今天、明天、现在、当前、待签到、是否过期”等时，默认都指当前提问人，并且时间判断只能以上面的服务器时间为准。",
-                "- 如果当前提问人未绑定学号，先要求其执行 setup_account，再进行账号相关操作。",
-                "- 调用课表、图书馆、研讨室工具前，优先参考上面的服务器时间快照；如果还需要完整状态，再调用 system_status。",
+                "- 不要沿用其他群成员的账号、预约或签到状态。",
+                "- “我的/今天/明天/现在/当前/待签到/是否过期”都只按上面的提问人与服务器时间理解。",
+                "- 未绑定学号时，先用 `henu_cli` 执行 `account set --student-id ... --password ...`。",
+                "- 优先使用 `henu_cli` 的窄命令；不确定时先 `help`。",
             ]
         )
         return "\n".join(lines)
@@ -293,7 +333,7 @@ class IdentityCaptureListener(EventListener):
         lines.append(f"【当前绑定学号】{student_id}")
         if now_text:
             lines.append(f"【当前服务器时间】{now_text} {weekday_cn}".strip())
-        lines.append("【规则】回答“我的/今天/明天/现在/当前”时，只能按以上当前提问人与当前服务器时间理解。")
+        lines.append("【规则】只按以上当前提问人与当前服务器时间理解“我的/今天/明天/现在/当前”；河大能力统一走 henu_cli。")
         lines.append(f"【用户原始问题】{original_text}")
         return "\n".join(lines)
 
@@ -389,6 +429,18 @@ class IdentityCaptureListener(EventListener):
     def _resolve_timezone(self, query_vars: dict[str, object]) -> str:
         timezone = str(query_vars.get("timezone") or query_vars.get("henu_timezone") or "").strip()
         return timezone or self._DEFAULT_TIMEZONE
+
+    def _should_enrich_event(self, event: object) -> bool:
+        text = str(getattr(event, "text_message", "") or "").strip()
+        return self._should_enrich_text(text)
+
+    def _should_enrich_text(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", "", text or "").lower()
+        if not normalized:
+            return False
+        if normalized.startswith(self._CLI_PREFIXES):
+            return True
+        return any(keyword in normalized for keyword in self._ENRICH_KEYWORDS)
 
     @staticmethod
     def _normalize_launcher_type(value: object) -> str:

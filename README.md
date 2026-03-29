@@ -4,12 +4,19 @@
 
 ## 功能
 
-- 当前 QQ 账号绑定河大学号和密码：`setup_account`
-- 同步并查询课表：`sync_schedule`、`schedule_query`
-- 图书馆查询 / 预约 / 签到 / 取消：`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`
-- 研讨室分组 / 查询 / 预约 / 签到 / 取消：`seminar_group`、`seminar_query`、`seminar_reserve`、`seminar_signin`、`seminar_cancel`
-- 节次校准源：`set_calibration_source`
-- 系统状态：`system_status`
+- 统一 CLI 风格入口：`henu_cli`
+- 内部仍复用原有账号、课表、图书馆、研讨室、节次校准和系统状态逻辑
+- 帮助采用渐进式披露：先 `help`，再 `help <topic>`，再执行精确命令
+
+常用命令示例：
+
+- `help`
+- `account status`
+- `account set --student-id 20230001 --password 'secret'`
+- `schedule now`
+- `schedule day --date 2026-03-30`
+- `library current`
+- `seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`
 
 ## 账号隔离
 
@@ -57,8 +64,10 @@ cp .env.example .env
 
 - `manifest.yaml`：Langbot 插件清单
 - `main.py`：插件入口
-- `components/tools/`：Langbot Tool 组件
+- `components/cli_tools/`：对 LLM 暴露的统一 CLI Tool
+- `components/tools/`：内部复用的旧 Tool 包装层，不再直接暴露
 - `henu_plugin/service.py`：工具分发和按 QQ 隔离的存储上下文
+- `henu_plugin/cli.py`：CLI 命令解析、帮助与下一步建议
 - `mcp_server.py` / `course_schedule.py` / `library_core/`：复用的原始业务逻辑
 
 ## 说明

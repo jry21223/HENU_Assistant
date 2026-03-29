@@ -30,12 +30,14 @@ class BaseHenuTool(Tool):
             return {"success": False, "msg": "插件服务未初始化"}
 
         identity_hint = await self._load_identity_hint(query_id)
-        runtime_context = await self._ensure_runtime_context(
-            query_id,
-            session,
-            identity_hint,
-            service,
-        )
+        runtime_context = None
+        if self.should_preload_runtime_context(params):
+            runtime_context = await self._ensure_runtime_context(
+                query_id,
+                session,
+                identity_hint,
+                service,
+            )
 
         result = await asyncio.to_thread(
             service.run_tool,
@@ -51,7 +53,11 @@ class BaseHenuTool(Tool):
                 result.setdefault("server_time_snapshot", server_time)
 
         await self._refresh_after_sensitive_success(query_id, params, result)
+        self._strip_internal_fields(result)
         return result
+
+    def should_preload_runtime_context(self, params: dict[str, Any]) -> bool:
+        return self.tool_name not in self._TIME_PREFLIGHT_EXEMPT_TOOLS
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
@@ -134,11 +140,15 @@ class BaseHenuTool(Tool):
         params: dict[str, Any],
         result: Any,
     ) -> None:
-        if self.tool_name != "setup_account":
+        if not isinstance(result, dict):
             return
-        if not isinstance(result, dict) or not result.get("success"):
+        resolved_tool = str(result.get("_resolved_tool_name") or self.tool_name)
+        if resolved_tool != "setup_account":
             return
-        if not self._as_bool(params.get("verify_login"), True):
+        if not result.get("success"):
+            return
+        effective_params = result.get("_effective_params") if isinstance(result.get("_effective_params"), dict) else params
+        if not self._as_bool(effective_params.get("verify_login"), True):
             return
 
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
@@ -159,6 +169,12 @@ class BaseHenuTool(Tool):
         result["security_notice"] = (
             "账号已验证登录成功，插件已自动刷新对话上下文，避免后续沿用旧上下文。"
         )
+
+    def _strip_internal_fields(self, result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        result.pop("_resolved_tool_name", None)
+        result.pop("_effective_params", None)
 
     def _as_bool(self, value: Any, default: bool) -> bool:
         if isinstance(value, bool):

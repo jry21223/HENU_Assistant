@@ -12,6 +12,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 
 import course_schedule
 import mcp_server
+from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -82,6 +83,7 @@ class HenuPluginService:
         self.xiqueer_request_file = self.shared_dir / "xiqueer_period_time_request.json"
 
         self._tool_dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+            "henu_cli": self._henu_cli,
             "setup_account": self._setup_account,
             "sync_schedule": self._sync_schedule,
             "schedule_query": self._schedule_query,
@@ -242,7 +244,9 @@ class HenuPluginService:
         paths: UserStoragePaths,
         query_id: int,
     ) -> None:
-        if tool_name in {"setup_account", "system_status"}:
+        effective_tool_name = _text(result.get("_resolved_tool_name")) or tool_name
+
+        if effective_tool_name in {"setup_account", "system_status"}:
             result["session_binding"] = {
                 "qq": identity.qq,
                 "storage_key": identity.storage_key,
@@ -252,7 +256,7 @@ class HenuPluginService:
                 "query_id": query_id,
             }
 
-        if tool_name == "system_status":
+        if effective_tool_name == "system_status":
             result["storage_paths"] = {
                 "user_root": str(paths.user_root),
                 "profile_file": str(paths.profile_file),
@@ -263,11 +267,86 @@ class HenuPluginService:
                 "shared_dir": str(self.shared_dir),
             }
 
-        if tool_name == "seminar_reserve":
+        if effective_tool_name == "seminar_reserve":
             result["auto_signin_mode"] = "manual_scan_only"
             if result.get("success"):
                 note = "插件版不会启动后台自动签到线程，请在签到时间前后再次调用 seminar_signin(auto_scan=true) 或 seminar_signin(record_id=...)。"
                 result["msg"] = f"{_text(result.get('msg'))}；{note}".strip("；")
+
+    def _henu_cli(self, params: dict[str, Any]) -> dict[str, Any]:
+        raw_command = _text(params.get("command"), strip=False)
+        spec = inspect_cli_command(raw_command)
+
+        if spec.is_help:
+            help_payload = build_help_payload(spec.help_topic)
+            return {
+                "success": True,
+                "msg": help_payload["summary"],
+                "cli": {
+                    "mode": "help",
+                    "command": raw_command,
+                    "topic": help_payload["topic"],
+                },
+                "commands": help_payload["commands"],
+                "examples": help_payload["examples"],
+                "tips": help_payload["tips"],
+                "next_commands": build_next_commands(spec),
+            }
+
+        if spec.error:
+            help_payload = build_help_payload(spec.help_topic)
+            return {
+                "success": False,
+                "msg": spec.error,
+                "cli": {
+                    "mode": "error",
+                    "command": raw_command,
+                    "topic": help_payload["topic"],
+                },
+                "commands": help_payload["commands"],
+                "examples": help_payload["examples"],
+                "tips": help_payload["tips"],
+                "next_commands": build_next_commands(spec),
+            }
+
+        if not spec.resolved_tool:
+            return {
+                "success": False,
+                "msg": "命令未解析到具体动作，请先执行 `help`。",
+                "cli": {"mode": "error", "command": raw_command},
+                "next_commands": ["help"],
+            }
+
+        handler = self._tool_dispatch.get(spec.resolved_tool)
+        if handler is None or spec.resolved_tool == "henu_cli":
+            return {
+                "success": False,
+                "msg": f"CLI 路由失败：未找到 `{spec.resolved_tool}`。",
+                "cli": {"mode": "error", "command": raw_command, "resolved_tool": spec.resolved_tool},
+                "next_commands": ["help"],
+            }
+
+        result = handler(spec.params)
+        if not isinstance(result, dict):
+            result = {
+                "success": False,
+                "msg": f"{spec.resolved_tool} 返回了非字典结果。",
+            }
+
+        result.setdefault("cli", {})
+        if isinstance(result["cli"], dict):
+            result["cli"].update(
+                {
+                    "mode": "exec",
+                    "command": raw_command,
+                    "action": spec.action,
+                    "resolved_tool": spec.resolved_tool,
+                }
+            )
+        result["_resolved_tool_name"] = spec.resolved_tool
+        result["_effective_params"] = spec.params
+        result["next_commands"] = build_next_commands(spec, result)
+        return result
 
     @contextlib.contextmanager
     def _activate_user_storage(self, paths: UserStoragePaths):
