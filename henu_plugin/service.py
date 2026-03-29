@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -29,6 +30,18 @@ from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli
 
 _RUNTIME_STATE_LOCK = threading.RLock()
 _CURRENT_IDENTITY: threading.local = threading.local()
+
+# Persistent storage directory
+# Priority: HENU_DATA_DIR env > LANGBOT_DATA_DIR env > ~/.langbot/plugins/jry21223__henu_assistant/data
+def _get_persistent_data_dir() -> Path:
+    """Get persistent data directory for the plugin."""
+    # Check environment variables
+    if "HENU_DATA_DIR" in os.environ:
+        return Path(os.environ["HENU_DATA_DIR"])
+    if "LANGBOT_DATA_DIR" in os.environ:
+        return Path(os.environ["LANGBOT_DATA_DIR"]) / "plugins" / "jry21223__henu_assistant" / "data"
+    # Default: use user home directory for persistence
+    return Path.home() / ".langbot" / "plugins" / "jry21223__henu_assistant" / "data"
 
 
 @dataclass(frozen=True)
@@ -84,7 +97,8 @@ def _clean_session_id(value: Any) -> str:
 class HenuPluginService:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
-        self.data_dir = self.base_dir / "data"
+        # Use persistent data directory for user data
+        self.data_dir = _get_persistent_data_dir()
         self.shared_dir = self.data_dir / "shared"
         self.users_dir = self.data_dir / "users"
 
