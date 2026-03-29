@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 
 from langbot_plugin.api.definition.components.common.event_listener import EventListener
@@ -8,6 +9,21 @@ from langbot_plugin.api.entities.builtin.platform import message as platform_mes
 from langbot_plugin.api.entities.builtin.provider import message as provider_message
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.entities import context, events
+
+from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.service import set_current_user_paths
+
+
+def _resolve_storage_key(session: provider_session.Session, identity_hint: dict) -> str:
+    """Resolve storage key from session and identity hint."""
+    sender_id = str(identity_hint.get("sender_id") or session.sender_id or "").strip()
+    launcher_id = str(identity_hint.get("launcher_id") or session.launcher_id or "").strip()
+    qq = sender_id or launcher_id or "unknown"
+
+    storage_key = re.sub(r"[^0-9A-Za-z._-]+", "_", qq).strip("._-")
+    if not storage_key:
+        storage_key = hashlib.sha1(qq.encode("utf-8")).hexdigest()[:16]
+    return storage_key
 
 
 class IdentityCaptureListener(EventListener):
@@ -159,14 +175,25 @@ class IdentityCaptureListener(EventListener):
             "launcher_type": str(getattr(event, "launcher_type", "") or ""),
         }
 
-        result = await asyncio.to_thread(
-            service.run_tool,
-            "system_status",
-            {},
-            session,
-            ctx.query_id,
-            identity_hint,
-        )
+        # Resolve storage key and load user data from LangBot Storage
+        storage_key = _resolve_storage_key(session, identity_hint)
+        storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
+        user_paths = await storage_adapter.load_all()
+        set_current_user_paths(user_paths)
+
+        try:
+            result = await asyncio.to_thread(
+                service.run_tool,
+                "system_status",
+                {},
+                session,
+                ctx.query_id,
+                identity_hint,
+            )
+        finally:
+            await storage_adapter.save_all()
+            set_current_user_paths(None)
+
         if not isinstance(result, dict):
             return
 

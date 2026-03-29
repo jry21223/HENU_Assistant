@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import os
 import re
 import threading
 from dataclasses import dataclass
@@ -23,25 +22,12 @@ from henu_plugin.cache import (
     get_cache_stats,
     invalidate_account_cache,
     invalidate_schedule_cache,
-    invalidate_user_cache,
 )
 from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
 _CURRENT_IDENTITY: threading.local = threading.local()
-
-# Persistent storage directory
-# Priority: HENU_DATA_DIR env > LANGBOT_DATA_DIR env > ~/.langbot/plugins/jry21223__henu_assistant/data
-def _get_persistent_data_dir() -> Path:
-    """Get persistent data directory for the plugin."""
-    # Check environment variables
-    if "HENU_DATA_DIR" in os.environ:
-        return Path(os.environ["HENU_DATA_DIR"])
-    if "LANGBOT_DATA_DIR" in os.environ:
-        return Path(os.environ["LANGBOT_DATA_DIR"]) / "plugins" / "jry21223__henu_assistant" / "data"
-    # Default: use user home directory for persistence
-    return Path.home() / ".langbot" / "plugins" / "jry21223__henu_assistant" / "data"
 
 
 @dataclass(frozen=True)
@@ -51,6 +37,20 @@ class SessionIdentity:
     launcher_type: str
     launcher_id: str
     sender_id: str
+
+
+# Thread-local storage for current user paths (set by caller before tool execution)
+_CURRENT_USER_PATHS: threading.local = threading.local()
+
+
+def set_current_user_paths(paths: "UserStoragePaths | None") -> None:
+    """Set the current user's storage paths for the active thread."""
+    _CURRENT_USER_PATHS.value = paths
+
+
+def get_current_user_paths() -> "UserStoragePaths | None":
+    """Get the current user's storage paths."""
+    return getattr(_CURRENT_USER_PATHS, "value", None)
 
 
 @dataclass(frozen=True)
@@ -97,17 +97,8 @@ def _clean_session_id(value: Any) -> str:
 class HenuPluginService:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
-        # Use persistent data directory for user data
-        self.data_dir = _get_persistent_data_dir()
-        self.shared_dir = self.data_dir / "shared"
-        self.users_dir = self.data_dir / "users"
-
-        self.shared_dir.mkdir(parents=True, exist_ok=True)
-        self.users_dir.mkdir(parents=True, exist_ok=True)
-
-        self.period_time_file = self.shared_dir / "period_time_config.json"
-        self.period_calibration_state_file = self.shared_dir / "period_time_calibration_state.json"
-        self.xiqueer_request_file = self.shared_dir / "xiqueer_period_time_request.json"
+        # Storage is managed via LangBot Storage API
+        # User paths are set via set_current_user_paths() before tool execution
 
         self._tool_dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "henu_cli": self._henu_cli,
@@ -301,15 +292,18 @@ class HenuPluginService:
         )
 
     def _build_storage_paths(self, identity: SessionIdentity) -> UserStoragePaths:
-        user_root = self.users_dir / identity.storage_key
-        return UserStoragePaths(
-            user_root=user_root,
-            profile_file=user_root / "profile.json",
-            xk_cookie_file=user_root / "xk_cookies.json",
-            library_cookie_file=user_root / "library_cookies.json",
-            seminar_signin_task_file=user_root / "seminar_signin_tasks.json",
-            output_dir=user_root / "output",
-        )
+        """Build storage paths from thread-local storage.
+
+        The paths must be set by caller via set_current_user_paths() before
+        calling run_tool().
+        """
+        paths = get_current_user_paths()
+        if paths is None:
+            raise RuntimeError(
+                f"User storage paths not set for {identity.storage_key}. "
+                "Call set_current_user_paths() before run_tool()."
+            )
+        return paths
 
     def _decorate_result(
         self,
@@ -332,6 +326,7 @@ class HenuPluginService:
             }
 
         if effective_tool_name == "system_status":
+            shared_dir = paths.user_root / "shared"
             result["storage_paths"] = {
                 "user_root": str(paths.user_root),
                 "profile_file": str(paths.profile_file),
@@ -339,7 +334,8 @@ class HenuPluginService:
                 "library_cookie_file": str(paths.library_cookie_file),
                 "seminar_signin_task_file": str(paths.seminar_signin_task_file),
                 "output_dir": str(paths.output_dir),
-                "shared_dir": str(self.shared_dir),
+                "shared_dir": str(shared_dir),
+                "storage_mode": "langbot_storage_api",
             }
 
         if effective_tool_name == "seminar_reserve":
@@ -425,9 +421,20 @@ class HenuPluginService:
 
     @contextlib.contextmanager
     def _activate_user_storage(self, paths: UserStoragePaths):
+        """Activate user storage paths for file operations.
+
+        This sets global variables in course_schedule and mcp_server modules
+        to point to the user-specific paths.
+        """
         paths.user_root.mkdir(parents=True, exist_ok=True)
         paths.output_dir.mkdir(parents=True, exist_ok=True)
-        self.shared_dir.mkdir(parents=True, exist_ok=True)
+
+        # Shared files use user's temp directory (will be synced separately)
+        shared_dir = paths.user_root / "shared"
+        shared_dir.mkdir(parents=True, exist_ok=True)
+        period_time_file = shared_dir / "period_time_config.json"
+        period_calibration_state_file = shared_dir / "period_time_calibration_state.json"
+        xiqueer_request_file = shared_dir / "xiqueer_period_time_request.json"
 
         with _RUNTIME_STATE_LOCK:
             original_state = {
@@ -459,9 +466,9 @@ class HenuPluginService:
                 mcp_server.OUTPUT_DIR = paths.output_dir
                 mcp_server.LIBRARY_COOKIE_FILE = paths.library_cookie_file
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = paths.seminar_signin_task_file
-                mcp_server.PERIOD_TIME_FILE = self.period_time_file
-                mcp_server.PERIOD_CALIBRATION_STATE_FILE = self.period_calibration_state_file
-                mcp_server.XIQUEER_REQUEST_FILE = self.xiqueer_request_file
+                mcp_server.PERIOD_TIME_FILE = period_time_file
+                mcp_server.PERIOD_CALIBRATION_STATE_FILE = period_calibration_state_file
+                mcp_server.XIQUEER_REQUEST_FILE = xiqueer_request_file
                 mcp_server._ensure_seminar_auto_signin_worker = self._noop_auto_signin_worker
                 yield
             finally:

@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 from typing import Any
 
 from langbot_plugin.api.definition.components.tool.tool import Tool
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+
+from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.service import set_current_user_paths, SessionIdentity
+
+
+def _resolve_storage_key(session: provider_session.Session, identity_hint: dict[str, Any]) -> str:
+    """Resolve storage key from session and identity hint."""
+    sender_id = str(identity_hint.get("sender_id") or session.sender_id or "").strip()
+    launcher_id = str(identity_hint.get("launcher_id") or session.launcher_id or "").strip()
+    qq = sender_id or launcher_id or "unknown"
+
+    storage_key = re.sub(r"[^0-9A-Za-z._-]+", "_", qq).strip("._-")
+    if not storage_key:
+        storage_key = hashlib.sha1(qq.encode("utf-8")).hexdigest()[:16]
+    return storage_key
 
 
 class BaseHenuTool(Tool):
@@ -30,6 +47,17 @@ class BaseHenuTool(Tool):
             return {"success": False, "msg": "插件服务未初始化"}
 
         identity_hint = await self._load_identity_hint(query_id)
+
+        # Resolve storage key and load user data from LangBot Storage
+        storage_key = _resolve_storage_key(session, identity_hint)
+        storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
+
+        # Load user data from Storage to temp files
+        user_paths = await storage_adapter.load_all()
+
+        # Set thread-local paths for service to use
+        set_current_user_paths(user_paths)
+
         runtime_context = None
         if self.should_preload_runtime_context(params):
             runtime_context = await self._ensure_runtime_context(
@@ -39,14 +67,21 @@ class BaseHenuTool(Tool):
                 service,
             )
 
-        result = await asyncio.to_thread(
-            service.run_tool,
-            self.tool_name,
-            params,
-            session,
-            query_id,
-            identity_hint,
-        )
+        try:
+            result = await asyncio.to_thread(
+                service.run_tool,
+                self.tool_name,
+                params,
+                session,
+                query_id,
+                identity_hint,
+            )
+        finally:
+            # Save user data back to Storage after operation
+            await storage_adapter.save_all()
+            # Clear thread-local paths
+            set_current_user_paths(None)
+
         if isinstance(result, dict) and isinstance(runtime_context, dict):
             server_time = runtime_context.get("server_time")
             if isinstance(server_time, dict) and server_time:
