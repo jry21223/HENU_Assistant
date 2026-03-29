@@ -15,6 +15,11 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from schedule_cleaner import clean_schedule_grid_file
+from secure_storage import (
+    load_encrypted_profile,
+    save_encrypted_profile,
+    decrypt_value,
+)
 
 # Windows 时区支持
 try:
@@ -705,13 +710,14 @@ if __name__ == "__main__":
     if args.quick == "fetch":
         args.fetch = True
 
-    profile = load_json(PROFILE_FILE)
+    # 使用加密存储加载配置
+    profile = load_encrypted_profile(PROFILE_FILE)
 
     if args.setup:
         profile["student_id"] = prompt_text("学号", str(profile.get("student_id", "") or ""))
         pwd_input = prompt_password(default_exists=bool(profile.get("password")))
         profile["password"] = pwd_input or str(profile.get("password", "") or "")
-        save_json(PROFILE_FILE, profile)
+        save_encrypted_profile(PROFILE_FILE, profile)
         print(f"配置已保存: {PROFILE_FILE}")
 
     if args.show:

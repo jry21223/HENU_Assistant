@@ -4,3 +4,4 @@ mcp
 lxml
 tzdata; platform_system=='Windows'
 backports.zoneinfo; python_version<'3.9'
+cryptography>=41.0.0
