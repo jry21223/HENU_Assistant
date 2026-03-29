@@ -1,7 +1,5 @@
-langbot-plugin
-requests
-pycryptodome
-mcp
-lxml
-tzdata; platform_system=='Windows'
-backports.zoneinfo; python_version<'3.9'
+requests>=2.28.0
+pycryptodome>=3.15.0
+lxml>=4.9.0
+mcp>=1.0.0
+cryptography>=41.0.0

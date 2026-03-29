@@ -6,7 +6,6 @@ import json
 import math
 import random
 import re
-import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -15,20 +14,11 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from schedule_cleaner import clean_schedule_grid_file
-
-# Windows 时区支持
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
-
-def _now_dt() -> dt.datetime:
-    """获取当前北京时间（带时区信息）"""
-    try:
-        return dt.datetime.now(ZoneInfo("Asia/Shanghai"))
-    except Exception:
-        # 如果时区信息不可用，使用 UTC+8 手动计算
-        return dt.datetime.utcnow() + dt.timedelta(hours=8)
+from secure_storage import (
+    load_encrypted_profile,
+    save_encrypted_profile,
+    decrypt_value,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -177,7 +167,7 @@ class HenuXkClient:
         return m.group(1).strip() if m else ""
 
     def fetch_user_context(self) -> dict[str, Any]:
-        url = f"{self.base_url}/frame/home/js/SetMainInfo.jsp?v={int(_now_dt().timestamp())}"
+        url = f"{self.base_url}/frame/home/js/SetMainInfo.jsp?v={int(dt.datetime.now().timestamp())}"
         result = self.fetch_page(url)
         text = result["text"]
 
@@ -503,7 +493,7 @@ def run_fetch(
     if home_result["invalid_auth"]:
         return {"success": False, "msg": "登录后访问首页仍提示未登录，可能会话失效"}
 
-    timestamp = _now_dt().strftime("%Y%m%d_%H%M%S")
+    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     home_file = _save_output_file("home", timestamp, home_result["text"], "html")
     main_info_file = _save_output_file("set_main_info", timestamp, context["source_file_content"], "js")
 
@@ -705,13 +695,14 @@ if __name__ == "__main__":
     if args.quick == "fetch":
         args.fetch = True
 
-    profile = load_json(PROFILE_FILE)
+    # 使用加密存储加载配置
+    profile = load_encrypted_profile(PROFILE_FILE)
 
     if args.setup:
         profile["student_id"] = prompt_text("学号", str(profile.get("student_id", "") or ""))
         pwd_input = prompt_password(default_exists=bool(profile.get("password")))
         profile["password"] = pwd_input or str(profile.get("password", "") or "")
-        save_json(PROFILE_FILE, profile)
+        save_encrypted_profile(PROFILE_FILE, profile)
         print(f"配置已保存: {PROFILE_FILE}")
 
     if args.show:

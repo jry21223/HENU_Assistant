@@ -26,6 +26,13 @@ from course_schedule import (
     save_json,
 )
 from schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
+from secure_storage import (
+    encrypt_value,
+    decrypt_value,
+    is_encrypted,
+    load_encrypted_profile,
+    save_encrypted_profile,
+)
 
 mcp = FastMCP("henu-campus-unified")
 BASE_DIR = Path(__file__).resolve().parent
@@ -631,7 +638,8 @@ def get_current_course_status(
 
 
 def _effective_profile() -> dict[str, Any]:
-    return load_json(PROFILE_FILE)
+    """加载并解密配置文件"""
+    return load_encrypted_profile(PROFILE_FILE)
 
 
 def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -666,9 +674,10 @@ def _resolve_account(student_id: str, password: str, use_saved_account: bool = T
 
 
 def _save_profile_fields(fields: dict[str, Any]) -> None:
-    profile = load_json(PROFILE_FILE)
+    """加密并保存配置字段"""
+    profile = load_encrypted_profile(PROFILE_FILE)
     profile.update(fields)
-    save_json(PROFILE_FILE, profile)
+    save_encrypted_profile(PROFILE_FILE, profile)
 
 
 def _resolve_library_defaults() -> tuple[str, str]:
