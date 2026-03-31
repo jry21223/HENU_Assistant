@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+from typing import Any, Callable
 
 from langbot_plugin.api.definition.components.common.event_listener import EventListener
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
@@ -175,24 +176,16 @@ class IdentityCaptureListener(EventListener):
             "launcher_type": str(getattr(event, "launcher_type", "") or ""),
         }
 
-        # Resolve storage key and load user data from LangBot Storage
-        storage_key = _resolve_storage_key(session, identity_hint)
-        storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
-        user_paths = await storage_adapter.load_all()
-        set_current_user_paths(user_paths)
-
-        try:
-            result = await asyncio.to_thread(
-                service.run_tool,
-                "system_status",
-                {},
-                session,
-                ctx.query_id,
-                identity_hint,
-            )
-        finally:
-            await storage_adapter.save_all()
-            set_current_user_paths(None)
+        result = await self._run_with_user_storage(
+            session,
+            identity_hint,
+            service.run_tool,
+            "system_status",
+            {},
+            session,
+            ctx.query_id,
+            identity_hint,
+        )
 
         if not isinstance(result, dict):
             return
@@ -397,7 +390,9 @@ class IdentityCaptureListener(EventListener):
             "launcher_type": launcher_type,
         }
         timezone = self._resolve_timezone(query_vars)
-        runtime_context = await asyncio.to_thread(
+        runtime_context = await self._run_with_user_storage(
+            session,
+            identity_hint,
             service.get_runtime_context,
             session,
             identity_hint,
@@ -425,6 +420,23 @@ class IdentityCaptureListener(EventListener):
         )
         await ctx.set_query_var("_henu_time_context", server_time)
         return runtime_context
+
+    async def _run_with_user_storage(
+        self,
+        session: provider_session.Session,
+        identity_hint: dict[str, Any],
+        func: Callable[..., Any],
+        *args: Any,
+    ) -> Any:
+        storage_key = _resolve_storage_key(session, identity_hint)
+        storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
+        user_paths = await storage_adapter.load_all()
+        set_current_user_paths(user_paths)
+        try:
+            return await asyncio.to_thread(func, *args)
+        finally:
+            await storage_adapter.save_all()
+            set_current_user_paths(None)
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:
