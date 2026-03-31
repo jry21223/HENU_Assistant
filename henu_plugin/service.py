@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import hashlib
 import re
 import threading
@@ -39,18 +40,22 @@ class SessionIdentity:
     sender_id: str
 
 
-# Thread-local storage for current user paths (set by caller before tool execution)
-_CURRENT_USER_PATHS: threading.local = threading.local()
+# Context-local storage for current user paths.
+# `asyncio.to_thread()` propagates contextvars, but not thread-local values.
+_CURRENT_USER_PATHS: contextvars.ContextVar["UserStoragePaths | None"] = contextvars.ContextVar(
+    "henu_current_user_paths",
+    default=None,
+)
 
 
 def set_current_user_paths(paths: "UserStoragePaths | None") -> None:
-    """Set the current user's storage paths for the active thread."""
-    _CURRENT_USER_PATHS.value = paths
+    """Set the current user's storage paths for the active execution context."""
+    _CURRENT_USER_PATHS.set(paths)
 
 
 def get_current_user_paths() -> "UserStoragePaths | None":
     """Get the current user's storage paths."""
-    return getattr(_CURRENT_USER_PATHS, "value", None)
+    return _CURRENT_USER_PATHS.get()
 
 
 @dataclass(frozen=True)
