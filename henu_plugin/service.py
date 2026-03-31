@@ -60,6 +60,7 @@ class UserStoragePaths:
     xk_cookie_file: Path
     library_cookie_file: Path
     seminar_signin_task_file: Path
+    schedule_file: Path
     output_dir: Path
 
 
@@ -333,6 +334,7 @@ class HenuPluginService:
                 "xk_cookie_file": str(paths.xk_cookie_file),
                 "library_cookie_file": str(paths.library_cookie_file),
                 "seminar_signin_task_file": str(paths.seminar_signin_task_file),
+                "schedule_file": str(paths.schedule_file),
                 "output_dir": str(paths.output_dir),
                 "shared_dir": str(shared_dir),
                 "storage_mode": "langbot_storage_api",
@@ -510,6 +512,21 @@ class HenuPluginService:
         identity = getattr(_CURRENT_IDENTITY, "value", None)
         if result.get("success") and identity:
             SCHEDULE_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
+            # Save schedule to Storage after successful sync
+            paths = get_current_user_paths()
+            if paths and paths.output_dir:
+                import json
+                schedule_files = list(paths.output_dir.glob("schedule_clean_*.json"))
+                if schedule_files:
+                    latest = max(schedule_files, key=lambda p: p.stat().st_mtime)
+                    try:
+                        schedule_data = json.loads(latest.read_text(encoding="utf-8"))
+                        paths.schedule_file.write_text(
+                            json.dumps(schedule_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8"
+                        )
+                    except Exception:
+                        pass
         return result
 
     def _schedule_query(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -517,6 +534,23 @@ class HenuPluginService:
         view = _text(params.get("view")) or "current"
         timezone = _text(params.get("timezone")) or "Asia/Shanghai"
         target_date = _text(params.get("target_date")) or ""
+
+        # Try to restore schedule from Storage if not in output_dir
+        paths = get_current_user_paths()
+        if paths and paths.output_dir:
+            import shutil
+            schedule_files = list(paths.output_dir.glob("schedule_clean_*.json"))
+            if not schedule_files and paths.schedule_file.exists():
+                try:
+                    import json
+                    schedule_data = json.loads(paths.schedule_file.read_text(encoding="utf-8"))
+                    target = paths.output_dir / "schedule_clean_latest.json"
+                    target.write_text(
+                        json.dumps(schedule_data, ensure_ascii=False, indent=2),
+                        encoding="utf-8"
+                    )
+                except Exception:
+                    pass
 
         # Try cache for read-only views
         if identity and view in {"current", "now", "week", "full"}:
@@ -532,9 +566,9 @@ class HenuPluginService:
             auto_calibrate=_bool(params.get("auto_calibrate"), True),
         )
 
-        # Cache successful read-only queries
+        # Cache successful read-only queries (permanent TTL)
         if result.get("success") and identity and view in {"current", "now", "week", "full"}:
-            SCHEDULE_CACHE.set(cache_key, result)
+            SCHEDULE_CACHE.set(cache_key, result, ttl_seconds=315360000.0)  # 10 years
 
         return result
 

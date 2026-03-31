@@ -165,9 +165,10 @@ ACCOUNT_CONTEXT_CACHE: TTLCache[dict[str, Any]] = TTLCache(
     max_size=500,
 )
 
-# Schedule data cache: 10 minutes (synced daily, rarely changes)
+# Schedule data cache: permanent (synced on demand, use TTL = infinity)
+# Use a very large TTL (10 years in seconds) to simulate permanent cache
 SCHEDULE_CACHE: TTLCache[dict[str, Any]] = TTLCache(
-    default_ttl=600.0,
+    default_ttl=315360000.0,  # 10 years
     max_size=200,
 )
 
