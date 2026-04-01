@@ -60,7 +60,7 @@ class YunfzBot:
         "丧假": "丧假",
     }
 
-    def __init__(self, username: str, password: str, saved_token: str | None = None):
+    def __init__(self, username: str, password: str, saved_token: str | None = None, cas_cookies: dict[str, Any] | None = None):
         self.username = str(username).strip()
         self.password = password or ""
         self.base_url = "https://yzsfz.henu.edu.cn/fapi"
@@ -86,8 +86,21 @@ class YunfzBot:
         if self.token:
             self.session.headers["Authorization"] = self.token
 
+        # Load shared CAS cookies (CASTGC) for login reuse
+        if cas_cookies:
+            for name, value in cas_cookies.items():
+                self.session.cookies.set(name, value, domain="ids.henu.edu.cn", path="/")
+
     def get_token(self) -> str:
         return self.token
+
+    def get_cas_cookies(self) -> dict[str, Any]:
+        """Get CAS cookies (CASTGC) for sharing with other systems."""
+        cas_cookies = {}
+        for cookie in self.session.cookies:
+            if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
+                cas_cookies[cookie.name] = cookie.value
+        return cas_cookies
 
     def _random_string(self, length: int) -> str:
         chars = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"

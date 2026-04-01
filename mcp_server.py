@@ -44,6 +44,7 @@ LIBRARY_CORE_DIR = LIBRARY_CORE_EXPECTED_FILE.parent if LIBRARY_CORE_EXPECTED_FI
 
 LIBRARY_COOKIE_FILE = BASE_DIR / "henu_library_cookies.json"
 YUNFZ_TOKEN_FILE = BASE_DIR / "henu_yunfz_token.json"
+CAS_COOKIE_FILE = BASE_DIR / "henu_cas_cookies.json"
 SEMINAR_SIGNIN_TASK_FILE = BASE_DIR / "seminar_signin_tasks.json"
 SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS = 30
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -1545,6 +1546,16 @@ def _save_library_cookies(cookies: dict[str, Any]) -> None:
     save_json(LIBRARY_COOKIE_FILE, cookies)
 
 
+def _load_cas_cookies() -> dict[str, Any]:
+    """Load shared CAS cookies (CASTGC for login reuse)."""
+    return load_json(CAS_COOKIE_FILE)
+
+
+def _save_cas_cookies(cookies: dict[str, Any]) -> None:
+    """Save shared CAS cookies for reuse across all systems."""
+    save_json(CAS_COOKIE_FILE, cookies)
+
+
 def _set_library_login_error(message: str) -> None:
     global _LAST_LIBRARY_LOGIN_ERROR
     _LAST_LIBRARY_LOGIN_ERROR = str(message or "").strip()
@@ -1568,17 +1579,20 @@ def _build_library_bot(student_id: str, password: str):
 
     _set_library_login_error("")
     stored = _load_library_cookies()
-    bot = HenuLibraryBot(student_id, password, stored or None)  # type: ignore
+    cas_cookies = _load_cas_cookies()
+    bot = HenuLibraryBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
     if bot.login():
         _save_library_cookies(bot.get_cookies())
+        _save_cas_cookies(bot.get_cas_cookies())
         _set_library_login_error("")
         return bot
 
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
-        fresh_bot = HenuLibraryBot(student_id, password, None)  # type: ignore
+        fresh_bot = HenuLibraryBot(student_id, password, None, cas_cookies or None)  # type: ignore
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
+            _save_cas_cookies(fresh_bot.get_cas_cookies())
             _set_library_login_error("")
             return fresh_bot
         fresh_error = str(getattr(fresh_bot, "get_last_error", lambda: "")() or "").strip()
@@ -1631,21 +1645,24 @@ def _build_yunfz_bot(student_id: str, password: str):
     _set_yunfz_login_error("")
     stored = _load_yunfz_token()
     stored_token = stored.get("token", "") if stored else ""
-    bot = YunfzBot(student_id, password, stored_token or None)  # type: ignore
+    cas_cookies = _load_cas_cookies()
+    bot = YunfzBot(student_id, password, stored_token or None, cas_cookies or None)  # type: ignore
     if bot.login():
         token = bot.get_token()
         if token:
             _save_yunfz_token(token)
+        _save_cas_cookies(bot.get_cas_cookies())
         _set_yunfz_login_error("")
         return bot
 
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored_token:
-        fresh_bot = YunfzBot(student_id, password, None)  # type: ignore
+        fresh_bot = YunfzBot(student_id, password, None, cas_cookies or None)  # type: ignore
         if fresh_bot.login():
             token = fresh_bot.get_token()
             if token:
                 _save_yunfz_token(token)
+            _save_cas_cookies(fresh_bot.get_cas_cookies())
             _set_yunfz_login_error("")
             return fresh_bot
         fresh_error = str(getattr(fresh_bot, "get_last_error", lambda: "")() or "").strip()

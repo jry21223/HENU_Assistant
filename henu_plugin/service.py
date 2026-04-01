@@ -67,6 +67,7 @@ class UserStoragePaths:
     seminar_signin_task_file: Path
     schedule_file: Path
     yunfz_token_file: Path
+    cas_cookie_file: Path
     output_dir: Path
 
 
@@ -463,6 +464,7 @@ class HenuPluginService:
                     "LIBRARY_COOKIE_FILE": mcp_server.LIBRARY_COOKIE_FILE,
                     "SEMINAR_SIGNIN_TASK_FILE": mcp_server.SEMINAR_SIGNIN_TASK_FILE,
                     "YUNFZ_TOKEN_FILE": mcp_server.YUNFZ_TOKEN_FILE,
+                    "CAS_COOKIE_FILE": mcp_server.CAS_COOKIE_FILE,
                     "PERIOD_TIME_FILE": mcp_server.PERIOD_TIME_FILE,
                     "PERIOD_CALIBRATION_STATE_FILE": mcp_server.PERIOD_CALIBRATION_STATE_FILE,
                     "XIQUEER_REQUEST_FILE": mcp_server.XIQUEER_REQUEST_FILE,
@@ -481,6 +483,7 @@ class HenuPluginService:
                 mcp_server.LIBRARY_COOKIE_FILE = paths.library_cookie_file
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = paths.seminar_signin_task_file
                 mcp_server.YUNFZ_TOKEN_FILE = paths.yunfz_token_file
+                mcp_server.CAS_COOKIE_FILE = paths.cas_cookie_file
                 mcp_server.PERIOD_TIME_FILE = period_time_file
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = period_calibration_state_file
                 mcp_server.XIQUEER_REQUEST_FILE = xiqueer_request_file
@@ -497,6 +500,7 @@ class HenuPluginService:
                 mcp_server.LIBRARY_COOKIE_FILE = original_state["mcp_server"]["LIBRARY_COOKIE_FILE"]
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = original_state["mcp_server"]["SEMINAR_SIGNIN_TASK_FILE"]
                 mcp_server.YUNFZ_TOKEN_FILE = original_state["mcp_server"]["YUNFZ_TOKEN_FILE"]
+                mcp_server.CAS_COOKIE_FILE = original_state["mcp_server"]["CAS_COOKIE_FILE"]
                 mcp_server.PERIOD_TIME_FILE = original_state["mcp_server"]["PERIOD_TIME_FILE"]
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = original_state["mcp_server"]["PERIOD_CALIBRATION_STATE_FILE"]
                 mcp_server.XIQUEER_REQUEST_FILE = original_state["mcp_server"]["XIQUEER_REQUEST_FILE"]

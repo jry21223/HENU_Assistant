@@ -95,7 +95,7 @@ class HenuLibraryBot:
     }
     SIGNIN_RECORD_TYPES = {"1", "3", "4"}
 
-    def __init__(self, username: str, password: str, saved_cookies: dict[str, Any] | None = None):
+    def __init__(self, username: str, password: str, saved_cookies: dict[str, Any] | None = None, cas_cookies: dict[str, Any] | None = None):
         self.username = str(username).strip()
         self.password = password or ""
         self.base_url = "https://zwyy.henu.edu.cn"
@@ -124,6 +124,11 @@ class HenuLibraryBot:
             if cookie_data:
                 self.session.cookies.update(cookie_data)
 
+        # Load shared CAS cookies (CASTGC) for login reuse
+        if cas_cookies:
+            for name, value in cas_cookies.items():
+                self.session.cookies.set(name, value, domain="ids.henu.edu.cn", path="/")
+
         self._set_auth_header()
 
     def get_cookies(self) -> dict[str, Any]:
@@ -131,6 +136,14 @@ class HenuLibraryBot:
         if self.token:
             cookies["_v4_token"] = self.token
         return cookies
+
+    def get_cas_cookies(self) -> dict[str, Any]:
+        """Get CAS cookies (CASTGC) for sharing with other systems."""
+        cas_cookies = {}
+        for cookie in self.session.cookies:
+            if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
+                cas_cookies[cookie.name] = cookie.value
+        return cas_cookies
 
     def _random_string(self, length: int) -> str:
         return "".join(

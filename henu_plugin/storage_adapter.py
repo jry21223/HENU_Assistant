@@ -31,6 +31,7 @@ PREFIX_LIBRARY_COOKIE = "user:{}:library_cookie"
 PREFIX_SEMINAR_TASK = "user:{}:seminar_task"
 PREFIX_SCHEDULE = "user:{}:schedule"
 PREFIX_YUNFZ_TOKEN = "user:{}:yunfz_token"
+PREFIX_CAS_COOKIE = "user:{}:cas_cookie"
 PREFIX_SHARED_PERIOD_TIME = "shared:period_time"
 PREFIX_SHARED_CALIBRATION = "shared:calibration"
 PREFIX_SHARED_XIQUEER = "shared:xiqueer"
@@ -47,6 +48,7 @@ class UserStoragePaths:
     seminar_signin_task_file: Path
     schedule_file: Path
     yunfz_token_file: Path
+    cas_cookie_file: Path
     output_dir: Path
 
 
@@ -104,6 +106,7 @@ class PluginStorageAdapter:
             seminar_signin_task_file=user_root / "seminar_signin_tasks.json",
             schedule_file=user_root / "schedule_clean_latest.json",
             yunfz_token_file=user_root / "yunfz_token.json",
+            cas_cookie_file=user_root / "cas_cookies.json",
             output_dir=output_dir,
         )
 
@@ -118,6 +121,7 @@ class PluginStorageAdapter:
         )
         await self._load_json(self._key(PREFIX_SCHEDULE), self._paths.schedule_file)
         await self._load_json(self._key(PREFIX_YUNFZ_TOKEN), self._paths.yunfz_token_file)
+        await self._load_json(self._key(PREFIX_CAS_COOKIE), self._paths.cas_cookie_file)
 
         self._dirty.clear()
         return self._paths
@@ -138,6 +142,7 @@ class PluginStorageAdapter:
         )
         await self._save_json(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
         await self._save_json(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
+        await self._save_json(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
 
         self._dirty.clear()
 
