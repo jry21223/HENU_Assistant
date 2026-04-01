@@ -132,9 +132,16 @@ class YunfzBot:
             "认证失败",
             "访问过于频繁",
             "账号已锁定",
+            "需要验证码",
+            "请输入验证码",
+            "短信验证",
+            "手机验证",
         ):
             if keyword in plain:
                 return keyword
+        # 检测是否需要验证码（页面有验证码输入框但无明确错误提示）
+        if re.search(r'<img[^>]*captcha[^>]*>|<input[^>]*captcha[^>]*>|id=["\']captcha["\']', text, re.I):
+            return "需要验证码"
         return ""
 
     @staticmethod
@@ -292,7 +299,10 @@ class YunfzBot:
                     elif "authserver/login" in str(login_resp.url):
                         self._set_last_error("CAS 登录未返回 ticket，可能是账号或密码错误，或学校启用了额外校验")
                     else:
-                        self._set_last_error("CAS 登录未返回 ticket，无法完成登录")
+                        # 提供更详细的错误信息，包括最终 URL
+                        final_url = str(login_resp.url or "")
+                        url_hint = f"，最终 URL: {final_url[:200]}" if final_url else ""
+                        self._set_last_error(f"CAS 登录未返回 ticket{url_hint}")
                     return False
 
                 return self._exchange_cas_ticket(cas_ticket)
