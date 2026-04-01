@@ -66,6 +66,7 @@ class UserStoragePaths:
     library_cookie_file: Path
     seminar_signin_task_file: Path
     schedule_file: Path
+    yunfz_token_file: Path
     output_dir: Path
 
 
@@ -122,6 +123,11 @@ class HenuPluginService:
             "seminar_cancel": self._seminar_cancel,
             "set_calibration_source": self._set_calibration_source,
             "system_status": self._system_status,
+            "yunfz_leave_query": self._yunfz_leave_query,
+            "yunfz_signin_query": self._yunfz_signin_query,
+            "yunfz_checksleep_query": self._yunfz_checksleep_query,
+            "yunfz_activity_query": self._yunfz_activity_query,
+            "yunfz_collection_query": self._yunfz_collection_query,
         }
 
     def get_sender_account_context(
@@ -456,6 +462,7 @@ class HenuPluginService:
                     "OUTPUT_DIR": mcp_server.OUTPUT_DIR,
                     "LIBRARY_COOKIE_FILE": mcp_server.LIBRARY_COOKIE_FILE,
                     "SEMINAR_SIGNIN_TASK_FILE": mcp_server.SEMINAR_SIGNIN_TASK_FILE,
+                    "YUNFZ_TOKEN_FILE": mcp_server.YUNFZ_TOKEN_FILE,
                     "PERIOD_TIME_FILE": mcp_server.PERIOD_TIME_FILE,
                     "PERIOD_CALIBRATION_STATE_FILE": mcp_server.PERIOD_CALIBRATION_STATE_FILE,
                     "XIQUEER_REQUEST_FILE": mcp_server.XIQUEER_REQUEST_FILE,
@@ -473,6 +480,7 @@ class HenuPluginService:
                 mcp_server.OUTPUT_DIR = paths.output_dir
                 mcp_server.LIBRARY_COOKIE_FILE = paths.library_cookie_file
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = paths.seminar_signin_task_file
+                mcp_server.YUNFZ_TOKEN_FILE = paths.yunfz_token_file
                 mcp_server.PERIOD_TIME_FILE = period_time_file
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = period_calibration_state_file
                 mcp_server.XIQUEER_REQUEST_FILE = xiqueer_request_file
@@ -488,6 +496,7 @@ class HenuPluginService:
                 mcp_server.OUTPUT_DIR = original_state["mcp_server"]["OUTPUT_DIR"]
                 mcp_server.LIBRARY_COOKIE_FILE = original_state["mcp_server"]["LIBRARY_COOKIE_FILE"]
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = original_state["mcp_server"]["SEMINAR_SIGNIN_TASK_FILE"]
+                mcp_server.YUNFZ_TOKEN_FILE = original_state["mcp_server"]["YUNFZ_TOKEN_FILE"]
                 mcp_server.PERIOD_TIME_FILE = original_state["mcp_server"]["PERIOD_TIME_FILE"]
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = original_state["mcp_server"]["PERIOD_CALIBRATION_STATE_FILE"]
                 mcp_server.XIQUEER_REQUEST_FILE = original_state["mcp_server"]["XIQUEER_REQUEST_FILE"]
@@ -713,4 +722,40 @@ class HenuPluginService:
     def _system_status(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.system_status(
             timezone=_text(params.get("timezone")) or "Asia/Shanghai",
+        )
+
+    def _yunfz_leave_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.yunfz_leave_query(
+            view=_text(params.get("view")) or "list",
+            leave_id=_text(params.get("leave_id")),
+            page=_int(params.get("page"), 1),
+            page_size=_int(params.get("page_size"), 20),
+        )
+
+    def _yunfz_signin_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.yunfz_signin_query(
+            view=_text(params.get("view")) or "list",
+            page=_int(params.get("page"), 1),
+            page_size=_int(params.get("page_size"), 20),
+        )
+
+    def _yunfz_checksleep_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.yunfz_checksleep_query(
+            view=_text(params.get("view")) or "list",
+            page=_int(params.get("page"), 1),
+            page_size=_int(params.get("page_size"), 20),
+        )
+
+    def _yunfz_activity_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.yunfz_activity_query(
+            view=_text(params.get("view")) or "list",
+            page=_int(params.get("page"), 1),
+            page_size=_int(params.get("page_size"), 20),
+        )
+
+    def _yunfz_collection_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.yunfz_collection_query(
+            view=_text(params.get("view")) or "list",
+            page=_int(params.get("page"), 1),
+            page_size=_int(params.get("page_size"), 20),
         )

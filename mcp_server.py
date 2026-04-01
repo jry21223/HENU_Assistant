@@ -43,6 +43,7 @@ LIBRARY_CORE_EXPECTED_FILE = BASE_DIR / "library_core" / "henu_core.py"
 LIBRARY_CORE_DIR = LIBRARY_CORE_EXPECTED_FILE.parent if LIBRARY_CORE_EXPECTED_FILE.exists() else None
 
 LIBRARY_COOKIE_FILE = BASE_DIR / "henu_library_cookies.json"
+YUNFZ_TOKEN_FILE = BASE_DIR / "henu_yunfz_token.json"
 SEMINAR_SIGNIN_TASK_FILE = BASE_DIR / "seminar_signin_tasks.json"
 SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS = 30
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -74,6 +75,17 @@ if LIBRARY_CORE_DIR and str(LIBRARY_CORE_DIR) not in sys.path:
     sys.path.insert(0, str(LIBRARY_CORE_DIR))
     try:
         from henu_core import HenuLibraryBot  # type: ignore
+    except Exception:
+        pass
+
+# 尝试导入河宝社区模块
+YunfzBot = None
+YUNFZ_CORE_EXPECTED_FILE = BASE_DIR / "library_core" / "yunfz_core.py"
+if YUNFZ_CORE_EXPECTED_FILE.exists():
+    if str(LIBRARY_CORE_DIR) not in sys.path:
+        sys.path.insert(0, str(LIBRARY_CORE_DIR))
+    try:
+        from yunfz_core import YunfzBot  # type: ignore
     except Exception:
         pass
 
@@ -1582,6 +1594,68 @@ def _latest_grid_file() -> Path | None:
     return files[0] if files else None
 
 
+# ==================== 河宝社区 (Yunfz) Helpers ====================
+
+_LAST_YUNFZ_LOGIN_ERROR = ""
+
+
+def _set_yunfz_login_error(message: str) -> None:
+    global _LAST_YUNFZ_LOGIN_ERROR
+    _LAST_YUNFZ_LOGIN_ERROR = str(message or "").strip()
+
+
+def _yunfz_login_error_message(default: str = "河宝社区登录失败") -> str:
+    text = str(_LAST_YUNFZ_LOGIN_ERROR or "").strip()
+    return text or default
+
+
+def _yunfz_login_failed(extra: dict[str, Any] | None = None, default: str = "河宝社区登录失败") -> dict[str, Any]:
+    result = {"success": False, "msg": _yunfz_login_error_message(default)}
+    if extra:
+        result.update(extra)
+    return result
+
+
+def _load_yunfz_token() -> dict[str, Any]:
+    return load_json(YUNFZ_TOKEN_FILE)
+
+
+def _save_yunfz_token(token: str) -> None:
+    save_json(YUNFZ_TOKEN_FILE, {"token": token})
+
+
+def _build_yunfz_bot(student_id: str, password: str):
+    if YunfzBot is None:
+        raise RuntimeError(f"河宝社区核心模块不可用: {YUNFZ_CORE_EXPECTED_FILE}")
+
+    _set_yunfz_login_error("")
+    stored = _load_yunfz_token()
+    stored_token = stored.get("token", "") if stored else ""
+    bot = YunfzBot(student_id, password, stored_token or None)  # type: ignore
+    if bot.login():
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        _set_yunfz_login_error("")
+        return bot
+
+    first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
+    if stored_token:
+        fresh_bot = YunfzBot(student_id, password, None)  # type: ignore
+        if fresh_bot.login():
+            token = fresh_bot.get_token()
+            if token:
+                _save_yunfz_token(token)
+            _set_yunfz_login_error("")
+            return fresh_bot
+        fresh_error = str(getattr(fresh_bot, "get_last_error", lambda: "")() or "").strip()
+        _set_yunfz_login_error(fresh_error or first_error)
+        return None
+
+    _set_yunfz_login_error(first_error)
+    return None
+
+
 def get_server_time(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     """获取服务器当前时间（用于判断当前正在上的课）。"""
     now = _now_dt(timezone)
@@ -2988,6 +3062,255 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
         "seminar_signin_tasks": _seminar_signin_tasks_impl(),
         "recent_output_files": list_output_files(limit=10),
     }
+
+
+# ==================== 河宝社区 (Yunfz) MCP Tools ====================
+
+@mcp.tool()
+def yunfz_leave_query(
+    view: str = "list",
+    leave_id: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """
+    查询河宝社区请假信息。
+
+    view:
+    - list: 请假记录列表
+    - detail: 请假详情（需传 leave_id）
+    - statistics: 任务统计
+
+    规则：
+    1) 查询前必须先调用 system_status 确认当前日期时间。
+    2) 回复仅可基于本次返回结果，不得编造。
+    """
+    if YunfzBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "records": []}
+
+    bot = _build_yunfz_bot(sid, pwd)
+    if not bot:
+        return _yunfz_login_failed({"records": []})
+
+    normalized_view = str(view or "list").strip().lower()
+
+    if normalized_view == "list":
+        result = bot.get_leave_list(student_no=sid, page=page, page_size=page_size)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "detail":
+        if not str(leave_id or "").strip():
+            return {"success": False, "msg": "view=detail 时 leave_id 不能为空"}
+        result = bot.get_leave_detail(leave_id=leave_id)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "statistics":
+        result = bot.get_task_statistics()
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    return {"success": False, "msg": "view 仅支持 list/detail/statistics", "records": []}
+
+
+@mcp.tool()
+def yunfz_signin_query(
+    view: str = "list",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """
+    查询河宝社区签到任务。
+
+    view:
+    - list: 签到任务列表
+    - statistics: 任务统计
+
+    规则：
+    1) 查询前必须先调用 system_status 确认当前日期时间。
+    """
+    if YunfzBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "records": []}
+
+    bot = _build_yunfz_bot(sid, pwd)
+    if not bot:
+        return _yunfz_login_failed({"records": []})
+
+    normalized_view = str(view or "list").strip().lower()
+
+    if normalized_view == "list":
+        result = bot.get_signin_task_list(page=page, page_size=page_size)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "statistics":
+        result = bot.get_task_statistics()
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
+
+
+@mcp.tool()
+def yunfz_checksleep_query(
+    view: str = "list",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """
+    查询河宝社区查寝任务。
+
+    view:
+    - list: 查寝任务列表
+    - statistics: 任务统计
+
+    规则：
+    1) 查询前必须先调用 system_status 确认当前日期时间。
+    """
+    if YunfzBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "records": []}
+
+    bot = _build_yunfz_bot(sid, pwd)
+    if not bot:
+        return _yunfz_login_failed({"records": []})
+
+    normalized_view = str(view or "list").strip().lower()
+
+    if normalized_view == "list":
+        result = bot.get_checksleep_task_list(page=page, page_size=page_size)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "statistics":
+        result = bot.get_task_statistics()
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
+
+
+@mcp.tool()
+def yunfz_activity_query(
+    view: str = "list",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """
+    查询河宝社区活动信息。
+
+    view:
+    - list: 活动列表
+    - statistics: 任务统计
+
+    规则：
+    1) 查询前必须先调用 system_status 确认当前日期时间。
+    """
+    if YunfzBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "records": []}
+
+    bot = _build_yunfz_bot(sid, pwd)
+    if not bot:
+        return _yunfz_login_failed({"records": []})
+
+    normalized_view = str(view or "list").strip().lower()
+
+    if normalized_view == "list":
+        result = bot.get_activity_list(page=page, page_size=page_size)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "statistics":
+        result = bot.get_task_statistics()
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
+
+
+@mcp.tool()
+def yunfz_collection_query(
+    view: str = "list",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    """
+    查询河宝社区信息收集任务。
+
+    view:
+    - list: 信息收集列表
+    - statistics: 任务统计
+
+    规则：
+    1) 查询前必须先调用 system_status 确认当前日期时间。
+    """
+    if YunfzBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "records": []}
+
+    bot = _build_yunfz_bot(sid, pwd)
+    if not bot:
+        return _yunfz_login_failed({"records": []})
+
+    normalized_view = str(view or "list").strip().lower()
+
+    if normalized_view == "list":
+        result = bot.get_collection_list(page=page, page_size=page_size)
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    if normalized_view == "statistics":
+        result = bot.get_task_statistics()
+        token = bot.get_token()
+        if token:
+            _save_yunfz_token(token)
+        return result
+
+    return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
 if __name__ == "__main__":

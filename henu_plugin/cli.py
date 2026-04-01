@@ -64,6 +64,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_seminar(raw, argv)
     if head in {"calibration", "calibrate"}:
         return _parse_calibration(raw, argv)
+    if head in {"yunfz", "hebao"}:
+        return _parse_yunfz(raw, argv)
 
     return _error_spec(
         raw,
@@ -86,6 +88,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "schedule day --date 2026-03-30",
                 "library current",
                 "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
+                "yunfz leave list",
+                "yunfz signin list",
                 "status",
                 "help <topic>",
             ],
@@ -93,7 +97,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "help account",
                 "help schedule",
                 "help library",
-                "help seminar reserve",
+                "help seminar",
+                "help yunfz",
             ],
             "tips": [
                 "写操作只在 `success=true` 时才算完成。",
@@ -238,6 +243,35 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized == "yunfz":
+        return {
+            "topic": normalized,
+            "summary": "河宝社区（云发阵）相关命令：请假、签到、查寝、活动、信息收集。",
+            "commands": [
+                "yunfz leave list [--page 1] [--page-size 20]",
+                "yunfz leave detail --leave-id <ID>",
+                "yunfz leave statistics",
+                "yunfz signin list [--page 1] [--page-size 20]",
+                "yunfz signin statistics",
+                "yunfz checksleep list [--page 1] [--page-size 20]",
+                "yunfz checksleep statistics",
+                "yunfz activity list [--page 1] [--page-size 20]",
+                "yunfz activity statistics",
+                "yunfz collection list [--page 1] [--page-size 20]",
+                "yunfz collection statistics",
+            ],
+            "examples": [
+                "yunfz leave list",
+                "yunfz leave detail --leave-id 12345",
+                "yunfz signin list",
+                "yunfz checksleep list",
+            ],
+            "tips": [
+                "河宝社区使用统一身份认证（ids.henu.edu.cn）登录。",
+                "先调用 `status` 获取当前时间，再查询相对时间相关的记录。",
+            ],
+        }
+
     return {
         "topic": normalized,
         "summary": f"未找到 `help {normalized}` 的专用说明，可先退回上一级主题。",
@@ -251,7 +285,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help library", "help seminar"]
+            return ["help account", "help schedule", "help library", "help seminar", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
         if topic == "schedule":
@@ -260,6 +294,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
             return ["library current", "library locations"]
         if topic == "seminar":
             return ["seminar filters", "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4"]
+        if topic == "yunfz":
+            return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list"]
         return ["help"]
 
     resolved_tool = spec.resolved_tool or ""
@@ -302,6 +338,13 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["account status", "schedule now", "library current"]
     if resolved_tool == "set_calibration_source":
         return ["schedule now", "schedule sync"]
+    if resolved_tool == "yunfz_leave_query":
+        view = str(spec.params.get("view") or "list")
+        if view == "detail":
+            return ["yunfz leave list", "yunfz leave statistics"]
+        return ["yunfz leave detail --leave-id <ID>", "yunfz leave statistics"]
+    if resolved_tool in {"yunfz_signin_query", "yunfz_checksleep_query", "yunfz_activity_query", "yunfz_collection_query"}:
+        return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list", "yunfz activity list"]
     return ["help"]
 
 
@@ -755,6 +798,108 @@ def _parse_calibration(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         action="calibration set",
         should_preload_runtime_context=False,
     )
+
+
+def _parse_yunfz(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    """Parse yunfz (河宝社区) commands."""
+    if len(argv) == 1:
+        return _help_spec(raw, argv, "yunfz")
+
+    sub = argv[1].lower()
+    if sub in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "yunfz")
+
+    options, _, error = _parse_options(argv[2:])
+    if error:
+        return _error_spec(raw, error, help_topic="yunfz")
+
+    page, error = _int_option(options, "page", 1)
+    if error:
+        return _error_spec(raw, error, help_topic="yunfz")
+    page_size, error = _int_option(options, "page_size", 20)
+    if error:
+        return _error_spec(raw, error, help_topic="yunfz")
+
+    if sub in {"leave", "请假"}:
+        view = _string_option(options, "view") or "list"
+        leave_id = _string_option(options, "leave_id") or _string_option(options, "id")
+        if view == "detail" and not leave_id:
+            return _error_spec(raw, "view=detail 时需要参数 `--leave-id`。", help_topic="yunfz")
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="yunfz_leave_query",
+            params={
+                "view": view,
+                "leave_id": leave_id,
+                "page": page,
+                "page_size": page_size,
+            },
+            action=f"yunfz leave {view}",
+            should_preload_runtime_context=True,
+        )
+
+    if sub in {"signin", "签到"}:
+        view = _string_option(options, "view") or "list"
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="yunfz_signin_query",
+            params={
+                "view": view,
+                "page": page,
+                "page_size": page_size,
+            },
+            action=f"yunfz signin {view}",
+            should_preload_runtime_context=True,
+        )
+
+    if sub in {"checksleep", "查寝"}:
+        view = _string_option(options, "view") or "list"
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="yunfz_checksleep_query",
+            params={
+                "view": view,
+                "page": page,
+                "page_size": page_size,
+            },
+            action=f"yunfz checksleep {view}",
+            should_preload_runtime_context=True,
+        )
+
+    if sub in {"activity", "活动"}:
+        view = _string_option(options, "view") or "list"
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="yunfz_activity_query",
+            params={
+                "view": view,
+                "page": page,
+                "page_size": page_size,
+            },
+            action=f"yunfz activity {view}",
+            should_preload_runtime_context=True,
+        )
+
+    if sub in {"collection", "收集", "info"}:
+        view = _string_option(options, "view") or "list"
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="yunfz_collection_query",
+            params={
+                "view": view,
+                "page": page,
+                "page_size": page_size,
+            },
+            action=f"yunfz collection {view}",
+            should_preload_runtime_context=True,
+        )
+
+    return _error_spec(raw, f"未知命令 `yunfz {argv[1]}`。", help_topic="yunfz")
 
 
 def _help_spec(raw: str, argv: tuple[str, ...], topic: str) -> CliCommandSpec:

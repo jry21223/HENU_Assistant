@@ -174,8 +174,14 @@ class HenuLibraryBot:
 
     @staticmethod
     def _extract_cas_ticket(url: str) -> str:
+        # Library frontend pattern: #/cas/?cas=TICKET
         if "#/cas/?cas=" in url:
             return url.split("#/cas/?cas=", 1)[1].split("&", 1)[0]
+        # Standard CAS ticket parameter (ticket=)
+        match = re.search(r"[?&]ticket=([^&#]+)", url)
+        if match:
+            return match.group(1)
+        # Library-specific cas parameter (cas=)
         match = re.search(r"[?&]cas=([^&#]+)", url)
         return match.group(1) if match else ""
 

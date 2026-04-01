@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: yunfz_checksleep_query
+  label:
+    en_US: YunfzChecksleepQuery
+    zh_Hans: 河宝查寝查询
+  description:
+    en_US: "Query checksleep tasks from HENU Yunfz (河宝社区) system."
+    zh_Hans: "查询河宝社区查寝任务列表或统计信息。"
+spec:
+  parameters:
+    type: object
+    properties:
+      view:
+        type: string
+        enum: [list, statistics]
+        description: 查询视图，默认 list
+      page:
+        type: integer
+        description: 页码，默认 1
+      page_size:
+        type: integer
+        description: 每页数量，默认 20
+  llm_prompt: "如需判断今天、明天、现在等相对时间，先调用 system_status 获取 server_time；如果本轮结果里已有 server_time_snapshot，则必须以该时间为准。查询当前 QQ 账号对应用户在河宝社区的查寝任务信息。"
+execution:
+  python:
+    path: yunfz_checksleep_query.py
+    attr: YunfzChecksleepQuery
