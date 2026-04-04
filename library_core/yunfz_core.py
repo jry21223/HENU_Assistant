@@ -12,6 +12,7 @@ import math
 import random
 import re
 from html import unescape
+import logging
 from typing import Any
 from urllib.parse import urlencode
 
@@ -23,6 +24,8 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 
 def _now_dt() -> dt.datetime:
@@ -100,6 +103,7 @@ class YunfzBot:
         for cookie in self.session.cookies:
             if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
                 cas_cookies[cookie.name] = cookie.value
+        logger.debug(f"get_cas_cookies: extracted {len(cas_cookies)} cookies: {list(cas_cookies.keys())}")
         return cas_cookies
 
     def _random_string(self, length: int) -> str:

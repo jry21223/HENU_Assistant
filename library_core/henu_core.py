@@ -7,6 +7,8 @@ import re
 from html import unescape
 from typing import Any
 
+import logging
+
 import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -16,6 +18,8 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
+logger = logging.getLogger(__name__)
+
 
 def _now_dt() -> dt.datetime:
     """获取当前北京时间（带时区信息）"""
@@ -143,6 +147,7 @@ class HenuLibraryBot:
         for cookie in self.session.cookies:
             if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
                 cas_cookies[cookie.name] = cookie.value
+        logger.debug(f"get_cas_cookies: extracted {len(cas_cookies)} cookies: {list(cas_cookies.keys())}")
         return cas_cookies
 
     def _random_string(self, length: int) -> str:

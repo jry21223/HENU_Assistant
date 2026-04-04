@@ -164,6 +164,7 @@ class PluginStorageAdapter:
     async def _save_json(self, file_path: Path, storage_key: str) -> None:
         """Save local file content to Storage."""
         if not file_path.exists():
+            logger.debug(f"_save_json: file not found, skipping: {file_path.name}")
             return
         try:
             data = file_path.read_bytes()

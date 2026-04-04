@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 import threading
@@ -35,6 +36,7 @@ from secure_storage import (
 )
 
 mcp = FastMCP("henu-campus-unified")
+logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 PERIOD_TIME_FILE = BASE_DIR / "period_time_config.json"
 PERIOD_CALIBRATION_STATE_FILE = BASE_DIR / "period_time_calibration_state.json"
@@ -1548,12 +1550,15 @@ def _save_library_cookies(cookies: dict[str, Any]) -> None:
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load shared CAS cookies (CASTGC for login reuse)."""
-    return load_json(CAS_COOKIE_FILE)
+    data = load_json(CAS_COOKIE_FILE)
+    logger.debug(f"_load_cas_cookies: loaded {len(data)} cookies from {CAS_COOKIE_FILE}")
+    return data
 
 
 def _save_cas_cookies(cookies: dict[str, Any]) -> None:
     """Save shared CAS cookies for reuse across all systems."""
     save_json(CAS_COOKIE_FILE, cookies)
+    logger.debug(f"_save_cas_cookies: saved {len(cookies)} cookies to {CAS_COOKIE_FILE}")
 
 
 def _set_library_login_error(message: str) -> None:
