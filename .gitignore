@@ -52,13 +52,5 @@ build_out/
 henu_cookies.json
 henu_library_cookies.json
 henu_profile.json
-henu_cas_cookies.json
 period_time_*.json
 xiqueer_*.json
-.ace-tool/
-.claude/
-lieying-core/.gocache/
-lieying-core/*.exe
-lieying-core/*.exe~
-lieying-core/*~
-lieying-core/**/*.bak
