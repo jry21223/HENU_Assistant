@@ -158,6 +158,6 @@ source .venv/bin/activate
 
 ## 更新日志
 
-- **v3.0.0** - 添加 Langbot 插件版，支持按 QQ 隔离保存账号配置
-- **v2.0.0** - 添加 OpenClaw Skill 支持，重构项目结构
 - **v1.0.0** - 初始版本，支持 MCP 协议
+- **v2.0.0** - 添加 OpenClaw Skill 支持，重构项目结构
+- **v3.0.0** - 添加 Langbot 插件版，支持按 QQ 隔离保存账号配置
