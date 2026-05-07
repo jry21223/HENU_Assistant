@@ -1,4 +1,4 @@
-# 河大校园助手（OpenClaw Skill）
+# 河南大学校园助手
 
 为河南大学学生提供课表查询、图书馆预约、研讨室预约等能力，当前仓库包含多种接入形态，可按你的客户端和使用方式选择。
 
@@ -57,51 +57,22 @@ python mcp_server.py
 git clone -b openclaw-skill https://github.com/jry21223/HENU_Assistant.git
 cp -r HENU_Assistant ~/.openclaw/workspace/skills/henu_campus_assistant
 cd ~/.openclaw/workspace/skills/henu_campus_assistant
-
-# Ubuntu/Debian: 避免 "externally managed environment" 报错
-sudo apt update
-sudo apt install -y python3-venv
-
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
-
-# 可选：激活后可直接使用 python/pip
-source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## 常用入口
+## 功能特性
 
-- `setup_account`：保存账号并验证登录
-- `sync_schedule`：同步最新课表
-- `schedule_query --view current|day|week|full`：查当前课程、某一天课表、周课表或完整课表
-- `library_query --view locations|current|records`：查图书馆区域、当前预约或历史记录
-- `library_reserve` / `library_auto_signin` / `library_cancel`：图书馆写操作
-- `seminar_group --action list|save|delete`：管理研讨室 group
-- `seminar_query --view filters|rooms|detail|records|signin_tasks`：查研讨室筛选项、房间、详情、记录和签到任务
-- `seminar_reserve` / `seminar_signin` / `seminar_cancel`：研讨室写操作
-- `system_status`：查当前时间和系统状态
-- `set_calibration_source`：更新节次校准源
+### 📚 教务系统集成
+- 自动登录河大教务系统
+- 获取个人课表信息
+- 实时查询当前课程状态
+- 智能识别下一节课时间
 
-课表查询补充说明：
-- `schedule_query --view current` 只查“当前正在上的课 + 下一节课”
-- `schedule_query --view day --target_date "2026-03-19"` 查某一天课表
-- `schedule_query --view week` 为兼容旧调用，返回未按教学周过滤的完整周课表
-
-## 最短流程
-
-图书馆：
-- 先执行 `system_status`
-- 再执行 `library_query --view locations`
-- 然后 `library_reserve`
-- 后续用 `library_query --view current` / `library_query --view records`
-
-研讨室：
-- 先执行 `system_status`
-- 可先用 `seminar_group --action save` 保存成员
-- 按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 查询
-- 然后 `seminar_reserve`
-- 后续用 `seminar_query --view records`、`seminar_signin`、`seminar_cancel`
+### 🏛️ 图书馆服务
+- 座位预约功能
+- 预约记录查询
+- 一键取消预约
+- 支持多个图书馆区域
 
 ### 🧩 多平台接入
 - 支持 Langbot 插件
@@ -115,6 +86,8 @@ source .venv/bin/activate
 - 不上传任何个人数据
 - 支持多账号管理
 
+## 版本对比
+
 | 特性 | Langbot 插件版 | MCP 服务器版 | OpenClaw Skill 版 |
 | --- | --- | --- | --- |
 | 部署复杂度 | 中等 | 中等 | 简单 |
@@ -124,15 +97,7 @@ source .venv/bin/activate
 | 功能完整性 | 完整 | 完整 | 完整 |
 | 适用场景 | Langbot 接入 | 开发集成 | 日常使用 |
 
-## 说明
-
-- Skill CLI 统一为 14 个入口，避免重复命令
-- 账号与 Cookie 仅本地保存
-- 研讨室 `group` 不含自己，建议保存 3-9 个同行成员
-- 研讨室申请内容必须多于 10 个字
-- Ubuntu/Debian 不要直接执行系统级 `pip3 install -r requirements.txt`
-
-## 环境要求
+## 系统要求
 
 - Python 3.9+
 - 河南大学学生账号
@@ -158,6 +123,6 @@ source .venv/bin/activate
 
 ## 更新日志
 
-- **v1.0.0** - 初始版本，支持 MCP 协议
-- **v2.0.0** - 添加 OpenClaw Skill 支持，重构项目结构
 - **v3.0.0** - 添加 Langbot 插件版，支持按 QQ 隔离保存账号配置
+- **v2.0.0** - 添加 OpenClaw Skill 支持，重构项目结构
+- **v1.0.0** - 初始版本，支持 MCP 协议
