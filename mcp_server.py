@@ -1559,9 +1559,10 @@ def _build_library_bot(student_id: str, password: str):
     bot = HenuLibraryBot(student_id, password, stored or None)  # type: ignore
 
     # 自动从课程表 cookie 文件注入 CASTGC，实现免密复用
+    # 始终用课程表的 CASTGC 覆盖（不因 library_cookies 里已有旧值而跳过）
     schedule_cookies = load_json(COOKIE_FILE) or {}
     castgc = schedule_cookies.get("CASTGC", "")
-    if castgc and not bot.session.cookies.get("CASTGC"):
+    if castgc:
         bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
 
     if bot.login():
