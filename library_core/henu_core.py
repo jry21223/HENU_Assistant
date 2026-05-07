@@ -121,8 +121,12 @@ class HenuLibraryBot:
         if saved_cookies:
             cookie_data = dict(saved_cookies)
             self.token = str(cookie_data.pop("_v4_token", "") or "")
+            # CASTGC 属于 ids.henu.edu.cn，必须带 domain 才能在 CAS 跳转时正确发送
+            castgc_value = cookie_data.pop("CASTGC", None)
             if cookie_data:
                 self.session.cookies.update(cookie_data)
+            if castgc_value:
+                self.session.cookies.set("CASTGC", castgc_value, domain="ids.henu.edu.cn")
 
         self._set_auth_header()
 

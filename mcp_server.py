@@ -1557,6 +1557,14 @@ def _build_library_bot(student_id: str, password: str):
     _set_library_login_error("")
     stored = _load_library_cookies()
     bot = HenuLibraryBot(student_id, password, stored or None)  # type: ignore
+
+    # 自动从课程表 cookie 文件注入 CASTGC，实现免密复用
+    # 始终用课程表的 CASTGC 覆盖，确保使用最新值
+    schedule_cookies = load_json(COOKIE_FILE) or {}
+    castgc = schedule_cookies.get("CASTGC", "")
+    if castgc:
+        bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
+
     if bot.login():
         _save_library_cookies(bot.get_cookies())
         _set_library_login_error("")
@@ -1565,6 +1573,8 @@ def _build_library_bot(student_id: str, password: str):
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
         fresh_bot = HenuLibraryBot(student_id, password, None)  # type: ignore
+        if castgc:
+            fresh_bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
             _set_library_login_error("")
