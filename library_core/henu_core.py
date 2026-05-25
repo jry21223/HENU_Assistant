@@ -4,8 +4,10 @@ import json
 import math
 import random
 import re
+import time
 from html import unescape
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
 from Crypto.Cipher import AES
@@ -95,7 +97,13 @@ class HenuLibraryBot:
     }
     SIGNIN_RECORD_TYPES = {"1", "3", "4"}
 
-    def __init__(self, username: str, password: str, saved_cookies: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        saved_cookies: dict[str, Any] | None = None,
+        cas_cookies: dict[str, Any] | None = None,
+    ):
         self.username = str(username).strip()
         self.password = password or ""
         self.base_url = "https://zwyy.henu.edu.cn"
@@ -128,6 +136,11 @@ class HenuLibraryBot:
             if castgc_value:
                 self.session.cookies.set("CASTGC", castgc_value, domain="ids.henu.edu.cn")
 
+        if cas_cookies:
+            for name, value in cas_cookies.items():
+                if value not in (None, ""):
+                    self.session.cookies.set(str(name), str(value), domain="ids.henu.edu.cn", path="/")
+
         self._set_auth_header()
 
     def get_cookies(self) -> dict[str, Any]:
@@ -135,6 +148,13 @@ class HenuLibraryBot:
         if self.token:
             cookies["_v4_token"] = self.token
         return cookies
+
+    def get_cas_cookies(self) -> dict[str, Any]:
+        cas_cookies = {}
+        for cookie in self.session.cookies:
+            if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
+                cas_cookies[cookie.name] = cookie.value
+        return cas_cookies
 
     def _random_string(self, length: int) -> str:
         return "".join(
@@ -178,10 +198,48 @@ class HenuLibraryBot:
 
     @staticmethod
     def _extract_cas_ticket(url: str) -> str:
-        if "#/cas/?cas=" in url:
-            return url.split("#/cas/?cas=", 1)[1].split("&", 1)[0]
-        match = re.search(r"[?&]cas=([^&#]+)", url)
-        return match.group(1) if match else ""
+        text = str(url or "").strip()
+        if not text:
+            return ""
+
+        pieces: list[str] = []
+        try:
+            parsed = urlsplit(text)
+            pieces.extend([parsed.query, parsed.fragment])
+            if "?" in parsed.fragment:
+                pieces.append(parsed.fragment.split("?", 1)[1])
+        except Exception:
+            pass
+
+        pieces.extend([text, unquote(text)])
+        seen: set[str] = set()
+        for raw_piece in pieces:
+            piece = str(raw_piece or "")
+            if not piece or piece in seen:
+                continue
+            seen.add(piece)
+
+            candidates = [piece]
+            decoded = unquote(piece)
+            if decoded != piece:
+                candidates.append(decoded)
+
+            for candidate in candidates:
+                query_text = candidate.lstrip("?#")
+                if "?" in query_text:
+                    query_text = query_text.split("?", 1)[1]
+
+                parsed_query = parse_qs(query_text, keep_blank_values=True)
+                for key in ("ticket", "cas", "TICKET", "CAS"):
+                    values = parsed_query.get(key)
+                    if values and str(values[0] or "").strip():
+                        return unquote(str(values[0])).strip()
+
+                match = re.search(r"(?:^|[?&#/])(?:ticket|cas)=([^&#]+)", candidate, re.I)
+                if match:
+                    return unquote(match.group(1)).strip()
+
+        return ""
 
     @staticmethod
     def _extract_cas_login_error(html_text: str) -> str:
@@ -215,9 +273,15 @@ class HenuLibraryBot:
             "认证失败",
             "访问过于频繁",
             "账号已锁定",
+            "需要验证码",
+            "请输入验证码",
+            "短信验证",
+            "手机验证",
         ):
             if keyword in plain:
                 return keyword
+        if re.search(r'<img[^>]*captcha[^>]*>|<input[^>]*captcha[^>]*>|id=["\']captcha["\']', text, re.I):
+            return "需要验证码"
         return ""
 
     def _set_last_error(self, message: str) -> str:
@@ -365,7 +429,9 @@ class HenuLibraryBot:
                     elif "authserver/login" in str(login_resp.url):
                         self._set_last_error("CAS 登录未返回 ticket，可能是账号或密码错误，或学校启用了额外校验")
                     else:
-                        self._set_last_error("CAS 登录未返回 ticket，无法完成图书馆登录")
+                        final_url = str(login_resp.url or "")
+                        url_hint = f"，最终 URL: {final_url[:200]}" if final_url else ""
+                        self._set_last_error(f"CAS 登录未返回 ticket{url_hint}")
                     return False
                 return self._exchange_cas_ticket(cas_ticket)
             except Exception as exc:
@@ -428,10 +494,115 @@ class HenuLibraryBot:
         minute = max(0, value) % 60
         return f"{hour:02d}:{minute:02d}"
 
+    @classmethod
+    def _format_time_window(cls, start_time: Any = "", end_time: Any = "") -> str:
+        start_hhmm = cls._to_hhmm(start_time)
+        end_hhmm = cls._to_hhmm(end_time)
+        if start_hhmm and end_hhmm:
+            return f"{start_hhmm}-{end_hhmm}"
+        return start_hhmm or end_hhmm or ""
+
     @staticmethod
     def _normalize_seat_no(value: Any) -> str:
         text = str(value or "").strip()
         return text.lstrip("0") or "0"
+
+    @staticmethod
+    def _normalize_area_name(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"\s+", "", text)
+        text = re.sub(r"[（(].*?[）)]", "", text)
+        for token in ("河南大学", "图书馆"):
+            text = text.replace(token, "")
+        return text
+
+    @staticmethod
+    def _area_id(area: dict[str, Any]) -> str:
+        return str(area.get("id") or area.get("area_id") or area.get("areaId") or "").strip()
+
+    @staticmethod
+    def _area_name(area: dict[str, Any]) -> str:
+        return str(area.get("name") or area.get("areaName") or area.get("title") or "").strip()
+
+    @classmethod
+    def _iter_area_rows(cls, areas: Any):
+        if not isinstance(areas, list):
+            return
+        for area in areas:
+            if not isinstance(area, dict):
+                continue
+            yield area
+            for key in ("children", "child", "areas"):
+                children = area.get(key)
+                if isinstance(children, list):
+                    yield from cls._iter_area_rows(children)
+
+    @classmethod
+    def _location_summary(cls, area: dict[str, Any], *, source: str = "live") -> dict[str, Any]:
+        area_id = cls._area_id(area)
+        name = cls._area_name(area)
+        return {
+            "location": name or area_id,
+            "area_id": area_id,
+            "source": source,
+        }
+
+    @classmethod
+    def static_locations(cls) -> list[dict[str, Any]]:
+        return [
+            {"location": name, "area_id": str(area_id), "source": "static_fallback"}
+            for name, area_id in cls.LOCATIONS.items()
+        ]
+
+    @classmethod
+    def _summarize_areas(cls, areas: list[dict[str, Any]], *, source: str = "live") -> list[dict[str, Any]]:
+        locations: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for area in cls._iter_area_rows(areas):
+            area_id = cls._area_id(area)
+            name = cls._area_name(area)
+            if not area_id and not name:
+                continue
+            key = (area_id, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append(cls._location_summary(area, source=source))
+        return locations
+
+    @classmethod
+    def _find_area_by_id(cls, areas: list[dict[str, Any]], area_id: str) -> dict[str, Any] | None:
+        target_id = str(area_id or "").strip()
+        if not target_id:
+            return None
+        for area in cls._iter_area_rows(areas):
+            if cls._area_id(area) == target_id:
+                return area
+        return None
+
+    @classmethod
+    def _find_area_by_name(cls, areas: list[dict[str, Any]], location: str) -> dict[str, Any] | None:
+        target = str(location or "").strip()
+        target_norm = cls._normalize_area_name(target)
+        if not target_norm:
+            return None
+
+        area_rows = list(cls._iter_area_rows(areas))
+        for area in area_rows:
+            if target == cls._area_name(area):
+                return area
+
+        for area in area_rows:
+            area_norm = cls._normalize_area_name(cls._area_name(area))
+            if target_norm and target_norm == area_norm:
+                return area
+
+        for area in area_rows:
+            area_norm = cls._normalize_area_name(cls._area_name(area))
+            if target_norm and area_norm and (target_norm in area_norm or area_norm in target_norm):
+                return area
+
+        return None
 
     @staticmethod
     def _normalize_points(points: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -486,29 +657,90 @@ class HenuLibraryBot:
             raise RuntimeError(self._resp_msg(resp, "获取区域列表失败"))
         return ((resp.get("data") or {}).get("area") or [])
 
+    def list_locations(self, target_date: str = "") -> dict[str, Any]:
+        target_day = str(target_date or "").strip()
+        if not target_day:
+            target_day = (_now_dt().date() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            dt.date.fromisoformat(target_day)
+        except ValueError:
+            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "locations": []}
+
+        if not self._is_token_valid() and not self.login():
+            return self._login_failed_result(
+                {
+                    "date": target_day,
+                    "locations": self.static_locations(),
+                    "source": "static_fallback",
+                    "is_live": False,
+                }
+            )
+
+        try:
+            areas = self._fetch_pick_areas(target_day)
+            locations = self._summarize_areas(areas, source="live")
+            return {
+                "success": True,
+                "msg": "操作成功",
+                "date": target_day,
+                "locations": locations,
+                "total": len(locations),
+                "source": "live",
+                "is_live": True,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "msg": f"获取实时图书馆区域失败: {exc}",
+                "date": target_day,
+                "locations": self.static_locations(),
+                "source": "static_fallback",
+                "is_live": False,
+            }
+
     def _resolve_area(self, location_name: str, target_date: str) -> tuple[str, str]:
         location = str(location_name or "").strip()
         if not location:
             raise RuntimeError("区域名称不能为空")
 
+        areas: list[dict[str, Any]] = []
+        areas_error = ""
+        try:
+            areas = self._fetch_pick_areas(target_date)
+        except Exception as exc:
+            areas_error = str(exc)
+
+        if areas:
+            if location.isdigit():
+                area = self._find_area_by_id(areas, location)
+                if area:
+                    return self._area_id(area), self._area_name(area) or location
+                raise RuntimeError(f"区域 ID '{location}' 不在 {target_date} 的实时可预约区域列表中")
+
+            area = self._find_area_by_name(areas, location)
+            if area:
+                return self._area_id(area), self._area_name(area)
+
+            if location in self.LOCATIONS:
+                mapped_id = str(self.LOCATIONS[location])
+                area = self._find_area_by_id(areas, mapped_id)
+                if area:
+                    return self._area_id(area), self._area_name(area) or location
+                raise RuntimeError(
+                    f"区域 '{location}' 的内置映射 {mapped_id} 不在 {target_date} 的实时区域列表中，请先查询 locations"
+                )
+
         if location.isdigit():
             return location, location
 
         if location in self.LOCATIONS:
+            if areas_error:
+                return str(self.LOCATIONS[location]), location
             return str(self.LOCATIONS[location]), location
 
-        areas = self._fetch_pick_areas(target_date)
-
-        for area in areas:
-            if location == str(area.get("name", "")).strip():
-                return str(area.get("id")), str(area.get("name"))
-
-        for area in areas:
-            area_name = str(area.get("name", "")).strip()
-            if location and (location in area_name or area_name in location):
-                return str(area.get("id")), area_name
-
-        raise RuntimeError(f"区域 '{location}' 未找到，请检查名称")
+        if areas_error:
+            raise RuntimeError(f"获取实时区域列表失败，且内置映射中没有 '{location}': {areas_error}")
+        raise RuntimeError(f"区域 '{location}' 未找到，请先查询 locations 确认实时区域名称")
 
     def _get_space_map(self, area_id: str) -> dict[str, Any]:
         resp = self._post_json("/v4/Space/map", {"id": str(area_id)})
@@ -550,9 +782,17 @@ class HenuLibraryBot:
         space_map: dict[str, Any],
         target_date: str,
         preferred_time: str | None = None,
+        preferred_end_time: str | None = None,
     ) -> dict[str, Any]:
         space_type = str(space_map.get("type") or "")
         label_ids: list[Any] = []
+        requested_start_hhmm = self._to_hhmm(preferred_time or "")
+        requested_end_hhmm = self._to_hhmm(preferred_end_time or "")
+        requested_start_min = self._time_to_minutes(requested_start_hhmm) if requested_start_hhmm else None
+        requested_end_min = self._time_to_minutes(requested_end_hhmm) if requested_end_hhmm else None
+        has_time_window = requested_end_min is not None
+        if requested_start_min is not None and requested_end_min is not None and requested_start_min >= requested_end_min:
+            raise RuntimeError(f"预约时间窗口无效: {requested_start_hhmm}-{requested_end_hhmm}")
 
         if space_type != "1":
             period = self._get_study_period(area_id, target_date)
@@ -576,6 +816,10 @@ class HenuLibraryBot:
                     "enddate": enddate,
                 },
                 "confirm_crypto": True,
+                "space_type": space_type,
+                "preferred_time": requested_start_hhmm,
+                "preferred_end_time": requested_end_hhmm,
+                "time_window": self._format_time_window(requested_start_hhmm, requested_end_hhmm),
             }
 
         date_cfg = space_map.get("date") or {}
@@ -586,8 +830,6 @@ class HenuLibraryBot:
             raise RuntimeError(f"区域未返回 {target_date} 的开放时间")
 
         day = str(date_row.get("day") or target_date)
-        preferred_hhmm = self._to_hhmm(preferred_time or "")
-        preferred_min = self._time_to_minutes(preferred_hhmm) if preferred_hhmm else None
         seat_query = {
             "id": str(area_id),
             "day": day,
@@ -610,22 +852,39 @@ class HenuLibraryBot:
                 raise RuntimeError(f"{day} 未返回可预约时段")
             active_slots = [item for item in times if str(item.get("status", "1")) == "1"] or times
             first_slot = active_slots[0]
-            if preferred_min is not None:
-                slot_rows: list[tuple[int, int, dict[str, Any]]] = []
-                for item in active_slots:
-                    start_min = self._time_to_minutes(item.get("start"))
-                    end_min = self._time_to_minutes(item.get("end"))
-                    if start_min is None or end_min is None:
-                        continue
-                    slot_rows.append((start_min, end_min, item))
+            slot_rows: list[tuple[int, int, dict[str, Any]]] = []
+            for item in active_slots:
+                start_min = self._time_to_minutes(item.get("start"))
+                end_min = self._time_to_minutes(item.get("end"))
+                if start_min is None or end_min is None:
+                    continue
+                slot_rows.append((start_min, end_min, item))
+            if has_time_window:
+                matched_slots = [
+                    item
+                    for start_min, end_min, item in slot_rows
+                    if (requested_start_min is None or start_min >= requested_start_min)
+                    and (requested_end_min is None or end_min <= requested_end_min)
+                ]
+                if not matched_slots:
+                    available = [
+                        f"{self._minutes_to_hhmm(start)}-{self._minutes_to_hhmm(end)}"
+                        for start, end, _ in slot_rows
+                    ]
+                    raise RuntimeError(
+                        f"没有满足时间窗口 {self._format_time_window(requested_start_hhmm, requested_end_hhmm)} 的可预约时段"
+                        + (f"，可选时段: {', '.join(available)}" if available else "")
+                    )
+                first_slot = matched_slots[0]
+            elif requested_start_min is not None:
                 if slot_rows:
                     matched = None
                     for start_min, end_min, item in slot_rows:
-                        if start_min <= preferred_min <= end_min:
+                        if start_min <= requested_start_min <= end_min:
                             matched = item
                             break
                     if matched is None:
-                        later = [item for start_min, _, item in slot_rows if start_min >= preferred_min]
+                        later = [item for start_min, _, item in slot_rows if start_min >= requested_start_min]
                         if later:
                             matched = later[0]
                         else:
@@ -641,25 +900,39 @@ class HenuLibraryBot:
             if not times:
                 raise RuntimeError(f"{day} 未返回可预约时点")
             time_value = times[0]
-            if preferred_min is not None:
-                points: list[tuple[int, Any]] = []
-                for item in times:
-                    if isinstance(item, dict):
-                        compare_hhmm = self._to_hhmm(item.get("time") or item.get("start") or item.get("end"))
-                    else:
-                        compare_hhmm = self._to_hhmm(item)
-                    point_min = self._time_to_minutes(compare_hhmm)
-                    if point_min is None:
-                        continue
-                    points.append((point_min, item))
-                if points:
-                    points.sort(key=lambda x: x[0])
-                    exact = [item for point_min, item in points if point_min == preferred_min]
-                    if exact:
-                        time_value = exact[0]
-                    else:
-                        later = [item for point_min, item in points if point_min >= preferred_min]
-                        time_value = later[0] if later else points[-1][1]
+            points: list[tuple[int, Any]] = []
+            for item in times:
+                if isinstance(item, dict):
+                    compare_hhmm = self._to_hhmm(item.get("time") or item.get("start") or item.get("end"))
+                else:
+                    compare_hhmm = self._to_hhmm(item)
+                point_min = self._time_to_minutes(compare_hhmm)
+                if point_min is None:
+                    continue
+                points.append((point_min, item))
+            if points:
+                points.sort(key=lambda x: x[0])
+            if has_time_window:
+                matched_points = [
+                    item
+                    for point_min, item in points
+                    if (requested_start_min is None or point_min >= requested_start_min)
+                    and (requested_end_min is None or point_min <= requested_end_min)
+                ]
+                if not matched_points:
+                    available = [self._minutes_to_hhmm(point_min) for point_min, _ in points]
+                    raise RuntimeError(
+                        f"没有满足时间窗口 {self._format_time_window(requested_start_hhmm, requested_end_hhmm)} 的可预约时点"
+                        + (f"，可选时点: {', '.join(available)}" if available else "")
+                    )
+                time_value = matched_points[0]
+            elif requested_start_min is not None and points:
+                exact = [item for point_min, item in points if point_min == requested_start_min]
+                if exact:
+                    time_value = exact[0]
+                else:
+                    later = [item for point_min, item in points if point_min >= requested_start_min]
+                    time_value = later[0] if later else points[-1][1]
             if isinstance(time_value, dict):
                 time_value = time_value.get("time") or time_value.get("start") or time_value.get("end") or ""
             hhmm = self._to_hhmm(time_value)
@@ -673,15 +946,26 @@ class HenuLibraryBot:
             end_time = self._to_hhmm(date_row.get("def_end_time") or date_row.get("end_time"))
             if not start_time or not end_time:
                 raise RuntimeError("预约时间参数缺失")
-            if preferred_min is not None:
-                start_min = self._time_to_minutes(start_time)
-                end_min = self._time_to_minutes(end_time)
-                if start_min is not None and end_min is not None:
-                    if preferred_min < start_min or preferred_min >= end_min:
-                        raise RuntimeError(
-                            f"期望时间 {preferred_hhmm} 不在可预约区间 {start_time}-{end_time}"
-                        )
-                    start_time = self._minutes_to_hhmm(preferred_min)
+            start_min = self._time_to_minutes(start_time)
+            end_min = self._time_to_minutes(end_time)
+            if start_min is None or end_min is None:
+                raise RuntimeError("预约时间参数无效")
+            if has_time_window:
+                selected_start = max(start_min, requested_start_min if requested_start_min is not None else start_min)
+                selected_end = min(end_min, requested_end_min if requested_end_min is not None else end_min)
+                if selected_start >= selected_end:
+                    raise RuntimeError(
+                        f"期望时间窗口 {self._format_time_window(requested_start_hhmm, requested_end_hhmm)} "
+                        f"不在可预约区间 {start_time}-{end_time}"
+                    )
+                start_time = self._minutes_to_hhmm(selected_start)
+                end_time = self._minutes_to_hhmm(selected_end)
+            elif requested_start_min is not None:
+                if requested_start_min < start_min or requested_start_min >= end_min:
+                    raise RuntimeError(
+                        f"期望时间 {requested_start_hhmm} 不在可预约区间 {start_time}-{end_time}"
+                    )
+                start_time = self._minutes_to_hhmm(requested_start_min)
             seat_query["start_time"] = start_time
             seat_query["end_time"] = end_time
             confirm_payload["start_time"] = start_time
@@ -708,7 +992,9 @@ class HenuLibraryBot:
             "confirm_crypto": True,
             "reserve_type": reserve_type,
             "space_type": space_type,
-            "preferred_time": preferred_hhmm,
+            "preferred_time": requested_start_hhmm,
+            "preferred_end_time": requested_end_hhmm,
+            "time_window": self._format_time_window(requested_start_hhmm, requested_end_hhmm),
         }
 
     def _query_seats(self, seat_query_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -806,6 +1092,104 @@ class HenuLibraryBot:
             }
         except Exception as exc:
             return {"success": False, "msg": f"查询当前预约异常: {exc}", "appointments": []}
+
+    def _record_matches_reservation(
+        self,
+        record: dict[str, Any],
+        *,
+        area_name: str,
+        seat_no: str,
+        target_date: str,
+    ) -> bool:
+        expected_seat = self._normalize_seat_no(seat_no)
+        seat_values = [
+            record.get("no"),
+            record.get("name"),
+            record.get("spaceName"),
+            record.get("seatName"),
+            record.get("seat_no"),
+        ]
+        seat_matched = False
+        for raw in seat_values:
+            text = str(raw or "").strip()
+            if not text:
+                continue
+            if text == str(seat_no).strip() or self._normalize_seat_no(text) == expected_seat:
+                seat_matched = True
+                break
+        if not seat_matched:
+            return False
+
+        expected_area = self._normalize_area_name(area_name)
+        area_values = [
+            record.get("areaName"),
+            record.get("nameMerge"),
+            record.get("area_name"),
+            record.get("roomName"),
+            record.get("libraryName"),
+        ]
+        area_texts = [self._normalize_area_name(item) for item in area_values if str(item or "").strip()]
+        area_matched = not expected_area or not area_texts
+        if not area_matched:
+            area_matched = any(expected_area in item or item in expected_area for item in area_texts if item)
+        if not area_matched:
+            return False
+
+        date_values = [
+            record.get("day"),
+            record.get("date"),
+            record.get("bookDate"),
+            record.get("showTime"),
+            record.get("examTime"),
+            record.get("time"),
+        ]
+        date_texts = [str(item or "") for item in date_values if str(item or "").strip()]
+        if not date_texts:
+            return True
+        target_mmdd = target_date[5:] if len(target_date) >= 10 else target_date
+        return any(target_date in item or target_mmdd in item for item in date_texts)
+
+    def _verify_seat_reservation(
+        self,
+        *,
+        area_name: str,
+        seat_no: str,
+        target_date: str,
+        attempts: int = 3,
+    ) -> dict[str, Any]:
+        last_result: dict[str, Any] = {}
+        for index in range(max(1, attempts)):
+            current = self.list_current_appointments()
+            last_result = current
+            if current.get("success"):
+                appointments = current.get("appointments") or []
+                for record in appointments:
+                    if isinstance(record, dict) and self._record_matches_reservation(
+                        record,
+                        area_name=area_name,
+                        seat_no=seat_no,
+                        target_date=target_date,
+                    ):
+                        return {
+                            "verified": True,
+                            "msg": "已通过当前预约反查确认",
+                            "record": record,
+                            "summary": self._current_record_summary(record),
+                        }
+            if index < max(1, attempts) - 1:
+                time.sleep(0.5)
+
+        appointments = last_result.get("appointments") if isinstance(last_result, dict) else []
+        summaries = [
+            self._current_record_summary(item)
+            for item in (appointments or [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "verified": False,
+            "msg": last_result.get("msg", "未在当前预约中找到匹配记录") if isinstance(last_result, dict) else "未在当前预约中找到匹配记录",
+            "appointments": summaries,
+        }
 
     def sign_in_current_record(
         self,
@@ -1374,12 +1758,164 @@ class HenuLibraryBot:
         except Exception as exc:
             return {"success": False, "msg": f"取消预约异常: {exc}"}
 
+    @staticmethod
+    def _parse_retry_until(retry_until: str) -> dt.datetime | None:
+        text = str(retry_until or "").strip()
+        if not text:
+            return None
+
+        now = _now_dt()
+        hhmm = HenuLibraryBot._to_hhmm(text)
+        if re.fullmatch(r"\d{2}:\d{2}", hhmm):
+            hour, minute = [int(part) for part in hhmm.split(":")]
+            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = dt.datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            try:
+                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            except Exception:
+                pass
+        return parsed
+
+    @staticmethod
+    def _is_retryable_reserve_error(message: str) -> bool:
+        text = str(message or "")
+        non_retryable_markers = (
+            "格式必须",
+            "区域名称不能为空",
+            "未找到座位号",
+            "没有满足时间窗口",
+            "预约时间窗口无效",
+            "不在可预约区间",
+            "不在实时可预约区域列表",
+            "不在",
+            "内置映射",
+            "请先查询 locations",
+        )
+        return not any(marker in text for marker in non_retryable_markers)
+
+    def _reserve_once(
+        self,
+        location_name: str,
+        seat_no: str,
+        target_date: str,
+        preferred_time: str | None = None,
+        preferred_end_time: str | None = None,
+    ) -> dict[str, Any]:
+        area_id, area_name = self._resolve_area(location_name, target_date)
+        space_map = self._get_space_map(area_id)
+        plan = self._build_reservation_plan(
+            area_id,
+            space_map,
+            target_date,
+            preferred_time=preferred_time,
+            preferred_end_time=preferred_end_time,
+        )
+        seats = self._query_seats(plan["seat_query"])
+        if not seats:
+            return {
+                "success": False,
+                "retryable": True,
+                "msg": f"区域 {area_name} 在 {target_date} 没有可查询座位",
+                "area": {"id": area_id, "name": area_name},
+            }
+
+        target_seat = self._find_target_seat(seats, seat_no)
+        if not target_seat:
+            return {
+                "success": False,
+                "retryable": False,
+                "msg": f"在区域 {area_name} 未找到座位号: {seat_no}",
+                "area": {"id": area_id, "name": area_name},
+            }
+
+        if str(target_seat.get("status")) != "1":
+            return {
+                "success": False,
+                "retryable": True,
+                "msg": f"座位 {target_seat.get('no') or seat_no} 当前不可预约",
+                "area": {"id": area_id, "name": area_name},
+                "seat": {
+                    "id": str(target_seat.get("id") or ""),
+                    "no": str(target_seat.get("no") or target_seat.get("name") or seat_no),
+                    "status": str(target_seat.get("status") or ""),
+                },
+                "applied_time": {
+                    "preferred_time": plan.get("preferred_time", ""),
+                    "preferred_end_time": plan.get("preferred_end_time", ""),
+                    "time_window": plan.get("time_window", ""),
+                    "start_time": (plan.get("seat_query") or {}).get("start_time", ""),
+                    "end_time": (plan.get("seat_query") or {}).get("end_time", ""),
+                    "reserve_type": plan.get("reserve_type", ""),
+                    "space_type": plan.get("space_type", ""),
+                },
+            }
+
+        confirm_payload = dict(plan["confirm_payload"])
+        confirm_payload["seat_id"] = str(target_seat.get("id"))
+        confirm_resp = self._post_json(
+            plan["confirm_path"],
+            confirm_payload,
+            is_crypto=bool(plan.get("confirm_crypto")),
+        )
+        submit_success = confirm_resp.get("code") == 0
+        response = {
+            "success": submit_success,
+            "submit_success": submit_success,
+            "retryable": not submit_success,
+            "msg": self._resp_msg(confirm_resp),
+            "code": confirm_resp.get("code"),
+            "area": {"id": area_id, "name": area_name},
+            "seat": {
+                "id": str(target_seat.get("id") or ""),
+                "no": str(target_seat.get("no") or target_seat.get("name") or seat_no),
+                "status": str(target_seat.get("status") or ""),
+            },
+            "applied_time": {
+                "preferred_time": plan.get("preferred_time", ""),
+                "preferred_end_time": plan.get("preferred_end_time", ""),
+                "time_window": plan.get("time_window", ""),
+                "start_time": (plan.get("seat_query") or {}).get("start_time", ""),
+                "end_time": (plan.get("seat_query") or {}).get("end_time", ""),
+                "reserve_type": plan.get("reserve_type", ""),
+                "space_type": plan.get("space_type", ""),
+            },
+            "submit_response": {
+                "code": confirm_resp.get("code"),
+                "msg": self._resp_msg(confirm_resp),
+                "data": confirm_resp.get("data") or {},
+            },
+        }
+        if not submit_success:
+            return response
+
+        verification = self._verify_seat_reservation(
+            area_name=area_name,
+            seat_no=str(target_seat.get("no") or target_seat.get("name") or seat_no),
+            target_date=target_date,
+        )
+        response["verification"] = verification
+        if not verification.get("verified"):
+            response["success"] = False
+            response["retryable"] = False
+            response["msg"] = f"提交接口返回成功，但反查当前预约未确认: {verification.get('msg', '')}"
+        return response
+
     def reserve(
         self,
         location_name: str,
         seat_no: str,
         target_date: str,
         preferred_time: str | None = None,
+        preferred_end_time: str | None = None,
+        retry_until: str | None = None,
+        retry_interval_seconds: int = 2,
+        max_attempts: int = 1,
     ) -> dict[str, Any]:
         try:
             dt.date.fromisoformat(target_date)
@@ -1390,42 +1926,65 @@ class HenuLibraryBot:
         if not self._is_token_valid() and not self.login():
             return self._login_failed_result()
 
+        retry_deadline = self._parse_retry_until(str(retry_until or ""))
+        if str(retry_until or "").strip() and retry_deadline is None:
+            return {"success": False, "msg": "retry_until 格式必须为 HH:MM 或 ISO 日期时间"}
+
         try:
-            area_id, area_name = self._resolve_area(location_name, target_date)
-            space_map = self._get_space_map(area_id)
-            plan = self._build_reservation_plan(area_id, space_map, target_date, preferred_time=preferred_time)
-            seats = self._query_seats(plan["seat_query"])
-            if not seats:
-                return {"success": False, "msg": f"区域 {area_name} 在 {target_date} 没有可查询座位"}
+            interval = max(1, min(60, int(retry_interval_seconds)))
+        except (TypeError, ValueError):
+            interval = 2
+        try:
+            attempts_limit = max(1, min(120, int(max_attempts)))
+        except (TypeError, ValueError):
+            attempts_limit = 1
+        if retry_deadline is not None and attempts_limit <= 1:
+            attempts_limit = 120
 
-            target_seat = self._find_target_seat(seats, seat_no)
-            if not target_seat:
-                return {"success": False, "msg": f"在区域 {area_name} 未找到座位号: {seat_no}"}
-
-            if str(target_seat.get("status")) != "1":
-                return {
+        last_result: dict[str, Any] = {}
+        attempts = 0
+        while attempts < attempts_limit:
+            if retry_deadline is not None and _now_dt() > retry_deadline:
+                break
+            attempts += 1
+            try:
+                result = self._reserve_once(
+                    location_name=location_name,
+                    seat_no=seat_no,
+                    target_date=target_date,
+                    preferred_time=preferred_time,
+                    preferred_end_time=preferred_end_time,
+                )
+            except Exception as exc:
+                message = f"预约流程异常: {exc}"
+                result = {
                     "success": False,
-                    "msg": f"座位 {target_seat.get('no') or seat_no} 当前不可预约",
+                    "retryable": self._is_retryable_reserve_error(message),
+                    "msg": message,
                 }
 
-            confirm_payload = dict(plan["confirm_payload"])
-            confirm_payload["seat_id"] = str(target_seat.get("id"))
-            confirm_resp = self._post_json(
-                plan["confirm_path"],
-                confirm_payload,
-                is_crypto=bool(plan.get("confirm_crypto")),
-            )
-            success = confirm_resp.get("code") == 0
-            return {
-                "success": success,
-                "msg": self._resp_msg(confirm_resp),
-                "applied_time": {
-                    "preferred_time": plan.get("preferred_time", ""),
-                    "start_time": (plan.get("seat_query") or {}).get("start_time", ""),
-                    "end_time": (plan.get("seat_query") or {}).get("end_time", ""),
-                    "reserve_type": plan.get("reserve_type", ""),
-                    "space_type": plan.get("space_type", ""),
-                },
-            }
-        except Exception as exc:
-            return {"success": False, "msg": f"预约流程异常: {exc}"}
+            result["attempt"] = attempts
+            result["max_attempts"] = attempts_limit
+            if retry_deadline is not None:
+                result["retry_until"] = retry_deadline.isoformat()
+            last_result = result
+
+            if result.get("success") or not result.get("retryable"):
+                return result
+            if attempts >= attempts_limit:
+                break
+            if retry_deadline is not None:
+                remaining = (retry_deadline - _now_dt()).total_seconds()
+                if remaining <= 0:
+                    break
+                time.sleep(max(0.0, min(float(interval), remaining)))
+            else:
+                time.sleep(float(interval))
+
+        if last_result:
+            last_result["success"] = False
+            last_result["attempts"] = attempts
+            if retry_deadline is not None and _now_dt() > retry_deadline:
+                last_result["msg"] = f"{last_result.get('msg', '预约失败')}；已到达 retry_until，停止抢约"
+            return last_result
+        return {"success": False, "msg": "未执行预约尝试"}
