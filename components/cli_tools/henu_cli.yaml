@@ -17,7 +17,7 @@ spec:
         description: CLI 风格命令字符串，例如 help、account status、schedule now、library current
     required:
       - command
-  llm_prompt: "统一入口，只传 `command`。渐进式披露：先用 `help` 看一级命令，再用 `help <topic>` 看更窄主题；不确定参数时不要一次展开全部。常用命令：`account status`、`account set --student-id ... --password ...`、`schedule now`、`schedule day --date 2026-03-30`、`library current`、`library reserve --location ... --seat-no ...`、`seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`。参数值包含空格时要加引号。所有真实写操作只以返回 `success=true` 为准。"
+  llm_prompt: "统一入口，只传 `command`。渐进式披露：先用 `help` 看一级命令，再用 `help <topic>` 看更窄主题；不确定参数时不要一次展开全部。常用命令：`account status`、`account set --student-id ... --password ...`、`schedule now`、`schedule day --date 2026-03-30`、`library current`、`library locations --date 2026-03-30`、`library reserve --location ... --seat-no ... --date 2026-03-30 --time 08:00 --end-time 12:00`、`library reserve --location ... --seat-no ... --retry-until 08:05 --max-attempts 30`、`seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`。参数值包含空格时要加引号。所有真实写操作只以返回 `success=true` 为准。"
 execution:
   python:
     path: henu_cli.py

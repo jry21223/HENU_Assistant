@@ -595,10 +595,12 @@ class HenuPluginService:
         view = _text(params.get("view")) or "current"
         record_type = _text(params.get("record_type")) or "1"
         page = _int(params.get("page"), 1)
+        limit = _int(params.get("limit"), 20)
+        target_date = _text(params.get("target_date"))
 
         # Try cache for read operations
         if identity:
-            cache_key = f"user:{identity.storage_key}:library:{view}:{record_type}:{page}"
+            cache_key = f"user:{identity.storage_key}:library:{view}:{record_type}:{page}:{limit}:{target_date}"
             cached = LIBRARY_QUERY_CACHE.get(cache_key)
             if cached is not None:
                 return cached
@@ -607,7 +609,8 @@ class HenuPluginService:
             view=view,
             record_type=record_type,
             page=page,
-            limit=_int(params.get("limit"), 20),
+            limit=limit,
+            target_date=target_date,
         )
 
         # Cache successful queries
@@ -622,6 +625,10 @@ class HenuPluginService:
             seat_no=_text(params.get("seat_no")),
             target_date=_text(params.get("target_date")),
             preferred_time=_text(params.get("preferred_time")) or "08:00",
+            preferred_end_time=_text(params.get("preferred_end_time")),
+            retry_until=_text(params.get("retry_until")),
+            retry_interval_seconds=_int(params.get("retry_interval_seconds"), 2),
+            max_attempts=_int(params.get("max_attempts"), 1),
         )
 
     def _library_auto_signin(self, params: dict[str, Any]) -> dict[str, Any]:

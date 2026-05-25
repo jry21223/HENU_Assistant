@@ -169,10 +169,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "topic": normalized,
             "summary": "图书馆查询、预约、签到、取消。",
             "commands": [
-                "library locations",
+                "library locations [--date YYYY-MM-DD]",
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
-                "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM]",
+                "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
@@ -496,7 +496,10 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             raw=raw,
             argv=argv,
             resolved_tool="library_query",
-            params={"view": "locations"},
+            params={
+                "view": "locations",
+                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
+            },
             action="library locations",
             should_preload_runtime_context=True,
         )
@@ -530,6 +533,12 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             should_preload_runtime_context=True,
         )
     if sub in {"reserve", "book"}:
+        retry_interval, error = _int_option(options, "retry_interval_seconds", 2)
+        if error:
+            return _error_spec(raw, error, help_topic="library")
+        max_attempts, error = _int_option(options, "max_attempts", 1)
+        if error:
+            return _error_spec(raw, error, help_topic="library")
         return CliCommandSpec(
             raw=raw,
             argv=argv,
@@ -539,6 +548,10 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 "seat_no": _string_option(options, "seat_no"),
                 "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
                 "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
+                "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+                "retry_until": _string_option(options, "retry_until"),
+                "retry_interval_seconds": retry_interval,
+                "max_attempts": max_attempts,
             },
             action=f"library {sub}",
             should_preload_runtime_context=True,
