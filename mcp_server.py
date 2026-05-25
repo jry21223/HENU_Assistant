@@ -43,6 +43,7 @@ LIBRARY_CORE_EXPECTED_FILE = BASE_DIR / "library_core" / "henu_core.py"
 LIBRARY_CORE_DIR = LIBRARY_CORE_EXPECTED_FILE.parent if LIBRARY_CORE_EXPECTED_FILE.exists() else None
 
 LIBRARY_COOKIE_FILE = BASE_DIR / "henu_library_cookies.json"
+CAS_COOKIE_FILE = BASE_DIR / "henu_cas_cookies.json"
 SEMINAR_SIGNIN_TASK_FILE = BASE_DIR / "seminar_signin_tasks.json"
 SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS = 30
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -1533,6 +1534,16 @@ def _save_library_cookies(cookies: dict[str, Any]) -> None:
     save_json(LIBRARY_COOKIE_FILE, cookies)
 
 
+def _load_cas_cookies() -> dict[str, Any]:
+    """Load shared CAS cookies (CASTGC for login reuse)."""
+    return load_json(CAS_COOKIE_FILE)
+
+
+def _save_cas_cookies(cookies: dict[str, Any]) -> None:
+    """Save shared CAS cookies for reuse across all systems."""
+    save_json(CAS_COOKIE_FILE, cookies)
+
+
 def _set_library_login_error(message: str) -> None:
     global _LAST_LIBRARY_LOGIN_ERROR
     _LAST_LIBRARY_LOGIN_ERROR = str(message or "").strip()
@@ -1556,7 +1567,8 @@ def _build_library_bot(student_id: str, password: str):
 
     _set_library_login_error("")
     stored = _load_library_cookies() or {}
-    bot = HenuLibraryBot(student_id, password, stored or None)  # type: ignore
+    cas_cookies = _load_cas_cookies()
+    bot = HenuLibraryBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
 
     # 自动从课程表 cookie 文件注入 CASTGC，实现免密复用
     # 始终用课程表的 CASTGC 覆盖（不因 library_cookies 里已有旧值而跳过）
@@ -1567,16 +1579,18 @@ def _build_library_bot(student_id: str, password: str):
 
     if bot.login():
         _save_library_cookies(bot.get_cookies())
+        _save_cas_cookies(bot.get_cas_cookies())
         _set_library_login_error("")
         return bot
 
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
-        fresh_bot = HenuLibraryBot(student_id, password, None)  # type: ignore
+        fresh_bot = HenuLibraryBot(student_id, password, None, cas_cookies or None)  # type: ignore
         if castgc:
             fresh_bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
+            _save_cas_cookies(fresh_bot.get_cas_cookies())
             _set_library_login_error("")
             return fresh_bot
         fresh_error = str(getattr(fresh_bot, "get_last_error", lambda: "")() or "").strip()
@@ -1972,20 +1986,49 @@ def list_output_files(limit: int = 20) -> list[dict[str, Any]]:
     ]
 
 
-def _library_locations_impl() -> dict[str, Any]:
+def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     """
     【必须调用】查看图书馆区域列表 - 获取所有可预约的图书馆区域
 
-    功能：返回图书馆所有区域的名称和ID
+    功能：优先返回指定日期的实时可预约区域名称和ID，账号不可用时返回内置兜底列表
 
     重要：不要编造区域信息，必须调用此工具获取准确的区域列表。
     """
     if HenuLibraryBot is None:
         return {"success": False, "msg": f"图书馆核心模块不可用: {LIBRARY_CORE_EXPECTED_FILE}", "locations": []}
-    return {"success": True, "locations": [
-        {"location": name, "area_id": str(area_id)} 
-        for name, area_id in HenuLibraryBot.LOCATIONS.items()
-    ]}
+
+    target_day = str(target_date or "").strip()
+    if not target_day:
+        target_day = (_now_dt().date() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if sid and pwd:
+        bot = _build_library_bot(sid, pwd)
+        if not bot:
+            result = _library_login_failed(
+                {
+                    "date": target_day,
+                    "locations": HenuLibraryBot.static_locations(),
+                    "source": "static_fallback",
+                    "is_live": False,
+                }
+            )
+            return result
+        result = bot.list_locations(target_day)
+        _save_library_cookies(bot.get_cookies())
+        if hasattr(bot, "get_cas_cookies"):
+            _save_cas_cookies(bot.get_cas_cookies())
+        return result
+
+    return {
+        "success": True,
+        "msg": "未绑定账号，返回内置兜底区域；绑定后可获取实时可预约区域",
+        "date": target_day,
+        "locations": HenuLibraryBot.static_locations(),
+        "source": "static_fallback",
+        "is_live": False,
+    }
 
 
 def _library_reserve_impl(
@@ -1993,6 +2036,10 @@ def _library_reserve_impl(
     seat_no: str = "",
     target_date: str = "",
     preferred_time: str = "08:00",
+    preferred_end_time: str = "",
+    retry_until: str = "",
+    retry_interval_seconds: int = 2,
+    max_attempts: int = 1,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2025,12 +2072,22 @@ def _library_reserve_impl(
     if not bot:
         return _library_login_failed()
 
-    result = bot.reserve(target_location, target_seat, target_date, preferred_time=str(preferred_time or "08:00"))
+    result = bot.reserve(
+        target_location,
+        target_seat,
+        target_date,
+        preferred_time=str(preferred_time or "08:00"),
+        preferred_end_time=str(preferred_end_time or ""),
+        retry_until=str(retry_until or ""),
+        retry_interval_seconds=retry_interval_seconds,
+        max_attempts=max_attempts,
+    )
     _save_library_cookies(bot.get_cookies())
+    if hasattr(bot, "get_cas_cookies"):
+        _save_cas_cookies(bot.get_cas_cookies())
     
-    response = {"success": result.get("success"), "msg": result.get("msg", ""), "date": target_date}
-    if isinstance(result, dict) and "applied_time" in result:
-        response["applied_time"] = result.get("applied_time")
+    response = dict(result) if isinstance(result, dict) else {"success": False, "msg": "图书馆预约返回异常"}
+    response.setdefault("date", target_date)
     return response
 
 
@@ -2648,12 +2705,13 @@ def library_query(
     record_type: str = "1",
     page: int = 1,
     limit: int = 20,
+    target_date: str = "",
 ) -> dict[str, Any]:
     """
     统一查询图书馆信息。
 
     view:
-    - locations: 图书馆区域列表
+    - locations: 图书馆区域列表（可传 target_date 获取指定日期实时可预约区域）
     - current: 当前预约
     - records: 历史预约记录
 
@@ -2664,7 +2722,7 @@ def library_query(
     """
     normalized_view = str(view or "current").strip().lower()
     if normalized_view == "locations":
-        return _library_locations_impl()
+        return _library_locations_impl(target_date=target_date)
     if normalized_view == "current":
         return _library_current_impl()
     if normalized_view == "records":
@@ -2678,6 +2736,10 @@ def library_reserve(
     seat_no: str = "",
     target_date: str = "",
     preferred_time: str = "08:00",
+    preferred_end_time: str = "",
+    retry_until: str = "",
+    retry_interval_seconds: int = 2,
+    max_attempts: int = 1,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2692,7 +2754,11 @@ def library_reserve(
     - location: 图书馆区域名称（如"一楼东"）
     - seat_no: 座位号（如"001"）
     - target_date: 预约日期（格式：YYYY-MM-DD，默认明天）
-    - preferred_time: 首选时间（格式：HH:MM，默认08:00）
+    - preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）
+    - preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）
+    - retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）
+    - retry_interval_seconds: 抢约重试间隔秒数（1-60）
+    - max_attempts: 最大尝试次数（1-120）
     
     ⚠️ 严禁编造预约结果！
     - 不要说"预约成功"除非此工具返回 success: true
@@ -2705,6 +2771,10 @@ def library_reserve(
         seat_no=seat_no,
         target_date=target_date,
         preferred_time=preferred_time,
+        preferred_end_time=preferred_end_time,
+        retry_until=retry_until,
+        retry_interval_seconds=retry_interval_seconds,
+        max_attempts=max_attempts,
     )
 
 

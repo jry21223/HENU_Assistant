@@ -61,12 +61,17 @@ def build_parser() -> argparse.ArgumentParser:
     library_query_parser.add_argument("--record_type", default="1", help="记录类型")
     library_query_parser.add_argument("--page", type=int, default=1, help="页码")
     library_query_parser.add_argument("--limit", type=int, default=20, help="每页数量")
+    library_query_parser.add_argument("--target_date", "--date", default="", help="日期 YYYY-MM-DD，view=locations 时用于实时区域")
 
     library_reserve_parser = subparsers.add_parser("library_reserve", help="预约图书馆座位")
     library_reserve_parser.add_argument("--location", default="", help="区域名")
     library_reserve_parser.add_argument("--seat_no", default="", help="座位号")
     library_reserve_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD")
     library_reserve_parser.add_argument("--preferred_time", default="08:00", help="首选时间 HH:MM")
+    library_reserve_parser.add_argument("--preferred_end_time", default="", help="最晚结束时间 HH:MM，用于限制预约时间窗口")
+    library_reserve_parser.add_argument("--retry_until", default="", help="自动抢约截止时间 HH:MM 或 ISO 日期时间")
+    library_reserve_parser.add_argument("--retry_interval_seconds", type=int, default=2, help="抢约重试间隔秒数")
+    library_reserve_parser.add_argument("--max_attempts", type=int, default=1, help="最大尝试次数")
 
     library_signin_parser = subparsers.add_parser("library_auto_signin", help="图书馆自动签到")
     library_signin_parser.add_argument("--record_id", default="", help="指定当前预约记录 ID")
@@ -184,6 +189,7 @@ def main() -> None:
                 record_type=args.record_type,
                 page=args.page,
                 limit=args.limit,
+                target_date=args.target_date,
             )
         elif args.command == "library_reserve":
             result = library_reserve(
@@ -191,6 +197,10 @@ def main() -> None:
                 seat_no=args.seat_no,
                 target_date=args.target_date,
                 preferred_time=args.preferred_time,
+                preferred_end_time=args.preferred_end_time,
+                retry_until=args.retry_until,
+                retry_interval_seconds=args.retry_interval_seconds,
+                max_attempts=args.max_attempts,
             )
         elif args.command == "library_auto_signin":
             result = library_auto_signin(record_id=args.record_id)
