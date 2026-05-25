@@ -2053,20 +2053,58 @@ def list_output_files(limit: int = 20) -> list[dict[str, Any]]:
     ]
 
 
-def _library_locations_impl() -> dict[str, Any]:
+def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     """
     【必须调用】查看图书馆区域列表 - 获取所有可预约的图书馆区域
 
-    功能：返回图书馆所有区域的名称和ID
+    功能：调用真实 /v4/space/pick 返回目标日期图书馆所有区域的名称和ID
 
     重要：不要编造区域信息，必须调用此工具获取准确的区域列表。
     """
     if HenuLibraryBot is None:
         return {"success": False, "msg": f"图书馆核心模块不可用: {LIBRARY_CORE_EXPECTED_FILE}", "locations": []}
-    return {"success": True, "locations": [
-        {"location": name, "area_id": str(area_id)} 
-        for name, area_id in HenuLibraryBot.LOCATIONS.items()
-    ]}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "locations": []}
+
+    bot = _build_library_bot(sid, pwd)
+    if not bot:
+        return _library_login_failed({"locations": []})
+
+    result = bot.list_library_locations(target_date=str(target_date or "").strip())
+    _save_library_cookies(bot.get_cookies())
+    return result
+
+
+def _library_seats_impl(area_id: str = "", target_date: str = "", preferred_time: str = "08:00") -> dict[str, Any]:
+    """
+    查询某个图书馆区域的真实座位列表和座位图原始数据。
+    """
+    if HenuLibraryBot is None:
+        return {"success": False, "msg": "图书馆模块不可用", "seats": []}
+
+    area_text = str(area_id or "").strip()
+    if not area_text:
+        return {"success": False, "msg": "area_id 不能为空", "seats": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "seats": []}
+
+    bot = _build_library_bot(sid, pwd)
+    if not bot:
+        return _library_login_failed({"seats": []})
+
+    result = bot.list_library_seats(
+        area_id=area_text,
+        target_date=str(target_date or "").strip(),
+        preferred_time=str(preferred_time or "08:00"),
+    )
+    _save_library_cookies(bot.get_cookies())
+    return result
 
 
 def _library_reserve_impl(
@@ -2726,6 +2764,9 @@ def sync_schedule(
 @mcp.tool()
 def library_query(
     view: str = "current",
+    target_date: str = "",
+    area_id: str = "",
+    preferred_time: str = "08:00",
     record_type: str = "1",
     page: int = 1,
     limit: int = 20,
@@ -2734,23 +2775,26 @@ def library_query(
     统一查询图书馆信息。
 
     view:
-    - locations: 图书馆区域列表
+    - locations: 目标日期真实图书馆区域列表，来自 /v4/space/pick
+    - seats: 某区域真实座位列表和座位图原始数据，来自 /v4/Space/map + /v4/Space/seat
     - current: 当前预约
     - records: 历史预约记录
 
     规则：
     1) 查询 `current` 或 `records` 前必须先调用 `system_status` 确认当前日期时间。
-    2) 预约前应先查询 `locations`，不得凭记忆列举区域。
+    2) 预约前应先查询 `locations` 和 `seats`，不得凭记忆列举区域/座位。
     3) 回复仅可基于本次返回结果，不得编造。
     """
     normalized_view = str(view or "current").strip().lower()
     if normalized_view == "locations":
-        return _library_locations_impl()
+        return _library_locations_impl(target_date=target_date)
+    if normalized_view == "seats":
+        return _library_seats_impl(area_id=area_id, target_date=target_date, preferred_time=preferred_time)
     if normalized_view == "current":
         return _library_current_impl()
     if normalized_view == "records":
         return _library_records_impl(record_type=record_type, page=page, limit=limit)
-    return {"success": False, "msg": "view 仅支持 locations/current/records"}
+    return {"success": False, "msg": "view 仅支持 locations/seats/current/records"}
 
 
 @mcp.tool()
@@ -2765,7 +2809,7 @@ def library_reserve(
     
     【执行协议（必须遵守）】
     1) 禁止在未调用工具时说“已预约成功/已帮你预约”。
-    2) 回复必须包含本次返回的 success/msg/date（以及 applied_time 如有）。
+    2) 回复必须包含本次返回的 success/msg/date（以及 area/seat/applied_time/current_appointments 如有）。
     3) 调用失败时必须原样转述失败原因，不得改写为成功。
     
     功能：向图书馆系统提交座位预约请求

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import datetime as dt
 import json
@@ -6,6 +8,7 @@ import random
 import re
 from html import unescape
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
 from Crypto.Cipher import AES
@@ -199,6 +202,18 @@ class HenuLibraryBot:
         return match.group(1) if match else ""
 
     @staticmethod
+    def _redact_ticket_url(url: str) -> str:
+        try:
+            parts = urlsplit(str(url or ""))
+            query = urlencode(
+                [(key, "[redacted]" if key in {"cas", "ticket"} else value) for key, value in parse_qsl(parts.query, keep_blank_values=True)]
+            )
+            fragment = re.sub(r"((?:cas|ticket)=)[^&#]+", r"\1[redacted]", parts.fragment)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, query, fragment))
+        except Exception:
+            return re.sub(r"((?:cas|ticket)=)[^&#]+", r"\1[redacted]", str(url or ""))
+
+    @staticmethod
     def _extract_cas_login_error(html_text: str) -> str:
         text = str(html_text or "")
         if not text:
@@ -300,6 +315,51 @@ class HenuLibraryBot:
         self._set_last_error("")
         return True
 
+    def _open_cas_flow(
+        self,
+        url: str,
+        method: str = "GET",
+        **kwargs: Any,
+    ) -> tuple[str, requests.Response]:
+        """Follow CAS redirects manually so ticket/cas in Location is not missed."""
+        current_url = str(url)
+        current_method = method.upper()
+        request_kwargs = dict(kwargs)
+        response: requests.Response | None = None
+
+        for _ in range(10):
+            response = self.session.request(
+                current_method,
+                current_url,
+                allow_redirects=False,
+                timeout=int(request_kwargs.pop("timeout", 25)),
+                **request_kwargs,
+            )
+            direct_ticket = self._extract_cas_ticket(response.url)
+            if direct_ticket:
+                return direct_ticket, response
+
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                return "", response
+
+            location = response.headers.get("Location") or response.headers.get("location") or ""
+            if not location:
+                return "", response
+            next_url = urljoin(current_url, location)
+            redirect_ticket = self._extract_cas_ticket(next_url)
+            if redirect_ticket:
+                return redirect_ticket, response
+
+            current_url = next_url
+            if response.status_code == 303 or (response.status_code == 302 and current_method == "POST"):
+                current_method = "GET"
+                request_kwargs.pop("data", None)
+                request_kwargs.pop("json", None)
+
+        if response is None:
+            raise RuntimeError("CAS 请求未执行")
+        return "", response
+
     def _is_token_valid(self) -> bool:
         if not self.token:
             return False
@@ -332,8 +392,7 @@ class HenuLibraryBot:
         try:
             # 2) 先尝试 TGT 免密跳转
             try:
-                resp = self.session.get(cas_auth_url, allow_redirects=True, timeout=25)
-                cas_ticket = self._extract_cas_ticket(resp.url)
+                cas_ticket, resp = self._open_cas_flow(cas_auth_url, method="GET")
                 if cas_ticket and self._exchange_cas_ticket(cas_ticket):
                     return True
             except Exception as exc:
@@ -376,10 +435,17 @@ class HenuLibraryBot:
                 login_resp = self.session.post(
                     login_page.url,
                     data=form_data,
-                    allow_redirects=True,
                     timeout=25,
+                    allow_redirects=False,
                 )
                 cas_ticket = self._extract_cas_ticket(login_resp.url)
+                if not cas_ticket and login_resp.status_code in {301, 302, 303, 307, 308}:
+                    location = login_resp.headers.get("Location") or login_resp.headers.get("location") or ""
+                    if location:
+                        next_url = urljoin(login_page.url, location)
+                        cas_ticket = self._extract_cas_ticket(next_url)
+                        if not cas_ticket:
+                            cas_ticket, login_resp = self._open_cas_flow(next_url, method="GET")
                 if not cas_ticket:
                     page_error = self._extract_cas_login_error(login_resp.text)
                     if page_error:
@@ -389,7 +455,7 @@ class HenuLibraryBot:
                     else:
                         # 提供更详细的错误信息，包括最终 URL
                         final_url = str(login_resp.url or "")
-                        url_hint = f"，最终 URL: {final_url[:200]}" if final_url else ""
+                        url_hint = f"，最终 URL: {self._redact_ticket_url(final_url)[:200]}" if final_url else ""
                         self._set_last_error(f"CAS 登录未返回 ticket{url_hint}")
                     return False
                 return self._exchange_cas_ticket(cas_ticket)
@@ -505,11 +571,156 @@ class HenuLibraryBot:
             return "signin"
         return ""
 
+    @staticmethod
+    def _area_display_name(area: dict[str, Any]) -> str:
+        return str(area.get("nameMerge") or area.get("name_merge") or area.get("name") or area.get("enname") or "").strip()
+
+    @staticmethod
+    def _collect_area_rows(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, list):
+            rows: list[dict[str, Any]] = []
+            for item in value:
+                rows.extend(HenuLibraryBot._collect_area_rows(item))
+            return rows
+        if not isinstance(value, dict):
+            return []
+
+        rows = []
+        if value.get("id") and (value.get("name") or value.get("nameMerge") or value.get("name_merge") or value.get("enname")):
+            rows.append(value)
+        for key in ("area", "list", "children", "child", "data"):
+            if key in value:
+                rows.extend(HenuLibraryBot._collect_area_rows(value.get(key)))
+
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for row in rows:
+            area_id = str(row.get("id") or "").strip()
+            if not area_id or area_id in seen:
+                continue
+            seen.add(area_id)
+            unique.append(row)
+        return unique
+
+    @staticmethod
+    def _normalize_area_row(area: dict[str, Any], premises: list[dict[str, Any]], storey: list[dict[str, Any]]) -> dict[str, Any]:
+        premise_by_id = {
+            str(item.get("id") or ""): str(item.get("name") or item.get("enname") or "").strip()
+            for item in premises
+            if isinstance(item, dict)
+        }
+        storey_by_id = {
+            str(item.get("id") or ""): item
+            for item in storey
+            if isinstance(item, dict)
+        }
+        area_name = HenuLibraryBot._area_display_name(area)
+        storey_row = storey_by_id.get(str(area.get("parentId") or area.get("parent_id") or ""))
+        if not isinstance(storey_row, dict):
+            storey_row = {}
+        name_parts = [part.strip() for part in re.split(r"[-/｜|>]", area_name) if part.strip()]
+        campus = (
+            premise_by_id.get(str(area.get("topId") or area.get("top_id") or ""))
+            or premise_by_id.get(str(storey_row.get("parentId") or storey_row.get("topId") or ""))
+            or (name_parts[0] if name_parts else "")
+        )
+        floor = str(storey_row.get("name") or area.get("floor") or (name_parts[1] if len(name_parts) > 1 else "") or "").strip()
+        return {
+            "location": area_name,
+            "area_id": str(area.get("id") or "").strip(),
+            "name": area_name,
+            "short_name": str(area.get("name") or area.get("enname") or "").strip(),
+            "campus": campus,
+            "floor": floor,
+            "free_num": area.get("free_num", area.get("freeNum")),
+            "total_num": area.get("total_num", area.get("totalNum")),
+            "raw": area,
+        }
+
+    @staticmethod
+    def _normalize_seat_row(seat: dict[str, Any]) -> dict[str, Any]:
+        status = str(seat.get("status") or "")
+        seat_no = str(seat.get("no") or seat.get("name") or "").strip()
+        in_label = str(seat.get("in_label", "1")) == "1"
+        status_text = str(seat.get("status_name") or seat.get("statusName") or "").strip()
+        if not status_text:
+            if status == "1":
+                status_text = "可预约"
+            elif status == "2":
+                status_text = "已占用"
+            elif status == "3":
+                status_text = "不可用"
+            else:
+                status_text = status or "未知"
+        return {
+            "seat_id": str(seat.get("id") or "").strip(),
+            "seat_no": seat_no,
+            "name": str(seat.get("name") or seat_no).strip(),
+            "status": status,
+            "status_text": status_text,
+            "available": status == "1" and in_label,
+            "in_label": in_label,
+            "layout": {
+                "x": seat.get("point_x"),
+                "y": seat.get("point_y"),
+                "width": seat.get("width"),
+                "height": seat.get("height"),
+            },
+            "raw": seat,
+        }
+
+    @staticmethod
+    def _safe_confirm_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if key in {"seat_id", "segment", "day", "start_time", "end_time", "begdate", "enddate"}
+        }
+
     def _fetch_pick_areas(self, target_date: str) -> list[dict[str, Any]]:
         resp = self._post_json("/v4/space/pick", {"date": target_date})
         if resp.get("code") != 0:
             raise RuntimeError(self._resp_msg(resp, "获取区域列表失败"))
-        return ((resp.get("data") or {}).get("area") or [])
+        data = resp.get("data") or {}
+        if isinstance(data, dict):
+            return self._collect_area_rows(data.get("area") or data)
+        return self._collect_area_rows(data)
+
+    def list_library_locations(self, target_date: str = "") -> dict[str, Any]:
+        if not self._is_token_valid() and not self.login():
+            return self._login_failed_result({"locations": []})
+
+        query_date = str(target_date or "").strip() or _now_dt().strftime("%Y-%m-%d")
+        try:
+            dt.date.fromisoformat(query_date)
+        except ValueError:
+            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "date": query_date, "locations": []}
+
+        try:
+            resp = self._post_json("/v4/space/pick", {"date": query_date})
+            if resp.get("code") != 0:
+                return {"success": False, "msg": self._resp_msg(resp, "获取区域列表失败"), "date": query_date, "locations": []}
+            data = resp.get("data") or {}
+            data_dict = data if isinstance(data, dict) else {}
+            raw_areas = self._collect_area_rows(data_dict.get("area") or data)
+            premises = data_dict.get("premises") if isinstance(data_dict.get("premises"), list) else []
+            storey = data_dict.get("storey") if isinstance(data_dict.get("storey"), list) else []
+            locations = [
+                self._normalize_area_row(area, premises, storey)
+                for area in raw_areas
+                if isinstance(area, dict)
+            ]
+            return {
+                "success": True,
+                "msg": self._resp_msg(resp, "操作成功"),
+                "date": query_date,
+                "locations": locations,
+                "total": len(locations),
+                "premises": premises,
+                "storey": storey,
+            }
+        except Exception as exc:
+            return {"success": False, "msg": f"查询图书馆区域异常: {exc}", "date": query_date, "locations": []}
 
     def _resolve_area(self, location_name: str, target_date: str) -> tuple[str, str]:
         location = str(location_name or "").strip()
@@ -519,19 +730,20 @@ class HenuLibraryBot:
         if location.isdigit():
             return location, location
 
-        if location in self.LOCATIONS:
-            return str(self.LOCATIONS[location]), location
-
         areas = self._fetch_pick_areas(target_date)
 
         for area in areas:
-            if location == str(area.get("name", "")).strip():
-                return str(area.get("id")), str(area.get("name"))
+            area_name = self._area_display_name(area)
+            if location == area_name or location == str(area.get("name", "")).strip():
+                return str(area.get("id")), area_name
 
         for area in areas:
-            area_name = str(area.get("name", "")).strip()
+            area_name = self._area_display_name(area)
             if location and (location in area_name or area_name in location):
                 return str(area.get("id")), area_name
+
+        if location in self.LOCATIONS:
+            return str(self.LOCATIONS[location]), location
 
         raise RuntimeError(f"区域 '{location}' 未找到，请检查名称")
 
@@ -741,6 +953,49 @@ class HenuLibraryBot:
         if resp.get("code") != 0:
             raise RuntimeError(self._resp_msg(resp, "查询座位失败"))
         return ((resp.get("data") or {}).get("list") or [])
+
+    def list_library_seats(
+        self,
+        area_id: str,
+        target_date: str = "",
+        preferred_time: str | None = None,
+    ) -> dict[str, Any]:
+        area_text = str(area_id or "").strip()
+        if not area_text:
+            return {"success": False, "msg": "area_id 不能为空", "seats": []}
+        if not self._is_token_valid() and not self.login():
+            return self._login_failed_result({"seats": []})
+
+        query_date = str(target_date or "").strip() or _now_dt().strftime("%Y-%m-%d")
+        try:
+            dt.date.fromisoformat(query_date)
+        except ValueError:
+            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "seats": []}
+
+        try:
+            space_map = self._get_space_map(area_text)
+            plan = self._build_reservation_plan(area_text, space_map, query_date, preferred_time=preferred_time)
+            seats = self._query_seats(plan["seat_query"])
+            area_name = self._area_display_name(space_map) or area_text
+            return {
+                "success": True,
+                "msg": "操作成功",
+                "date": query_date,
+                "area": {
+                    "area_id": area_text,
+                    "area_name": area_name,
+                    "reserve_type": plan.get("reserve_type", ""),
+                    "space_type": plan.get("space_type", ""),
+                },
+                "seat_query": plan.get("seat_query") or {},
+                "confirm_path": plan.get("confirm_path", ""),
+                "confirm_payload_preview": self._safe_confirm_payload(plan.get("confirm_payload") or {}),
+                "map": space_map,
+                "seats": [self._normalize_seat_row(seat) for seat in seats if isinstance(seat, dict)],
+                "total": len(seats),
+            }
+        except Exception as exc:
+            return {"success": False, "msg": f"查询图书馆座位异常: {exc}", "date": query_date, "area_id": area_text, "seats": []}
 
     def _find_target_seat(self, seats: list[dict[str, Any]], seat_no: str) -> dict[str, Any] | None:
         target_raw = str(seat_no).strip()
@@ -1441,9 +1696,25 @@ class HenuLibraryBot:
                 is_crypto=bool(plan.get("confirm_crypto")),
             )
             success = confirm_resp.get("code") == 0
+            current_result = self.list_current_appointments() if success else {"success": False, "appointments": []}
+            current_appointments = current_result.get("appointments") if isinstance(current_result, dict) else []
+            if not isinstance(current_appointments, list):
+                current_appointments = []
+            normalized_target = self._normalize_seat_row(target_seat)
             return {
                 "success": success,
                 "msg": self._resp_msg(confirm_resp),
+                "code": confirm_resp.get("code"),
+                "area": {
+                    "area_id": str(area_id),
+                    "area_name": area_name,
+                },
+                "seat": {
+                    "seat_id": normalized_target.get("seat_id", ""),
+                    "seat_no": normalized_target.get("seat_no", ""),
+                    "status": normalized_target.get("status", ""),
+                    "status_text": normalized_target.get("status_text", ""),
+                },
                 "applied_time": {
                     "preferred_time": plan.get("preferred_time", ""),
                     "start_time": (plan.get("seat_query") or {}).get("start_time", ""),
@@ -1451,6 +1722,11 @@ class HenuLibraryBot:
                     "reserve_type": plan.get("reserve_type", ""),
                     "space_type": plan.get("space_type", ""),
                 },
+                "seat_query": plan.get("seat_query") or {},
+                "confirm_path": plan.get("confirm_path", ""),
+                "confirm_payload_preview": self._safe_confirm_payload(confirm_payload),
+                "current_appointments": current_appointments,
+                "current_appointments_total": len(current_appointments),
             }
         except Exception as exc:
             return {"success": False, "msg": f"预约流程异常: {exc}"}

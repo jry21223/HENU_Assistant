@@ -593,18 +593,24 @@ class HenuPluginService:
     def _library_query(self, params: dict[str, Any]) -> dict[str, Any]:
         identity = getattr(_CURRENT_IDENTITY, "value", None)
         view = _text(params.get("view")) or "current"
+        target_date = _text(params.get("target_date"))
+        area_id = _text(params.get("area_id"))
+        preferred_time = _text(params.get("preferred_time")) or "08:00"
         record_type = _text(params.get("record_type")) or "1"
         page = _int(params.get("page"), 1)
 
         # Try cache for read operations
         if identity:
-            cache_key = f"user:{identity.storage_key}:library:{view}:{record_type}:{page}"
+            cache_key = f"user:{identity.storage_key}:library:{view}:{target_date}:{area_id}:{preferred_time}:{record_type}:{page}"
             cached = LIBRARY_QUERY_CACHE.get(cache_key)
             if cached is not None:
                 return cached
 
         result = mcp_server.library_query(
             view=view,
+            target_date=target_date,
+            area_id=area_id,
+            preferred_time=preferred_time,
             record_type=record_type,
             page=page,
             limit=_int(params.get("limit"), 20),
@@ -612,7 +618,8 @@ class HenuPluginService:
 
         # Cache successful queries
         if result.get("success") and identity:
-            LIBRARY_QUERY_CACHE.set(cache_key, result)
+            ttl = 20.0 if view == "seats" else 60.0 if view == "locations" else None
+            LIBRARY_QUERY_CACHE.set(cache_key, result, ttl_seconds=ttl)
 
         return result
 

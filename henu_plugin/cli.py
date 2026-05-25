@@ -169,7 +169,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "topic": normalized,
             "summary": "图书馆查询、预约、签到、取消。",
             "commands": [
-                "library locations",
+                "library locations [--date YYYY-MM-DD]",
+                "library seats --area-id <ID> [--date YYYY-MM-DD] [--time HH:MM]",
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
                 "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM]",
@@ -177,10 +178,13 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
             "examples": [
+                "library locations --date 2026-03-30",
+                "library seats --area-id 12 --date 2026-03-30 --time 06:30",
                 "library current",
                 "library reserve --location 金明馆北区 --seat-no 201 --date 2026-03-30",
             ],
             "tips": [
+                "预约前先查真实区域和座位，不要凭旧名称或旧 area_id 预约。",
                 "先用 `library current` 或 `library records` 看现状。",
                 "取消与签到属于真实写操作，只认 `success=true`。",
             ],
@@ -309,7 +313,9 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["schedule day --date 2026-03-30", "schedule week"]
     if resolved_tool == "library_query":
         if spec.params.get("view") == "locations":
-            return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
+            return ["library seats --area-id <ID> --date YYYY-MM-DD --time HH:MM", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
+        if spec.params.get("view") == "seats":
+            return ["library reserve --location <区域或area_id> --seat-no <座位> --date YYYY-MM-DD --time HH:MM"]
         return ["library current", "library records"]
     if resolved_tool == "library_reserve":
         return ["library current", "library signin"] if success else ["library locations", "library current"]
@@ -496,8 +502,28 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             raw=raw,
             argv=argv,
             resolved_tool="library_query",
-            params={"view": "locations"},
+            params={
+                "view": "locations",
+                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
+            },
             action="library locations",
+            should_preload_runtime_context=True,
+        )
+    if sub in {"seats", "seat"}:
+        area_id = _string_option(options, "area_id") or _string_option(options, "area-id")
+        if not area_id:
+            return _error_spec(raw, "缺少参数 `--area-id`。", help_topic="library")
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="library_query",
+            params={
+                "view": "seats",
+                "area_id": area_id,
+                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
+                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
+            },
+            action="library seats",
             should_preload_runtime_context=True,
         )
     if sub in {"current", "now"}:
