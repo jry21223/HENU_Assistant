@@ -29,6 +29,11 @@ from mcp_server import (  # noqa: E402
     setup_account,
     sync_schedule,
     system_status,
+    yunfz_activity_query,
+    yunfz_checksleep_query,
+    yunfz_collection_query,
+    yunfz_leave_query,
+    yunfz_signin_query,
 )
 
 __all__ = [
@@ -46,4 +51,9 @@ __all__ = [
     "seminar_cancel",
     "set_calibration_source",
     "system_status",
+    "yunfz_leave_query",
+    "yunfz_signin_query",
+    "yunfz_checksleep_query",
+    "yunfz_activity_query",
+    "yunfz_collection_query",
 ]

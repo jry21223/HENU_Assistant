@@ -26,6 +26,11 @@ from henu_campus_mcp import (  # noqa: E402
     setup_account,
     sync_schedule,
     system_status,
+    yunfz_activity_query,
+    yunfz_checksleep_query,
+    yunfz_collection_query,
+    yunfz_leave_query,
+    yunfz_signin_query,
 )
 
 
@@ -149,6 +154,32 @@ def build_parser() -> argparse.ArgumentParser:
     system_parser = subparsers.add_parser("system_status", help="查看系统状态")
     system_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
 
+    yunfz_leave_parser = subparsers.add_parser("yunfz_leave_query", help="查询河宝社区请假信息")
+    yunfz_leave_parser.add_argument("--view", default="list", choices=["list", "detail", "statistics"], help="查询视图")
+    yunfz_leave_parser.add_argument("--leave_id", default="", help="请假记录 ID，仅 view=detail 时使用")
+    yunfz_leave_parser.add_argument("--page", type=int, default=1, help="页码")
+    yunfz_leave_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
+
+    yunfz_signin_parser = subparsers.add_parser("yunfz_signin_query", help="查询河宝社区签到任务")
+    yunfz_signin_parser.add_argument("--view", default="list", choices=["list", "statistics"], help="查询视图")
+    yunfz_signin_parser.add_argument("--page", type=int, default=1, help="页码")
+    yunfz_signin_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
+
+    yunfz_checksleep_parser = subparsers.add_parser("yunfz_checksleep_query", help="查询河宝社区查寝任务")
+    yunfz_checksleep_parser.add_argument("--view", default="list", choices=["list", "statistics"], help="查询视图")
+    yunfz_checksleep_parser.add_argument("--page", type=int, default=1, help="页码")
+    yunfz_checksleep_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
+
+    yunfz_activity_parser = subparsers.add_parser("yunfz_activity_query", help="查询河宝社区活动信息")
+    yunfz_activity_parser.add_argument("--view", default="list", choices=["list", "statistics"], help="查询视图")
+    yunfz_activity_parser.add_argument("--page", type=int, default=1, help="页码")
+    yunfz_activity_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
+
+    yunfz_collection_parser = subparsers.add_parser("yunfz_collection_query", help="查询河宝社区信息收集任务")
+    yunfz_collection_parser.add_argument("--view", default="list", choices=["list", "statistics"], help="查询视图")
+    yunfz_collection_parser.add_argument("--page", type=int, default=1, help="页码")
+    yunfz_collection_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
+
     return parser
 
 
@@ -266,6 +297,37 @@ def main() -> None:
             )
         elif args.command == "system_status":
             result = system_status(timezone=args.timezone)
+        elif args.command == "yunfz_leave_query":
+            result = yunfz_leave_query(
+                view=args.view,
+                leave_id=args.leave_id,
+                page=args.page,
+                page_size=args.page_size,
+            )
+        elif args.command == "yunfz_signin_query":
+            result = yunfz_signin_query(
+                view=args.view,
+                page=args.page,
+                page_size=args.page_size,
+            )
+        elif args.command == "yunfz_checksleep_query":
+            result = yunfz_checksleep_query(
+                view=args.view,
+                page=args.page,
+                page_size=args.page_size,
+            )
+        elif args.command == "yunfz_activity_query":
+            result = yunfz_activity_query(
+                view=args.view,
+                page=args.page,
+                page_size=args.page_size,
+            )
+        elif args.command == "yunfz_collection_query":
+            result = yunfz_collection_query(
+                view=args.view,
+                page=args.page,
+                page_size=args.page_size,
+            )
         else:
             print(f"未知命令: {args.command}")
             return

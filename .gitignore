@@ -23,6 +23,7 @@ MANIFEST
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
 
@@ -38,6 +39,8 @@ Thumbs.db
 
 # Project specific
 *.json
+!campus_core/config/
+!campus_core/config/*.json
 output/
 logs/
 

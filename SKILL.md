@@ -13,6 +13,7 @@ description: 河南大学校园助手，支持课表查询、图书馆预约、�
 - 图书馆：`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`
 - 研讨室：`seminar_group`、`seminar_query`、`seminar_signin`、`seminar_reserve`、`seminar_cancel`
 - 系统：`set_calibration_source`、`system_status`
+- 河宝社区：`yunfz_leave_query`、`yunfz_signin_query`、`yunfz_checksleep_query`、`yunfz_activity_query`、`yunfz_collection_query`
 
 ## 执行方式
 
@@ -50,6 +51,11 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `seminar_cancel --record_id "<记录ID>"`
 - `set_calibration_source --data "<DATA>" --cookie "<COOKIE>"`
 - `system_status`
+- `yunfz_leave_query --view list|detail|statistics [--leave_id "<请假ID>"] [--page 1] [--page_size 20]`
+- `yunfz_signin_query --view list|statistics [--page 1] [--page_size 20]`
+- `yunfz_checksleep_query --view list|statistics [--page 1] [--page_size 20]`
+- `yunfz_activity_query --view list|statistics [--page 1] [--page_size 20]`
+- `yunfz_collection_query --view list|statistics [--page 1] [--page_size 20]`
 
 ## 注意
 
@@ -63,4 +69,6 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - 研讨室预约会按照房间限制校验总人数，通常为 4-5 人起、最多 10 人
 - 研讨室申请说明必须多于 10 个字
 - 研讨室可先用 `seminar_query --view records` 查记录，再用 `seminar_cancel` 取消
+- 河宝社区相关查询前先执行 `system_status`
+- 请假详情使用 `yunfz_leave_query --view detail --leave_id "..."`
 - 账号与 Cookie 仅本地保存
