@@ -585,15 +585,22 @@ class HenuPluginService:
 
     def _library_query(self, params: dict[str, Any]) -> dict[str, Any]:
         identity = getattr(_CURRENT_IDENTITY, "value", None)
-        view = _text(params.get("view")) or "current"
+        view = (_text(params.get("view")) or "current").strip().lower()
         record_type = _text(params.get("record_type")) or "1"
         page = _int(params.get("page"), 1)
         limit = _int(params.get("limit"), 20)
         target_date = _text(params.get("target_date"))
+        location = _text(params.get("location"))
+        area_id = _text(params.get("area_id"))
+        preferred_time = _text(params.get("preferred_time")) or "08:00"
+        preferred_end_time = _text(params.get("preferred_end_time"))
 
         # Try cache for read operations
         if identity:
-            cache_key = f"user:{identity.storage_key}:library:{view}:{record_type}:{page}:{limit}:{target_date}"
+            cache_key = (
+                f"user:{identity.storage_key}:library:{view}:{record_type}:{page}:{limit}:"
+                f"{target_date}:{location}:{area_id}:{preferred_time}:{preferred_end_time}"
+            )
             cached = LIBRARY_QUERY_CACHE.get(cache_key)
             if cached is not None:
                 return cached
@@ -604,11 +611,16 @@ class HenuPluginService:
             page=page,
             limit=limit,
             target_date=target_date,
+            location=location,
+            area_id=area_id,
+            preferred_time=preferred_time,
+            preferred_end_time=preferred_end_time,
         )
 
         # Cache successful queries
         if result.get("success") and identity:
-            LIBRARY_QUERY_CACHE.set(cache_key, result)
+            ttl_seconds = 20.0 if view == "seats" else None
+            LIBRARY_QUERY_CACHE.set(cache_key, result, ttl_seconds=ttl_seconds)
 
         return result
 

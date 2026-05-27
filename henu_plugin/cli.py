@@ -170,6 +170,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "summary": "图书馆查询、预约、签到、取消。",
             "commands": [
                 "library locations [--date YYYY-MM-DD]",
+                "library seats [--location <区域>|--area-id <ID>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM]",
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
                 "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
@@ -178,6 +179,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
             "examples": [
                 "library current",
+                "library seats --location 金明馆北区 --date 2026-03-30 --time 08:00",
                 "library reserve --location 金明馆北区 --seat-no 201 --date 2026-03-30",
             ],
             "tips": [
@@ -291,7 +293,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         if topic == "schedule":
             return ["schedule now", "schedule sync"]
         if topic == "library":
-            return ["library current", "library locations"]
+            return ["library current", "library locations", "library seats --location <区域> --date YYYY-MM-DD"]
         if topic == "seminar":
             return ["seminar filters", "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4"]
         if topic == "yunfz":
@@ -309,7 +311,9 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["schedule day --date 2026-03-30", "schedule week"]
     if resolved_tool == "library_query":
         if spec.params.get("view") == "locations":
-            return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
+            return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
+        if spec.params.get("view") == "seats":
+            return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD", "library current"]
         return ["library current", "library records"]
     if resolved_tool == "library_reserve":
         return ["library current", "library signin"] if success else ["library locations", "library current"]
@@ -501,6 +505,22 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
             },
             action="library locations",
+            should_preload_runtime_context=True,
+        )
+    if sub in {"seats", "seat", "available", "free"}:
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="library_query",
+            params={
+                "view": "seats",
+                "location": _string_option(options, "location"),
+                "area_id": _string_option(options, "area_id"),
+                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
+                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
+                "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+            },
+            action=f"library {sub}",
             should_preload_runtime_context=True,
         )
     if sub in {"current", "now"}:

@@ -27,6 +27,7 @@ account set --student-id 20230001 --password 'secret'
 schedule now
 schedule day --date 2026-03-30
 library current
+library seats --location "<区域>" --date 2026-03-30 --time 08:00
 library reserve --location "<区域>" --seat-no "<座位号>"
 seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan

@@ -327,6 +327,79 @@ class SeatReservationMixin:
             raise RuntimeError(self._resp_msg(resp, "查询座位失败"))
         return ((resp.get("data") or {}).get("list") or [])
 
+    @staticmethod
+    def _seat_status(seat: dict[str, Any]) -> str:
+        value = seat.get("status")
+        return "" if value is None else str(value)
+
+    @classmethod
+    def _seat_summary(cls, seat: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": str(seat.get("id") or ""),
+            "no": str(seat.get("no") or seat.get("name") or ""),
+            "name": str(seat.get("name") or ""),
+            "status": cls._seat_status(seat),
+        }
+
+    def list_available_seats(
+        self,
+        location_name: str = "",
+        area_id: str = "",
+        target_date: str = "",
+        preferred_time: str | None = "08:00",
+        preferred_end_time: str | None = "",
+    ) -> dict[str, Any]:
+        target_day = str(target_date or "").strip()
+        if not target_day:
+            target_day = (_now_dt().date() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            dt.date.fromisoformat(target_day)
+        except ValueError:
+            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "seats": []}
+
+        location = str(area_id or location_name or "").strip()
+        if not location:
+            return {"success": False, "msg": "请提供 location 或 area_id", "seats": []}
+
+        if not self._is_token_valid() and not self.login():
+            return self._login_failed_result({"seats": []})
+
+        try:
+            resolved_area_id, area_name = self._resolve_area(location, target_day)
+            space_map = self._get_space_map(resolved_area_id)
+            plan = self._build_reservation_plan(
+                resolved_area_id,
+                space_map,
+                target_day,
+                preferred_time=preferred_time,
+                preferred_end_time=preferred_end_time,
+            )
+            seats = self._query_seats(plan["seat_query"])
+        except Exception as exc:
+            return {"success": False, "msg": f"查询可用座位失败: {exc}", "seats": []}
+
+        status_counts: dict[str, int] = {}
+        available_seats: list[dict[str, Any]] = []
+        for seat in seats:
+            if not isinstance(seat, dict):
+                continue
+            status = self._seat_status(seat)
+            status_counts[status or "unknown"] = status_counts.get(status or "unknown", 0) + 1
+            if status == "1":
+                available_seats.append(self._seat_summary(seat))
+
+        return {
+            "success": True,
+            "msg": f"查询成功，{len(available_seats)}/{len(seats)} 个座位可用",
+            "area": {"id": resolved_area_id, "name": area_name},
+            "target_date": target_day,
+            "time_window": plan.get("time_window", ""),
+            "total_count": len(seats),
+            "available_count": len(available_seats),
+            "seats": available_seats,
+            "status_counts": status_counts,
+        }
+
     def _find_target_seat(self, seats: list[dict[str, Any]], seat_no: str) -> dict[str, Any] | None:
         target_raw = str(seat_no).strip()
         target_norm = self._normalize_seat_no(target_raw)

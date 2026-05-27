@@ -172,7 +172,7 @@ SCHEDULE_CACHE: TTLCache[dict[str, Any]] = TTLCache(
     max_size=200,
 )
 
-# Library query cache: 2 minutes (reservation status changes frequently)
+# Library query cache: 2 minutes by default; live seat lists override to a shorter TTL.
 LIBRARY_QUERY_CACHE: TTLCache[dict[str, Any]] = TTLCache(
     default_ttl=120.0,
     max_size=200,
