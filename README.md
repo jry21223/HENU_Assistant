@@ -58,7 +58,7 @@ Cherry Studio 示例：
 
 1. `setup_account` 绑定学号、密码，可保存默认图书馆区域和座位。
 2. 查询前先用 `system_status` 确认服务器时间。
-3. 图书馆预约前先查 `library_query(view="locations")`，预约后用 `library_query(view="current")` 核对。
+3. 图书馆预约前先查 `library_query(view="locations")`，可用 `library_query(view="seats")` 查看当前可用座位，预约后用 `library_query(view="current")` 核对。
 4. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
 
 账号、Cookie 和抓取结果都保存在本地。
