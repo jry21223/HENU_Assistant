@@ -62,11 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_parser.add_argument("--no_auto_calibrate", action="store_true", help="查询当前课程前不执行自动节次校准")
 
     library_query_parser = subparsers.add_parser("library_query", help="统一查询图书馆信息")
-    library_query_parser.add_argument("--view", default="current", choices=["locations", "current", "records"], help="查询视图")
+    library_query_parser.add_argument("--view", default="current", choices=["locations", "seats", "current", "records"], help="查询视图")
     library_query_parser.add_argument("--record_type", default="1", help="记录类型")
     library_query_parser.add_argument("--page", type=int, default=1, help="页码")
     library_query_parser.add_argument("--limit", type=int, default=20, help="每页数量")
-    library_query_parser.add_argument("--target_date", "--date", default="", help="日期 YYYY-MM-DD，view=locations 时用于实时区域")
+    library_query_parser.add_argument("--target_date", "--date", default="", help="日期 YYYY-MM-DD，view=locations/seats 时使用")
+    library_query_parser.add_argument("--location", default="", help="区域名，view=seats 时使用")
+    library_query_parser.add_argument("--area_id", default="", help="区域 ID，view=seats 时优先使用")
+    library_query_parser.add_argument("--preferred_time", default="08:00", help="首选时间 HH:MM，view=seats 时使用")
+    library_query_parser.add_argument("--preferred_end_time", default="", help="最晚结束时间 HH:MM，view=seats 时使用")
 
     library_reserve_parser = subparsers.add_parser("library_reserve", help="预约图书馆座位")
     library_reserve_parser.add_argument("--location", default="", help="区域名")
@@ -221,6 +225,10 @@ def main() -> None:
                 page=args.page,
                 limit=args.limit,
                 target_date=args.target_date,
+                location=args.location,
+                area_id=args.area_id,
+                preferred_time=args.preferred_time,
+                preferred_end_time=args.preferred_end_time,
             )
         elif args.command == "library_reserve":
             result = library_reserve(

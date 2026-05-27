@@ -2092,6 +2092,46 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     }
 
 
+def _library_seats_impl(
+    location: str = "",
+    area_id: str = "",
+    target_date: str = "",
+    preferred_time: str = "08:00",
+    preferred_end_time: str = "",
+) -> dict[str, Any]:
+    """
+    查询指定图书馆区域在指定日期/时间段的当前可用座位。
+    """
+    if HenuCampusBot is None:
+        return {"success": False, "msg": "图书馆模块不可用", "seats": []}
+
+    profile = load_json(PROFILE_FILE)
+    sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
+    if not sid or not pwd:
+        return {"success": False, "msg": "缺少账号", "seats": []}
+
+    target_location = str(location or profile.get("library_location", "")).strip()
+    target_area_id = str(area_id or "").strip()
+    if not target_area_id and not target_location:
+        return {"success": False, "msg": "请提供 location 或 area_id，或在 setup_account 中设置默认图书馆区域", "seats": []}
+
+    bot = _build_library_bot(sid, pwd)
+    if not bot:
+        return _library_login_failed({"seats": []})
+
+    result = bot.list_available_seats(
+        location_name=target_location,
+        area_id=target_area_id,
+        target_date=str(target_date or ""),
+        preferred_time=str(preferred_time or "08:00"),
+        preferred_end_time=str(preferred_end_time or ""),
+    )
+    _save_library_cookies(bot.get_cookies())
+    if hasattr(bot, "get_cas_cookies"):
+        _save_cas_cookies(bot.get_cas_cookies())
+    return result
+
+
 def _library_reserve_impl(
     location: str = "",
     seat_no: str = "",
@@ -2767,12 +2807,17 @@ def library_query(
     page: int = 1,
     limit: int = 20,
     target_date: str = "",
+    location: str = "",
+    area_id: str = "",
+    preferred_time: str = "08:00",
+    preferred_end_time: str = "",
 ) -> dict[str, Any]:
     """
     统一查询图书馆信息。
 
     view:
     - locations: 图书馆区域列表（可传 target_date 获取指定日期实时可预约区域）
+    - seats: 当前可用座位列表（需传 location 或 area_id，可传 target_date/preferred_time）
     - current: 当前预约
     - records: 历史预约记录
 
@@ -2784,11 +2829,19 @@ def library_query(
     normalized_view = str(view or "current").strip().lower()
     if normalized_view == "locations":
         return _library_locations_impl(target_date=target_date)
+    if normalized_view == "seats":
+        return _library_seats_impl(
+            location=location,
+            area_id=area_id,
+            target_date=target_date,
+            preferred_time=preferred_time,
+            preferred_end_time=preferred_end_time,
+        )
     if normalized_view == "current":
         return _library_current_impl()
     if normalized_view == "records":
         return _library_records_impl(record_type=record_type, page=page, limit=limit)
-    return {"success": False, "msg": "view 仅支持 locations/current/records"}
+    return {"success": False, "msg": "view 仅支持 locations/seats/current/records"}
 
 
 @mcp.tool()

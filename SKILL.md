@@ -32,6 +32,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `schedule_query --view week`
 - `schedule_query --view full`
 - `library_query --view locations`
+- `library_query --view seats --location "<区域>" --target_date "2026-03-19" --preferred_time "08:00"`
 - `library_query --view current`
 - `library_query --view records --record_type 1 --page 1 --limit 20`
 - `library_reserve --location "<区域>" --seat_no "<座位号>" --preferred_time "10:30"`
@@ -62,7 +63,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - 首次使用先执行 `setup_account`
 - 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先执行 `system_status`
 - 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
-- 图书馆预约前先用 `library_query --view locations` 确认区域
+- 图书馆预约前先用 `library_query --view locations` 确认区域，可用 `library_query --view seats` 查看当前可用座位
 - 图书馆查看当前预约或历史记录时，用 `library_query --view current` / `library_query --view records`
 - 研讨室通常先按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 逐步查询
 - 研讨室 `group` 保存的是同行成员学号，不含自己；建议保存 3-9 个学号，预约时会自动去重并排除当前账号

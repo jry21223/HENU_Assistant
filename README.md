@@ -26,7 +26,7 @@ sudo apt install -y python3-venv
 | --- | --- |
 | 账号 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query --view current|day|week|full` |
-| 图书馆 | `library_query --view locations|current|records`, `library_reserve`, `library_auto_signin`, `library_cancel` |
+| 图书馆 | `library_query --view locations|seats|current|records`, `library_reserve`, `library_auto_signin`, `library_cancel` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 校准 | `set_calibration_source` |
@@ -38,6 +38,7 @@ sudo apt install -y python3-venv
 ```bash
 python3 henu_cli.py system_status
 python3 henu_cli.py library_query --view locations
+python3 henu_cli.py library_query --view seats --location "<区域>"
 python3 henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>"
 ```
 
