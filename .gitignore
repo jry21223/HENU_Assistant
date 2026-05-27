@@ -40,6 +40,8 @@ Thumbs.db
 
 # Project specific
 *.json
+!campus_core/config/
+!campus_core/config/*.json
 output/
 logs/
 data/

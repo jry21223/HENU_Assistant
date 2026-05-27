@@ -331,7 +331,6 @@ class HenuPluginService:
         if effective_tool_name in {"setup_account", "system_status"}:
             result["session_binding"] = {
                 "qq": identity.qq,
-                "storage_key": identity.storage_key,
                 "launcher_type": identity.launcher_type,
                 "launcher_id": identity.launcher_id,
                 "sender_id": identity.sender_id,
@@ -339,17 +338,11 @@ class HenuPluginService:
             }
 
         if effective_tool_name == "system_status":
-            shared_dir = paths.user_root / "shared"
-            result["storage_paths"] = {
-                "user_root": str(paths.user_root),
-                "profile_file": str(paths.profile_file),
-                "xk_cookie_file": str(paths.xk_cookie_file),
-                "library_cookie_file": str(paths.library_cookie_file),
-                "seminar_signin_task_file": str(paths.seminar_signin_task_file),
-                "schedule_file": str(paths.schedule_file),
-                "output_dir": str(paths.output_dir),
-                "shared_dir": str(shared_dir),
-                "storage_mode": "langbot_storage_api",
+            result["storage"] = {
+                "mode": "langbot_storage_api",
+                "has_schedule_cache": paths.schedule_file.exists(),
+                "has_output_dir": paths.output_dir.exists(),
+                "has_shared_period_config": (paths.user_root / "shared" / "period_time_config.json").exists(),
             }
 
         if effective_tool_name == "seminar_reserve":
@@ -463,7 +456,7 @@ class HenuPluginService:
                     "OUTPUT_DIR": mcp_server.OUTPUT_DIR,
                     "LIBRARY_COOKIE_FILE": mcp_server.LIBRARY_COOKIE_FILE,
                     "SEMINAR_SIGNIN_TASK_FILE": mcp_server.SEMINAR_SIGNIN_TASK_FILE,
-                    "YUNFZ_TOKEN_FILE": mcp_server.YUNFZ_TOKEN_FILE,
+                    "HEBAO_TOKEN_FILE": mcp_server.HEBAO_TOKEN_FILE,
                     "CAS_COOKIE_FILE": mcp_server.CAS_COOKIE_FILE,
                     "PERIOD_TIME_FILE": mcp_server.PERIOD_TIME_FILE,
                     "PERIOD_CALIBRATION_STATE_FILE": mcp_server.PERIOD_CALIBRATION_STATE_FILE,
@@ -482,7 +475,7 @@ class HenuPluginService:
                 mcp_server.OUTPUT_DIR = paths.output_dir
                 mcp_server.LIBRARY_COOKIE_FILE = paths.library_cookie_file
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = paths.seminar_signin_task_file
-                mcp_server.YUNFZ_TOKEN_FILE = paths.yunfz_token_file
+                mcp_server.HEBAO_TOKEN_FILE = paths.yunfz_token_file
                 mcp_server.CAS_COOKIE_FILE = paths.cas_cookie_file
                 mcp_server.PERIOD_TIME_FILE = period_time_file
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = period_calibration_state_file
@@ -499,7 +492,7 @@ class HenuPluginService:
                 mcp_server.OUTPUT_DIR = original_state["mcp_server"]["OUTPUT_DIR"]
                 mcp_server.LIBRARY_COOKIE_FILE = original_state["mcp_server"]["LIBRARY_COOKIE_FILE"]
                 mcp_server.SEMINAR_SIGNIN_TASK_FILE = original_state["mcp_server"]["SEMINAR_SIGNIN_TASK_FILE"]
-                mcp_server.YUNFZ_TOKEN_FILE = original_state["mcp_server"]["YUNFZ_TOKEN_FILE"]
+                mcp_server.HEBAO_TOKEN_FILE = original_state["mcp_server"]["HEBAO_TOKEN_FILE"]
                 mcp_server.CAS_COOKIE_FILE = original_state["mcp_server"]["CAS_COOKIE_FILE"]
                 mcp_server.PERIOD_TIME_FILE = original_state["mcp_server"]["PERIOD_TIME_FILE"]
                 mcp_server.PERIOD_CALIBRATION_STATE_FILE = original_state["mcp_server"]["PERIOD_CALIBRATION_STATE_FILE"]

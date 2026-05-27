@@ -1,13 +1,7 @@
-"""
-河宝社区 (yzsfz.henu.edu.cn) API 客户端
-支持请假、签到、查寝等功能
-"""
 from __future__ import annotations
 
 import base64
-import datetime as dt
 import hashlib
-import json
 import math
 import random
 import re
@@ -19,21 +13,10 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+from .auth import AuthMixin
 
 
-def _now_dt() -> dt.datetime:
-    """获取当前北京时间（带时区信息）"""
-    try:
-        return dt.datetime.now(ZoneInfo("Asia/Shanghai"))
-    except Exception:
-        return dt.datetime.utcnow() + dt.timedelta(hours=8)
-
-
-class YunfzBot:
+class _HebaoClient:
     """河宝社区 API 客户端"""
 
     # 请假状态映射
@@ -159,11 +142,7 @@ class YunfzBot:
 
     @staticmethod
     def _extract_cas_ticket(url: str) -> str:
-        # Standard CAS ticket parameter
-        match = re.search(r"[?&]ticket=([^&#]+)", url)
-        if match:
-            return match.group(1)
-        return ""
+        return AuthMixin._extract_cas_ticket(url)
 
     def _set_last_error(self, message: str) -> str:
         self.last_error = str(message or "").strip()
@@ -832,3 +811,41 @@ class YunfzBot:
             "msg": "查询成功",
             "statistics": result.get("data", {}),
         }
+
+
+class HebaoMixin:
+    def _init_hebao(self, saved_token: str | None = None, cas_cookies: dict[str, Any] | None = None) -> None:
+        self._hebao_client = _HebaoClient(self.username, self.password, saved_token, cas_cookies)
+
+    def hebao_login(self) -> bool:
+        return self._hebao_client.login()
+
+    def get_hebao_token(self) -> str:
+        return self._hebao_client.get_token()
+
+    def get_hebao_cas_cookies(self) -> dict[str, Any]:
+        return self._hebao_client.get_cas_cookies()
+
+    def get_hebao_last_error(self) -> str:
+        return self._hebao_client.get_last_error()
+
+    def get_leave_list(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_leave_list(*args, **kwargs)
+
+    def get_leave_detail(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_leave_detail(*args, **kwargs)
+
+    def get_task_statistics(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_task_statistics(*args, **kwargs)
+
+    def get_signin_task_list(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_signin_task_list(*args, **kwargs)
+
+    def get_checksleep_task_list(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_checksleep_task_list(*args, **kwargs)
+
+    def get_activity_list(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_activity_list(*args, **kwargs)
+
+    def get_collection_list(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._hebao_client.get_collection_list(*args, **kwargs)

@@ -241,10 +241,13 @@ class IdentityCaptureListener(EventListener):
         seat_no = str(account.get("library_default_seat_no") or "").strip()
         has_mobile = bool(account.get("has_seminar_mobile"))
 
+        masked_qq = self._mask_identifier(qq)
+        masked_student_id = self._mask_identifier(student_id)
+
         lines = ["当前账号绑定信息"]
-        if qq:
-            lines.append(f"QQ: {qq}")
-        lines.append(f"学号: {student_id or '未绑定'}")
+        if masked_qq:
+            lines.append(f"QQ: {masked_qq}")
+        lines.append(f"学号: {masked_student_id or '未绑定'}")
         lines.append(f"密码: {'已保存' if has_password else '未保存'}")
         lines.append(f"图书馆默认区域: {location or '未设置'}")
         lines.append(f"图书馆默认座位: {seat_no or '未设置'}")
@@ -278,6 +281,9 @@ class IdentityCaptureListener(EventListener):
         if not sender_id:
             return ""
 
+        masked_sender_id = self._mask_identifier(sender_id)
+        masked_student_id = self._mask_identifier(student_id)
+
         lines = [
             "# HENU 当前会话上下文",
             "",
@@ -287,10 +293,10 @@ class IdentityCaptureListener(EventListener):
         ]
         if sender_name:
             lines.append(f"- 昵称: {sender_name}")
-        lines.append(f"- QQ: {sender_id}")
+        lines.append(f"- QQ: {masked_sender_id}")
         if launcher_type and launcher_id:
-            lines.append(f"- 会话: {launcher_type}_{launcher_id}")
-        lines.append(f"- 绑定学号: {student_id or '未绑定'}")
+            lines.append(f"- 会话类型: {launcher_type}")
+        lines.append(f"- 绑定学号: {masked_student_id or '未绑定'}")
         lines.append(f"- 已保存密码: {'是' if has_password else '否'}")
         lines.append(f"- 图书馆默认区域: {location or '未设置'}")
         lines.append(f"- 图书馆默认座位: {seat_no or '未设置'}")
@@ -335,7 +341,6 @@ class IdentityCaptureListener(EventListener):
 
         sender_id = str(binding.get("sender_id") or binding.get("qq") or "").strip()
         launcher_type = str(binding.get("launcher_type") or "").strip()
-        launcher_id = str(binding.get("launcher_id") or "").strip()
         student_id = str(account.get("student_id") or "").strip() or "未绑定"
         now_text = str(server_time.get("now_text") or "").strip()
         weekday_cn = str(server_time.get("weekday_cn") or "").strip()
@@ -343,19 +348,30 @@ class IdentityCaptureListener(EventListener):
         if not sender_id:
             return original_text
 
+        masked_sender_id = self._mask_identifier(sender_id)
+        masked_student_id = self._mask_identifier(student_id) if student_id != "未绑定" else student_id
+
         lines = [
-            f"【当前提问人】QQ={sender_id}",
+            f"【当前提问人】QQ={masked_sender_id}",
         ]
         if sender_name:
             lines[-1] += f"，昵称={sender_name}"
-        if launcher_type and launcher_id:
-            lines.append(f"【当前会话】{launcher_type}_{launcher_id}")
-        lines.append(f"【当前绑定学号】{student_id}")
+        if launcher_type:
+            lines.append(f"【当前会话类型】{launcher_type}")
+        lines.append(f"【当前绑定学号】{masked_student_id}")
         if now_text:
             lines.append(f"【当前服务器时间】{now_text} {weekday_cn}".strip())
         lines.append("【规则】只按以上当前提问人与当前服务器时间理解“我的/今天/明天/现在/当前”；河大能力统一走 henu_cli。")
         lines.append(f"【用户原始问题】{original_text}")
         return "\n".join(lines)
+
+    def _mask_identifier(self, value: str) -> str:
+        text = str(value or "").strip()
+        if len(text) <= 2:
+            return text
+        if len(text) <= 6:
+            return f"{text[0]}***{text[-1]}"
+        return f"{text[:2]}***{text[-2:]}"
 
     async def _get_or_create_runtime_context(self, ctx: context.EventContext) -> dict | None:
         cached = await self._safe_get_query_var(ctx, "_henu_runtime_context")

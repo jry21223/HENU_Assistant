@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from components.tools._base import BaseHenuTool
+from components.cli_tools.base import BaseHenuTool
 from henu_plugin.cli import inspect_cli_command
 
 

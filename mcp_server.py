@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 import threading
 import time
 import uuid
@@ -39,11 +38,10 @@ BASE_DIR = Path(__file__).resolve().parent
 PERIOD_TIME_FILE = BASE_DIR / "period_time_config.json"
 PERIOD_CALIBRATION_STATE_FILE = BASE_DIR / "period_time_calibration_state.json"
 XIQUEER_REQUEST_FILE = BASE_DIR / "xiqueer_period_time_request.json"
-LIBRARY_CORE_EXPECTED_FILE = BASE_DIR / "library_core" / "henu_core.py"
-LIBRARY_CORE_DIR = LIBRARY_CORE_EXPECTED_FILE.parent if LIBRARY_CORE_EXPECTED_FILE.exists() else None
+CAMPUS_CORE_EXPECTED_FILE = BASE_DIR / "campus_core" / "bot.py"
 
 LIBRARY_COOKIE_FILE = BASE_DIR / "henu_library_cookies.json"
-YUNFZ_TOKEN_FILE = BASE_DIR / "henu_yunfz_token.json"
+HEBAO_TOKEN_FILE = BASE_DIR / "henu_yunfz_token.json"
 CAS_COOKIE_FILE = BASE_DIR / "henu_cas_cookies.json"
 SEMINAR_SIGNIN_TASK_FILE = BASE_DIR / "seminar_signin_tasks.json"
 SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS = 30
@@ -70,26 +68,12 @@ _SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
 _SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
 
-# 尝试导入图书馆模块
-HenuLibraryBot = None
-if LIBRARY_CORE_DIR and str(LIBRARY_CORE_DIR) not in sys.path:
-    sys.path.insert(0, str(LIBRARY_CORE_DIR))
-    try:
-        from henu_core import HenuLibraryBot  # type: ignore
-    except Exception:
-        pass
-
-# 尝试导入河宝社区模块
-YunfzBot = None
-YUNFZ_CORE_EXPECTED_FILE = BASE_DIR / "library_core" / "yunfz_core.py"
-if YUNFZ_CORE_EXPECTED_FILE.exists():
-    if str(LIBRARY_CORE_DIR) not in sys.path:
-        sys.path.insert(0, str(LIBRARY_CORE_DIR))
-    try:
-        from yunfz_core import YunfzBot  # type: ignore
-    except Exception:
-        pass
-
+# 尝试导入校园核心模块
+HenuCampusBot = None
+try:
+    from campus_core import HenuCampusBot
+except Exception:
+    pass
 
 def _now_dt(timezone: str = "Asia/Shanghai") -> datetime:
     try:
@@ -1290,7 +1274,7 @@ def _process_seminar_signin_tasks(
     task_id: str = "",
     trigger: str = "manual",
 ) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "tasks": []}
 
     with _SEMINAR_SIGNIN_TASK_LOCK:
@@ -1574,13 +1558,13 @@ def _library_login_failed(extra: dict[str, Any] | None = None, default: str = "�
 
 
 def _build_library_bot(student_id: str, password: str):
-    if HenuLibraryBot is None:
-        raise RuntimeError(f"图书馆核心模块不可用: {LIBRARY_CORE_EXPECTED_FILE}")
+    if HenuCampusBot is None:
+        raise RuntimeError(f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}")
 
     _set_library_login_error("")
     stored = _load_library_cookies()
     cas_cookies = _load_cas_cookies()
-    bot = HenuLibraryBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
+    bot = HenuCampusBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
     if bot.login():
         _save_library_cookies(bot.get_cookies())
         _save_cas_cookies(bot.get_cas_cookies())
@@ -1589,7 +1573,7 @@ def _build_library_bot(student_id: str, password: str):
 
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
-        fresh_bot = HenuLibraryBot(student_id, password, None, cas_cookies or None)  # type: ignore
+        fresh_bot = HenuCampusBot(student_id, password, None, cas_cookies or None)  # type: ignore
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
             _save_cas_cookies(fresh_bot.get_cas_cookies())
@@ -1608,68 +1592,68 @@ def _latest_grid_file() -> Path | None:
     return files[0] if files else None
 
 
-# ==================== 河宝社区 (Yunfz) Helpers ====================
+# ==================== 河宝社区 Helpers ====================
 
-_LAST_YUNFZ_LOGIN_ERROR = ""
-
-
-def _set_yunfz_login_error(message: str) -> None:
-    global _LAST_YUNFZ_LOGIN_ERROR
-    _LAST_YUNFZ_LOGIN_ERROR = str(message or "").strip()
+_LAST_HEBAO_LOGIN_ERROR = ""
 
 
-def _yunfz_login_error_message(default: str = "河宝社区登录失败") -> str:
-    text = str(_LAST_YUNFZ_LOGIN_ERROR or "").strip()
+def _set_hebao_login_error(message: str) -> None:
+    global _LAST_HEBAO_LOGIN_ERROR
+    _LAST_HEBAO_LOGIN_ERROR = str(message or "").strip()
+
+
+def _hebao_login_error_message(default: str = "河宝社区登录失败") -> str:
+    text = str(_LAST_HEBAO_LOGIN_ERROR or "").strip()
     return text or default
 
 
-def _yunfz_login_failed(extra: dict[str, Any] | None = None, default: str = "河宝社区登录失败") -> dict[str, Any]:
-    result = {"success": False, "msg": _yunfz_login_error_message(default)}
+def _hebao_login_failed(extra: dict[str, Any] | None = None, default: str = "河宝社区登录失败") -> dict[str, Any]:
+    result = {"success": False, "msg": _hebao_login_error_message(default)}
     if extra:
         result.update(extra)
     return result
 
 
-def _load_yunfz_token() -> dict[str, Any]:
-    return load_json(YUNFZ_TOKEN_FILE)
+def _load_hebao_token() -> dict[str, Any]:
+    return load_json(HEBAO_TOKEN_FILE)
 
 
-def _save_yunfz_token(token: str) -> None:
-    save_json(YUNFZ_TOKEN_FILE, {"token": token})
+def _save_hebao_token(token: str) -> None:
+    save_json(HEBAO_TOKEN_FILE, {"token": token})
 
 
-def _build_yunfz_bot(student_id: str, password: str):
-    if YunfzBot is None:
-        raise RuntimeError(f"河宝社区核心模块不可用: {YUNFZ_CORE_EXPECTED_FILE}")
+def _build_hebao_bot(student_id: str, password: str):
+    if HenuCampusBot is None:
+        raise RuntimeError(f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}")
 
-    _set_yunfz_login_error("")
-    stored = _load_yunfz_token()
+    _set_hebao_login_error("")
+    stored = _load_hebao_token()
     stored_token = stored.get("token", "") if stored else ""
     cas_cookies = _load_cas_cookies()
-    bot = YunfzBot(student_id, password, stored_token or None, cas_cookies or None)  # type: ignore
-    if bot.login():
-        token = bot.get_token()
+    bot = HenuCampusBot(student_id, password, None, cas_cookies or None, stored_token or None)  # type: ignore
+    if bot.hebao_login():
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
-        _save_cas_cookies(bot.get_cas_cookies())
-        _set_yunfz_login_error("")
+            _save_hebao_token(token)
+        _save_cas_cookies(bot.get_hebao_cas_cookies())
+        _set_hebao_login_error("")
         return bot
 
-    first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
+    first_error = str(getattr(bot, "get_hebao_last_error", lambda: "")() or "").strip()
     if stored_token:
-        fresh_bot = YunfzBot(student_id, password, None, cas_cookies or None)  # type: ignore
-        if fresh_bot.login():
-            token = fresh_bot.get_token()
+        fresh_bot = HenuCampusBot(student_id, password, None, cas_cookies or None, None)  # type: ignore
+        if fresh_bot.hebao_login():
+            token = fresh_bot.get_hebao_token()
             if token:
-                _save_yunfz_token(token)
-            _save_cas_cookies(fresh_bot.get_cas_cookies())
-            _set_yunfz_login_error("")
+                _save_hebao_token(token)
+            _save_cas_cookies(fresh_bot.get_hebao_cas_cookies())
+            _set_hebao_login_error("")
             return fresh_bot
-        fresh_error = str(getattr(fresh_bot, "get_last_error", lambda: "")() or "").strip()
-        _set_yunfz_login_error(fresh_error or first_error)
+        fresh_error = str(getattr(fresh_bot, "get_hebao_last_error", lambda: "")() or "").strip()
+        _set_hebao_login_error(fresh_error or first_error)
         return None
 
-    _set_yunfz_login_error(first_error)
+    _set_hebao_login_error(first_error)
     return None
 
 
@@ -2061,8 +2045,8 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
 
     重要：不要编造区域信息，必须调用此工具获取准确的区域列表。
     """
-    if HenuLibraryBot is None:
-        return {"success": False, "msg": f"图书馆核心模块不可用: {LIBRARY_CORE_EXPECTED_FILE}", "locations": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "locations": []}
 
     target_day = str(target_date or "").strip()
     if not target_day:
@@ -2076,7 +2060,7 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
             result = _library_login_failed(
                 {
                     "date": target_day,
-                    "locations": HenuLibraryBot.static_locations(),
+                    "locations": HenuCampusBot.static_locations(),
                     "source": "static_fallback",
                     "is_live": False,
                 }
@@ -2092,7 +2076,7 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
         "success": True,
         "msg": "未绑定账号，返回内置兜底区域；绑定后可获取实时可预约区域",
         "date": target_day,
-        "locations": HenuLibraryBot.static_locations(),
+        "locations": HenuCampusBot.static_locations(),
         "source": "static_fallback",
         "is_live": False,
     }
@@ -2116,7 +2100,7 @@ def _library_reserve_impl(
     重要：不要假装预约成功，必须调用此工具执行真实的预约操作。
     预约结果会返回成功或失败的详细信息。
     """
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
     
     profile = load_json(PROFILE_FILE)
@@ -2166,7 +2150,7 @@ def _library_records_impl(record_type: str = "1", page: int = 1, limit: int = 20
 
     重要：不要编造预约记录，必须调用此工具获取真实数据。
     """
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "records": []}
     
     profile = load_json(PROFILE_FILE)
@@ -2186,7 +2170,7 @@ def _library_current_impl() -> dict[str, Any]:
     """
     查询图书馆当前预约，用于判断是否存在可签到记录。
     """
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "appointments": []}
 
     profile = load_json(PROFILE_FILE)
@@ -2207,7 +2191,7 @@ def _library_auto_signin_impl(record_id: str = "") -> dict[str, Any]:
     """
     对当前图书馆预约执行自动签到。
     """
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
 
     profile = load_json(PROFILE_FILE)
@@ -2287,7 +2271,7 @@ def _seminar_group_delete_impl(group_name: str) -> dict[str, Any]:
 
 
 def _seminar_filters_impl() -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "filters": {}}
 
     profile = load_json(PROFILE_FILE)
@@ -2310,7 +2294,7 @@ def _seminar_records_impl(
     limit: int = 20,
     mode: str = "books",
 ) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "records": []}
 
     profile = load_json(PROFILE_FILE)
@@ -2362,7 +2346,7 @@ def _seminar_rooms_impl(
     boutique_names: str = "",
     page: int = 1,
 ) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用", "rooms": []}
 
     profile = load_json(PROFILE_FILE)
@@ -2447,7 +2431,7 @@ def _seminar_rooms_impl(
 
 
 def _seminar_room_detail_impl(area_id: str, target_date: str = "") -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
 
     profile = load_json(PROFILE_FILE)
@@ -2511,7 +2495,7 @@ def _seminar_reserve_impl(
     cate_id: str = "",
     time_ranges_json: str = "",
 ) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
 
     profile = load_json(PROFILE_FILE)
@@ -2584,7 +2568,7 @@ def _seminar_reserve_impl(
 
 
 def _seminar_signin_impl(record_id: str) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
 
     profile = load_json(PROFILE_FILE)
@@ -2622,7 +2606,7 @@ def _seminar_auto_signin_impl() -> dict[str, Any]:
 
 
 def _seminar_cancel_impl(record_id: str) -> dict[str, Any]:
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
 
     profile = load_json(PROFILE_FILE)
@@ -2663,7 +2647,7 @@ def _library_cancel_impl(record_id: str, record_type: str = "auto") -> dict[str,
 
     重要：不要假装取消成功，必须调用此工具执行真实的取消操作。
     """
-    if HenuLibraryBot is None:
+    if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
     
     profile = load_json(PROFILE_FILE)
@@ -3137,7 +3121,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     }
 
 
-# ==================== 河宝社区 (Yunfz) MCP Tools ====================
+# ==================== 河宝社区 MCP Tools ====================
 
 @mcp.tool()
 def yunfz_leave_query(
@@ -3158,41 +3142,41 @@ def yunfz_leave_query(
     1) 查询前必须先调用 system_status 确认当前日期时间。
     2) 回复仅可基于本次返回结果，不得编造。
     """
-    if YunfzBot is None:
-        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "records": []}
 
     profile = load_json(PROFILE_FILE)
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
         return {"success": False, "msg": "缺少账号", "records": []}
 
-    bot = _build_yunfz_bot(sid, pwd)
+    bot = _build_hebao_bot(sid, pwd)
     if not bot:
-        return _yunfz_login_failed({"records": []})
+        return _hebao_login_failed({"records": []})
 
     normalized_view = str(view or "list").strip().lower()
 
     if normalized_view == "list":
         result = bot.get_leave_list(student_no=sid, page=page, page_size=page_size)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "detail":
         if not str(leave_id or "").strip():
             return {"success": False, "msg": "view=detail 时 leave_id 不能为空"}
         result = bot.get_leave_detail(leave_id=leave_id)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "statistics":
         result = bot.get_task_statistics()
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     return {"success": False, "msg": "view 仅支持 list/detail/statistics", "records": []}
@@ -3214,32 +3198,32 @@ def yunfz_signin_query(
     规则：
     1) 查询前必须先调用 system_status 确认当前日期时间。
     """
-    if YunfzBot is None:
-        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "records": []}
 
     profile = load_json(PROFILE_FILE)
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
         return {"success": False, "msg": "缺少账号", "records": []}
 
-    bot = _build_yunfz_bot(sid, pwd)
+    bot = _build_hebao_bot(sid, pwd)
     if not bot:
-        return _yunfz_login_failed({"records": []})
+        return _hebao_login_failed({"records": []})
 
     normalized_view = str(view or "list").strip().lower()
 
     if normalized_view == "list":
         result = bot.get_signin_task_list(page=page, page_size=page_size)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "statistics":
         result = bot.get_task_statistics()
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
@@ -3261,32 +3245,32 @@ def yunfz_checksleep_query(
     规则：
     1) 查询前必须先调用 system_status 确认当前日期时间。
     """
-    if YunfzBot is None:
-        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "records": []}
 
     profile = load_json(PROFILE_FILE)
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
         return {"success": False, "msg": "缺少账号", "records": []}
 
-    bot = _build_yunfz_bot(sid, pwd)
+    bot = _build_hebao_bot(sid, pwd)
     if not bot:
-        return _yunfz_login_failed({"records": []})
+        return _hebao_login_failed({"records": []})
 
     normalized_view = str(view or "list").strip().lower()
 
     if normalized_view == "list":
         result = bot.get_checksleep_task_list(page=page, page_size=page_size)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "statistics":
         result = bot.get_task_statistics()
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
@@ -3308,32 +3292,32 @@ def yunfz_activity_query(
     规则：
     1) 查询前必须先调用 system_status 确认当前日期时间。
     """
-    if YunfzBot is None:
-        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "records": []}
 
     profile = load_json(PROFILE_FILE)
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
         return {"success": False, "msg": "缺少账号", "records": []}
 
-    bot = _build_yunfz_bot(sid, pwd)
+    bot = _build_hebao_bot(sid, pwd)
     if not bot:
-        return _yunfz_login_failed({"records": []})
+        return _hebao_login_failed({"records": []})
 
     normalized_view = str(view or "list").strip().lower()
 
     if normalized_view == "list":
         result = bot.get_activity_list(page=page, page_size=page_size)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "statistics":
         result = bot.get_task_statistics()
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
@@ -3355,32 +3339,32 @@ def yunfz_collection_query(
     规则：
     1) 查询前必须先调用 system_status 确认当前日期时间。
     """
-    if YunfzBot is None:
-        return {"success": False, "msg": f"河宝社区模块不可用: {YUNFZ_CORE_EXPECTED_FILE}", "records": []}
+    if HenuCampusBot is None:
+        return {"success": False, "msg": f"河宝社区模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "records": []}
 
     profile = load_json(PROFILE_FILE)
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
         return {"success": False, "msg": "缺少账号", "records": []}
 
-    bot = _build_yunfz_bot(sid, pwd)
+    bot = _build_hebao_bot(sid, pwd)
     if not bot:
-        return _yunfz_login_failed({"records": []})
+        return _hebao_login_failed({"records": []})
 
     normalized_view = str(view or "list").strip().lower()
 
     if normalized_view == "list":
         result = bot.get_collection_list(page=page, page_size=page_size)
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     if normalized_view == "statistics":
         result = bot.get_task_statistics()
-        token = bot.get_token()
+        token = bot.get_hebao_token()
         if token:
-            _save_yunfz_token(token)
+            _save_hebao_token(token)
         return result
 
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
