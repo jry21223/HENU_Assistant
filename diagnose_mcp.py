@@ -58,6 +58,9 @@ def check_files():
         "mcp_server.py",
         "course_schedule.py",
         "schedule_cleaner.py",
+        "campus_core/__init__.py",
+        "campus_core/bot.py",
+        "campus_core/config/library_locations.json",
         "requirements.txt"
     ]
     

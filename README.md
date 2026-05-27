@@ -1,42 +1,34 @@
-# 河大校园助手（MCP 服务器版）
+# 河大校园助手 MCP 服务器版
 
-河南大学校园助手的 MCP 实现，集成了课表查询、图书馆预约、研讨室预约、节次校准和系统状态能力。
+把河大校园能力暴露为 MCP tools，适合 Cherry Studio 等支持 stdio MCP 的客户端。
 
-## 安装
+## 安装与诊断
 
 ```bash
-git clone https://github.com/jry21223/HENU_MCP.git
-cd HENU_MCP
-git checkout mcp-server
-chmod +x install.sh
-./install.sh
+git clone -b mcp-server https://github.com/jry21223/HENU_Assistant.git henu-mcp
+cd henu-mcp
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 diagnose_mcp.py
+```
+
+Windows 将激活命令换成：
+
+```cmd
+venv\Scripts\activate
 ```
 
 ## 启动
 
 ```bash
+python3 mcp_server.py --transport stdio
+# 或
 ./run.sh
 ```
 
-## 诊断
+Cherry Studio 示例：
 
-### macOS / Linux
-```bash
-source venv/bin/activate
-python3 diagnose_mcp.py
-```
-
-### Windows
-```cmd
-venv\Scripts\activate
-python diagnose_mcp.py
-```
-
-## MCP 客户端配置
-
-### Cherry Studio
-
-#### macOS / Linux
 ```json
 {
   "mcpServers": {
@@ -51,40 +43,22 @@ python diagnose_mcp.py
 }
 ```
 
-#### Windows
-```json
-{
-  "mcpServers": {
-    "henu-campus": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "cd /d \"<YOUR_PROJECT_PATH>\" && venv\\Scripts\\activate && python mcp_server.py --transport stdio"
-      ]
-    }
-  }
-}
-```
-
-其他支持 `stdio` 的客户端也可以复用同一条启动命令。
-
-## 常用工具
+## 工具
 
 | 类别 | 工具 |
 | --- | --- |
-| 账号与系统 | `setup_account`, `system_status` |
+| 账号/系统 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query` |
 | 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
+| 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 节次校准 | `set_calibration_source` |
 
-课表查询补充说明：
-- `schedule_query(view="current")` 只查“当前正在上的课 + 下一节课”
-- `schedule_query(view="day", target_date="2026-03-19")` 查某一天课表
-- `schedule_query(view="week")` 为兼容旧客户端，返回未按教学周过滤的完整周课表
+## 常用流程
 
-## 说明
+1. `setup_account` 绑定学号、密码，可保存默认图书馆区域和座位。
+2. 查询前先用 `system_status` 确认服务器时间。
+3. 图书馆预约前先查 `library_query(view="locations")`，预约后用 `library_query(view="current")` 核对。
+4. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
 
-- OpenClaw Skill 版本在 `openclaw-skill` 分支
-- 如果无法连接，先运行 `python3 diagnose_mcp.py`
-- 账号与 Cookie 只保存在本地
+账号、Cookie 和抓取结果都保存在本地。
