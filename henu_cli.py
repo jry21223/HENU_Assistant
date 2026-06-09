@@ -61,6 +61,26 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD，仅 view=day 时使用")
     schedule_parser.add_argument("--no_auto_calibrate", action="store_true", help="查询当前课程前不执行自动节次校准")
 
+
+    smart_course_parser = subparsers.add_parser("smart_course_selection", aliases=["smart_course_select"], help="从 Excel/JSON 课表智能规划选课")
+    smart_course_parser.add_argument("--source_path", "--source", default="", help="Excel 或清洗后 JSON 文件路径")
+    smart_course_parser.add_argument("--excel_path", "--excel", default="", help="教务导出的 Excel 文件路径")
+    smart_course_parser.add_argument("--json_path", "--json", default="", help="清洗后的 JSON 文件路径")
+    smart_course_parser.add_argument("--user_class", "--class", default="", help="班级，例如 25软工1")
+    smart_course_parser.add_argument("--sheet_name", "--sheet", default="2026-2027-1学期", help="Excel 工作表名")
+    smart_course_parser.add_argument("--semester", default="", help="学期标识，例如 2026-2027-1")
+    smart_course_parser.add_argument("--mode", choices=["schema", "filter", "plan"], default="plan", help="输出模式")
+    smart_course_parser.add_argument("--like_early8", action="store_true", help="偏好早八")
+    smart_course_parser.add_argument("--avoid_early8", action="store_true", help="避免早八")
+    smart_course_parser.add_argument("--compact_days", action="store_true", help="尽量集中上课天数")
+    smart_course_parser.add_argument("--target_days", type=int, default=3, help="集中排课目标天数")
+    smart_course_parser.add_argument("--avoid_evening", action="store_true", help="避免晚课")
+    smart_course_parser.add_argument("--no_unscheduled", action="store_true", help="排除未排时间课程")
+    smart_course_parser.add_argument("--no_common", action="store_true", help="排除全年级公共课")
+    smart_course_parser.add_argument("--include_options", action="store_true", help="plan 模式也返回候选课程选项")
+    smart_course_parser.add_argument("--top_k", type=int, default=3, help="返回推荐方案数量")
+    smart_course_parser.add_argument("--max_combinations", type=int, default=200000, help="最大组合搜索数")
+
     library_query_parser = subparsers.add_parser("library_query", help="统一查询图书馆信息")
     library_query_parser.add_argument("--view", default="current", choices=["locations", "seats", "current", "records"], help="查询视图")
     library_query_parser.add_argument("--record_type", default="1", help="记录类型")
@@ -217,6 +237,29 @@ def main() -> None:
                 timezone=args.timezone,
                 target_date=args.target_date,
                 auto_calibrate=not args.no_auto_calibrate,
+            )
+
+        elif args.command in {"smart_course_selection", "smart_course_select"}:
+            from mcp_server import smart_course_selection
+
+            result = smart_course_selection(
+                source_path=args.source_path,
+                excel_path=args.excel_path,
+                json_path=args.json_path,
+                user_class=args.user_class,
+                sheet_name=args.sheet_name,
+                semester=args.semester,
+                mode=args.mode,
+                like_early8=args.like_early8,
+                avoid_early8=args.avoid_early8,
+                compact_days=args.compact_days,
+                target_days=args.target_days,
+                avoid_evening=args.avoid_evening,
+                allow_unscheduled=not args.no_unscheduled,
+                include_common=not args.no_common,
+                include_course_options=args.include_options,
+                top_k=args.top_k,
+                max_combinations=args.max_combinations,
             )
         elif args.command == "library_query":
             result = library_query(
