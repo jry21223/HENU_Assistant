@@ -62,3 +62,27 @@ Cherry Studio 示例：
 4. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
 
 账号、Cookie 和抓取结果都保存在本地。
+
+## 智能选课
+
+本版本包含通用智能选课模块 `campus_core.smart_course_selector`，三种接入形态复用同一套逻辑：
+
+- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。
+- 按班级筛选班级对应专业课、专业选课班 / 专业公共课、全年级公共课。
+- 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
+- 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
+
+MCP / OpenClaw 示例：
+
+```bash
+python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
+```
+
+Langbot CLI 示例：
+
+```text
+course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
+course filter --excel ./courses.xlsx --class 25软工1
+course schema
+```
+
