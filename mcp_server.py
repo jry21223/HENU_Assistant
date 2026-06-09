@@ -2704,8 +2704,150 @@ def _library_cancel_impl(record_id: str, record_type: str = "auto") -> dict[str,
     return result
 
 
+
+
+def _smart_course_selection_impl(
+    source_path: str = "",
+    excel_path: str = "",
+    json_path: str = "",
+    user_class: str = "",
+    sheet_name: str = "2026-2027-1学期",
+    semester: str = "",
+    mode: str = "plan",
+    like_early8: bool = False,
+    avoid_early8: bool = False,
+    compact_days: bool = False,
+    target_days: int = 3,
+    avoid_evening: bool = False,
+    allow_unscheduled: bool = True,
+    include_common: bool = True,
+    include_course_options: bool = False,
+    top_k: int = 3,
+    max_combinations: int = 200000,
+) -> dict[str, Any]:
+    """Build structured smart-course selection output from Excel/JSON."""
+    try:
+        from campus_core.smart_course_selector import build_smart_course_selection_response
+
+        return build_smart_course_selection_response(
+            source_path=source_path,
+            excel_path=excel_path,
+            json_path=json_path,
+            sheet_name=sheet_name,
+            semester=semester,
+            user_class=user_class,
+            mode=mode,
+            like_early8=True if like_early8 else None,
+            avoid_early8=avoid_early8,
+            compact_days=compact_days,
+            target_days=target_days,
+            avoid_evening=avoid_evening,
+            allow_unscheduled=allow_unscheduled,
+            include_common=include_common,
+            include_course_options=include_course_options,
+            top_k=top_k,
+            max_combinations=max_combinations,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "schema_version": "henu.smart_course_selection.v1",
+            "mode": str(mode or "plan"),
+            "msg": f"智能选课失败: {exc}",
+            "source": {},
+            "request": {},
+            "summary": {},
+            "course_options": [],
+            "plans": [],
+            "warnings": [str(exc)],
+        }
+
 # ===== MCP 精简对外工具 =====
 
+
+
+
+@mcp.tool()
+def smart_course_selection(
+    source_path: str = "",
+    excel_path: str = "",
+    json_path: str = "",
+    user_class: str = "",
+    sheet_name: str = "2026-2027-1学期",
+    semester: str = "",
+    mode: str = "plan",
+    like_early8: bool = False,
+    avoid_early8: bool = False,
+    compact_days: bool = False,
+    target_days: int = 3,
+    avoid_evening: bool = False,
+    allow_unscheduled: bool = True,
+    include_common: bool = True,
+    include_course_options: bool = False,
+    top_k: int = 3,
+    max_combinations: int = 200000,
+) -> dict[str, Any]:
+    """
+    智能选课结构化规划工具。
+
+    从教务导出的 Excel 或清洗后的 JSON 中筛选：
+    1) 班级对应专业课
+    2) 专业选课班 / 专业公共课
+    3) 全年级公共课
+
+    输出统一遵循 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions`
+    是后续自动选课提交器的输入契约；本工具只做 dry-run 规划，不提交教务系统。
+    """
+    return _smart_course_selection_impl(
+        source_path=source_path,
+        excel_path=excel_path,
+        json_path=json_path,
+        user_class=user_class,
+        sheet_name=sheet_name,
+        semester=semester,
+        mode=mode,
+        like_early8=like_early8,
+        avoid_early8=avoid_early8,
+        compact_days=compact_days,
+        target_days=target_days,
+        avoid_evening=avoid_evening,
+        allow_unscheduled=allow_unscheduled,
+        include_common=include_common,
+        include_course_options=include_course_options,
+        top_k=top_k,
+        max_combinations=max_combinations,
+    )
+
+
+@mcp.tool()
+def smart_course_select(
+    excel_path: str,
+    user_class: str,
+    sheet_name: str = "2026-2027-1学期",
+    semester: str = "",
+    like_early8: bool = False,
+    avoid_early8: bool = False,
+    compact_days: bool = False,
+    target_days: int = 3,
+    avoid_evening: bool = False,
+    allow_unscheduled: bool = True,
+    top_k: int = 3,
+) -> dict[str, Any]:
+    """兼容旧命名的智能选课入口。新接入建议使用 smart_course_selection。"""
+    return _smart_course_selection_impl(
+        excel_path=excel_path,
+        user_class=user_class,
+        sheet_name=sheet_name,
+        semester=semester,
+        mode="plan",
+        like_early8=like_early8,
+        avoid_early8=avoid_early8,
+        compact_days=compact_days,
+        target_days=target_days,
+        avoid_evening=avoid_evening,
+        allow_unscheduled=allow_unscheduled,
+        top_k=top_k,
+    )
 
 @mcp.tool()
 def setup_account(
