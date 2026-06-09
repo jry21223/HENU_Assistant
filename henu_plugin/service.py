@@ -112,6 +112,8 @@ class HenuPluginService:
             "henu_cli": self._henu_cli,
             "setup_account": self._setup_account,
             "sync_schedule": self._sync_schedule,
+            "smart_course_selection": self._smart_course_selection,
+            "smart_course_select": self._smart_course_select,
             "schedule_query": self._schedule_query,
             "library_query": self._library_query,
             "library_reserve": self._library_reserve,
@@ -512,6 +514,31 @@ class HenuPluginService:
             verify_login=_bool(params.get("verify_login"), True),
             calibrate_period_time=_bool(params.get("calibrate_period_time"), True),
         )
+
+
+    def _smart_course_selection(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.smart_course_selection(
+            source_path=_text(params.get("source_path") or params.get("source") or params.get("excel_path") or params.get("excel")),
+            excel_path=_text(params.get("excel_path") or params.get("excel")),
+            json_path=_text(params.get("json_path") or params.get("json")),
+            user_class=_text(params.get("user_class") or params.get("class")),
+            sheet_name=_text(params.get("sheet_name") or params.get("sheet")) or "2026-2027-1学期",
+            semester=_text(params.get("semester")),
+            mode=_text(params.get("mode")) or "plan",
+            like_early8=_bool(params.get("like_early8"), False),
+            avoid_early8=_bool(params.get("avoid_early8"), False),
+            compact_days=_bool(params.get("compact_days"), False),
+            target_days=_int(params.get("target_days"), 3),
+            avoid_evening=_bool(params.get("avoid_evening"), False),
+            allow_unscheduled=_bool(params.get("allow_unscheduled"), True),
+            include_common=_bool(params.get("include_common"), True),
+            include_course_options=_bool(params.get("include_course_options"), False),
+            top_k=_int(params.get("top_k"), 3),
+            max_combinations=_int(params.get("max_combinations"), 200000),
+        )
+
+    def _smart_course_select(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._smart_course_selection(params)
 
     def _sync_schedule(self, params: dict[str, Any]) -> dict[str, Any]:
         result = mcp_server.sync_schedule(

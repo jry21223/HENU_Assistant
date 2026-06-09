@@ -58,6 +58,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_account(raw, argv)
     if head == "schedule":
         return _parse_schedule(raw, argv)
+    if head in {"course", "courses", "xk"}:
+        return _parse_course(raw, argv)
     if head == "library":
         return _parse_library(raw, argv)
     if head == "seminar":
@@ -86,6 +88,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "account set --student-id ... --password ...",
                 "schedule now",
                 "schedule day --date 2026-03-30",
+                "course plan --excel ./courses.xlsx --class 25软工1",
                 "library current",
                 "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
                 "yunfz leave list",
@@ -96,6 +99,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "examples": [
                 "help account",
                 "help schedule",
+                "help course",
                 "help library",
                 "help seminar",
                 "help yunfz",
@@ -161,6 +165,29 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "tips": [
                 "`schedule now` 默认自动校准节次时间。",
                 "需要精确某天时，用 `schedule day --date ...`。",
+            ],
+        }
+
+
+    if normalized == "course":
+        return {
+            "topic": normalized,
+            "summary": "智能选课：从 Excel/JSON 课表中筛选班级专业课、专业选课班和全年级公共课，并输出结构化推荐方案。",
+            "commands": [
+                "course schema",
+                "course filter --excel <课表.xlsx> --class <班级> [--sheet 2026-2027-1学期]",
+                "course plan --excel <课表.xlsx> --class <班级> [--like-early8|--avoid-early8] [--compact-days --target-days 3]",
+                "course plan --excel <课表.xlsx> --class 25软工1 --include-options",
+            ],
+            "examples": [
+                "course schema",
+                "course filter --excel ./2026-2027-1.xlsx --class 25软工1",
+                "course plan --excel ./2026-2027-1.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3",
+            ],
+            "tips": [
+                "输出 schema_version 固定为 henu.smart_course_selection.v1。",
+                "plans[].selection_actions 是后续自动选课提交器的 dry-run 输入契约。",
+                "Excel 路径需要是运行环境本地可访问的文件路径。",
             ],
         }
 
@@ -287,11 +314,13 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help library", "help seminar", "help yunfz"]
+            return ["help account", "help schedule", "help course", "help library", "help seminar", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
         if topic == "schedule":
             return ["schedule now", "schedule sync"]
+        if topic == "course":
+            return ["course schema", "course filter --excel ./courses.xlsx --class 25软工1", "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3"]
         if topic == "library":
             return ["library current", "library locations", "library seats --location <区域> --date YYYY-MM-DD"]
         if topic == "seminar":
@@ -305,6 +334,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
 
     if resolved_tool == "setup_account":
         return ["account status", "schedule sync", "schedule now"]
+    if resolved_tool == "smart_course_selection":
+        return ["help course", "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3"]
     if resolved_tool == "sync_schedule":
         return ["schedule now", "schedule week"]
     if resolved_tool == "schedule_query":
@@ -482,6 +513,84 @@ def _parse_schedule(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
 
     return _error_spec(raw, f"未知命令 `schedule {argv[1]}`。", help_topic="schedule")
 
+
+
+
+def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 1:
+        return _help_spec(raw, argv, "course")
+
+    sub = argv[1].lower()
+    if sub in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "course")
+
+    options, _, error = _parse_options(argv[2:])
+    if error:
+        return _error_spec(raw, error, help_topic="course")
+
+    if sub in {"schema", "contract"}:
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="smart_course_selection",
+            params={"mode": "schema"},
+            action=f"course {sub}",
+            should_preload_runtime_context=False,
+        )
+
+    if sub in {"filter", "options", "select", "plan", "smart", "recommend"}:
+        source_path = (
+            _string_option(options, "source")
+            or _string_option(options, "source_path")
+            or _string_option(options, "excel")
+            or _string_option(options, "excel_path")
+            or _string_option(options, "json")
+            or _string_option(options, "json_path")
+            or _string_option(options, "file")
+        )
+        user_class = _string_option(options, "class") or _string_option(options, "user_class")
+        if not source_path:
+            return _error_spec(raw, "缺少参数 `--excel <Excel文件路径>` 或 `--source <文件路径>`。", help_topic="course")
+        if not user_class:
+            return _error_spec(raw, "缺少参数 `--class <班级>`，例如 `--class 25软工1`。", help_topic="course")
+
+        target_days, error = _int_option(options, "target_days", 3)
+        if error:
+            return _error_spec(raw, error, help_topic="course")
+        top_k, error = _int_option(options, "top_k", 3)
+        if error:
+            return _error_spec(raw, error, help_topic="course")
+        max_combinations, error = _int_option(options, "max_combinations", 200000)
+        if error:
+            return _error_spec(raw, error, help_topic="course")
+
+        mode = "filter" if sub in {"filter", "options"} else "plan"
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="smart_course_selection",
+            params={
+                "source_path": source_path,
+                "user_class": user_class,
+                "sheet_name": _string_option(options, "sheet") or _string_option(options, "sheet_name") or "2026-2027-1学期",
+                "semester": _string_option(options, "semester"),
+                "mode": mode,
+                "like_early8": _flag(options, "like_early8"),
+                "avoid_early8": _flag(options, "avoid_early8"),
+                "compact_days": _flag(options, "compact_days"),
+                "target_days": target_days,
+                "avoid_evening": _flag(options, "avoid_evening"),
+                "allow_unscheduled": not _flag(options, "no_unscheduled"),
+                "include_common": not _flag(options, "no_common"),
+                "include_course_options": _flag(options, "include_options") or mode == "filter",
+                "top_k": top_k,
+                "max_combinations": max_combinations,
+            },
+            action=f"course {sub}",
+            should_preload_runtime_context=False,
+        )
+
+    return _error_spec(raw, f"未知命令 `course {argv[1]}`。", help_topic="course")
 
 def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if len(argv) == 1:
