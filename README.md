@@ -56,3 +56,27 @@ python3 henu_cli.py seminar_reserve --area_id <ID> --target_date YYYY-MM-DD --st
 - 研讨室 `group` 不包含自己，建议保存 3-9 个同行成员。
 - 研讨室申请内容必须多于 10 个字。
 - 不建议直接执行系统级 `pip3 install -r requirements.txt`。
+
+## 智能选课
+
+本版本包含通用智能选课模块 `campus_core.smart_course_selector`，三种接入形态复用同一套逻辑：
+
+- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。
+- 按班级筛选班级对应专业课、专业选课班 / 专业公共课、全年级公共课。
+- 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
+- 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
+
+MCP / OpenClaw 示例：
+
+```bash
+python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
+```
+
+Langbot CLI 示例：
+
+```text
+course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
+course filter --excel ./courses.xlsx --class 25软工1
+course schema
+```
+

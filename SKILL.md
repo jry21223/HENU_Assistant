@@ -31,6 +31,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `schedule_query --view day --target_date "2026-03-19"`
 - `schedule_query --view week`
 - `schedule_query --view full`
+- `smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3`
 - `library_query --view locations`
 - `library_query --view seats --location "<区域>" --target_date "2026-03-19" --preferred_time "08:00"`
 - `library_query --view current`
