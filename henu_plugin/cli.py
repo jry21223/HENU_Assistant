@@ -87,6 +87,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "account status",
                 "account set --student-id ... --password ...",
                 "schedule now",
+                "course status",
+                "course plan --candidates-json '<json>'",
                 "schedule day --date 2026-03-30",
                 "course plan --excel ./courses.xlsx --class 25软工1",
                 "library current",
@@ -172,22 +174,27 @@ def build_help_payload(topic: str) -> dict[str, Any]:
     if normalized == "course":
         return {
             "topic": normalized,
-            "summary": "智能选课：从 Excel/JSON 课表中筛选班级专业课、专业选课班和全年级公共课，并输出结构化推荐方案。",
+            "summary": "选课工具：xk 只读状态查询、通用 JSON 本地规划，以及从 Excel/JSON 课表生成智能选课推荐。",
             "commands": [
+                "course status [--xktype 2]",
                 "course schema",
                 "course filter --excel <课表.xlsx> --class <班级> [--sheet 2026-2027-1学期]",
                 "course plan --excel <课表.xlsx> --class <班级> [--like-early8|--avoid-early8] [--compact-days --target-days 3]",
-                "course plan --excel <课表.xlsx> --class 25软工1 --include-options",
+                "course plan --candidates-json '<json>' [--preferences-json '<json>'] [--top-k 10]",
+                "course submit",
             ],
             "examples": [
+                "course status",
                 "course schema",
                 "course filter --excel ./2026-2027-1.xlsx --class 25软工1",
                 "course plan --excel ./2026-2027-1.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3",
+                "course plan --candidates-json '[[{\"name\":\"A\",\"meetings\":[{\"weekday\":1,\"periods\":[1,2],\"weeks\":[1,2]}]}]]'",
             ],
             "tips": [
-                "输出 schema_version 固定为 henu.smart_course_selection.v1。",
-                "plans[].selection_actions 是后续自动选课提交器的 dry-run 输入契约。",
-                "Excel 路径需要是运行环境本地可访问的文件路径。",
+                "`course status` 只读查询 xk 状态，不执行提交。",
+                "`course plan --excel/--source` 输出 henu.smart_course_selection.v1。",
+                "`course plan --candidates-json` 使用通用 JSON 做本地轻量规划。",
+                "`course submit` 当前只返回未实现提示，不执行真实选课。",
             ],
         }
 
@@ -320,7 +327,12 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         if topic == "schedule":
             return ["schedule now", "schedule sync"]
         if topic == "course":
-            return ["course schema", "course filter --excel ./courses.xlsx --class 25软工1", "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3"]
+            return [
+                "course status",
+                "course schema",
+                "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3",
+                "course plan --candidates-json '<json>'",
+            ]
         if topic == "library":
             return ["library current", "library locations", "library seats --location <区域> --date YYYY-MM-DD"]
         if topic == "seminar":
@@ -340,6 +352,12 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["schedule now", "schedule week"]
     if resolved_tool == "schedule_query":
         return ["schedule day --date 2026-03-30", "schedule week"]
+    if resolved_tool == "course_selection_query":
+        return ["course plan --candidates-json '<json>'", "course submit"]
+    if resolved_tool == "course_selection_plan":
+        return ["course status", "course submit"]
+    if resolved_tool == "course_selection_submit":
+        return ["course status"]
     if resolved_tool == "library_query":
         if spec.params.get("view") == "locations":
             return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
@@ -514,8 +532,6 @@ def _parse_schedule(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     return _error_spec(raw, f"未知命令 `schedule {argv[1]}`。", help_topic="schedule")
 
 
-
-
 def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if len(argv) == 1:
         return _help_spec(raw, argv, "course")
@@ -528,6 +544,29 @@ def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if error:
         return _error_spec(raw, error, help_topic="course")
 
+    if sub in {"status", "query"}:
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="course_selection_query",
+            params={
+                "view": "status",
+                "xktype": _string_option(options, "xktype") or "2",
+            },
+            action="course status",
+            should_preload_runtime_context=True,
+        )
+
+    if sub == "submit":
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="course_selection_submit",
+            params={"payload_json": _string_option(options, "payload_json")},
+            action="course submit",
+            should_preload_runtime_context=False,
+        )
+
     if sub in {"schema", "contract"}:
         return CliCommandSpec(
             raw=raw,
@@ -539,6 +578,25 @@ def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
 
     if sub in {"filter", "options", "select", "plan", "smart", "recommend"}:
+        candidates_json = _string_option(options, "candidates_json")
+        if candidates_json:
+            top_k, error = _int_option(options, "top_k", 10)
+            if error:
+                return _error_spec(raw, error, help_topic="course")
+            return CliCommandSpec(
+                raw=raw,
+                argv=argv,
+                resolved_tool="course_selection_plan",
+                params={
+                    "candidates_json": candidates_json,
+                    "existing_schedule_json": _string_option(options, "existing_schedule_json"),
+                    "preferences_json": _string_option(options, "preferences_json"),
+                    "top_k": top_k,
+                },
+                action="course plan",
+                should_preload_runtime_context=False,
+            )
+
         source_path = (
             _string_option(options, "source")
             or _string_option(options, "source_path")

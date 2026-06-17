@@ -115,6 +115,9 @@ class HenuPluginService:
             "smart_course_selection": self._smart_course_selection,
             "smart_course_select": self._smart_course_select,
             "schedule_query": self._schedule_query,
+            "course_selection_query": self._course_selection_query,
+            "course_selection_plan": self._course_selection_plan,
+            "course_selection_submit": self._course_selection_submit,
             "library_query": self._library_query,
             "library_reserve": self._library_reserve,
             "library_auto_signin": self._library_auto_signin,
@@ -650,6 +653,25 @@ class HenuPluginService:
             LIBRARY_QUERY_CACHE.set(cache_key, result, ttl_seconds=ttl_seconds)
 
         return result
+
+    def _course_selection_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_selection_query(
+            view=_text(params.get("view")) or "status",
+            xktype=_text(params.get("xktype")) or "2",
+        )
+
+    def _course_selection_plan(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_selection_plan(
+            candidates_json=_text(params.get("candidates_json")),
+            existing_schedule_json=_text(params.get("existing_schedule_json")),
+            preferences_json=_text(params.get("preferences_json")),
+            top_k=_int(params.get("top_k"), 10),
+        )
+
+    def _course_selection_submit(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_selection_submit(
+            payload_json=_text(params.get("payload_json")),
+        )
 
     def _library_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.library_reserve(

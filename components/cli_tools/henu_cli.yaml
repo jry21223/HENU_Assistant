@@ -6,18 +6,18 @@ metadata:
     en_US: HenuCLI
     zh_Hans: 河大 CLI
   description:
-    en_US: "Unified CLI-style entry for HENU account, schedule, library, seminar, and calibration operations."
-    zh_Hans: "统一 CLI 风格入口，用一条 command 调用河大账号、课表、图书馆、研讨室与节次校准能力。"
+    en_US: "Unified CLI-style entry for HENU account, schedule, course selection, library, seminar, and calibration operations."
+    zh_Hans: "统一 CLI 风格入口，用一条 command 调用河大账号、课表、选课、图书馆、研讨室与节次校准能力。"
 spec:
   parameters:
     type: object
     properties:
       command:
         type: string
-        description: CLI 风格命令字符串，例如 help、account status、schedule now、library current
+        description: CLI 风格命令字符串，例如 help、account status、schedule now、course status、library current
     required:
       - command
-  llm_prompt: "统一入口，只传 `command`。渐进式披露：先用 `help` 看一级命令，再用 `help <topic>` 看更窄主题；不确定参数时不要一次展开全部。常用命令：`account status`、`account set --student-id ... --password ...`、`schedule now`、`schedule day --date 2026-03-30`、`library current`、`library locations --date 2026-03-30`、`library seats --location ... --date 2026-03-30 --time 08:00`、`library reserve --location ... --seat-no ... --date 2026-03-30 --time 08:00 --end-time 12:00`、`library reserve --location ... --seat-no ... --retry-until 08:05 --max-attempts 30`、`seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`。参数值包含空格时要加引号。所有真实写操作只以返回 `success=true` 为准。"
+  llm_prompt: "统一入口，只传 `command`。渐进式披露：先用 `help` 看一级命令，再用 `help <topic>` 看更窄主题；不确定参数时不要一次展开全部。常用命令：`account status`、`account set --student-id ... --password ...`、`schedule now`、`course status`、`course plan --excel ./courses.xlsx --class 25软工1`、`course plan --candidates-json '<json>'`、`library current`、`library locations --date 2026-03-30`、`library seats --location ... --date 2026-03-30 --time 08:00`、`library reserve --location ... --seat-no ... --date 2026-03-30 --time 08:00 --end-time 12:00`、`library reserve --location ... --seat-no ... --retry-until 08:05 --max-attempts 30`、`seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`。`course status` 只读查询 xk 状态；`course submit` 当前不执行真实提交。参数值包含空格时要加引号。所有真实写操作只以返回 `success=true` 为准。"
 execution:
   python:
     path: henu_cli.py
