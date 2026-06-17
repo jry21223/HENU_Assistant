@@ -380,7 +380,7 @@ def _fetch_timetable_text_candidates(sid: str, pwd: str) -> list[tuple[str, str]
             if client.login():
                 save_json(COOKIE_FILE, client.get_cookies())
                 home = client.fetch_page(DEFAULT_HOME_URL)
-                referers = [home.get("final_url", ""), "https://xk.henu.edu.cn/cas/login.action", ""]
+                referers = [home.get("final_url", ""), client._cas_auth_url(), ""]
                 for u in urls:
                     for ref in referers:
                         try:
@@ -393,6 +393,7 @@ def _fetch_timetable_text_candidates(sid: str, pwd: str) -> list[tuple[str, str]
 
     # 2) 用公开登录页会话尝试
     try:
+        cas_auth_url = "https://ids.henu.edu.cn/authserver/login?service=https://xk.henu.edu.cn/caslogin"
         session = requests.Session()
         session.trust_env = False
         session.headers.update(
@@ -406,12 +407,12 @@ def _fetch_timetable_text_candidates(sid: str, pwd: str) -> list[tuple[str, str]
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             }
         )
-        session.get("https://xk.henu.edu.cn/cas/login.action", timeout=20)
+        session.get(cas_auth_url, timeout=20)
         for u in urls:
             try:
                 resp = session.get(
                     u,
-                    headers={"Referer": "https://xk.henu.edu.cn/cas/login.action"},
+                    headers={"Referer": cas_auth_url},
                     allow_redirects=True,
                     timeout=20,
                 )
