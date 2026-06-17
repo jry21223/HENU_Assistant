@@ -12,6 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 from henu_campus_mcp import (  # noqa: E402
+    course_selection_plan,
+    course_selection_query,
+    course_selection_submit,
     library_auto_signin,
     library_cancel,
     library_query,
@@ -61,7 +64,6 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD，仅 view=day 时使用")
     schedule_parser.add_argument("--no_auto_calibrate", action="store_true", help="查询当前课程前不执行自动节次校准")
 
-
     smart_course_parser = subparsers.add_parser("smart_course_selection", aliases=["smart_course_select"], help="从 Excel/JSON 课表智能规划选课")
     smart_course_parser.add_argument("--source_path", "--source", default="", help="Excel 或清洗后 JSON 文件路径")
     smart_course_parser.add_argument("--excel_path", "--excel", default="", help="教务导出的 Excel 文件路径")
@@ -80,6 +82,19 @@ def build_parser() -> argparse.ArgumentParser:
     smart_course_parser.add_argument("--include_options", action="store_true", help="plan 模式也返回候选课程选项")
     smart_course_parser.add_argument("--top_k", type=int, default=3, help="返回推荐方案数量")
     smart_course_parser.add_argument("--max_combinations", type=int, default=200000, help="最大组合搜索数")
+
+    course_query_parser = subparsers.add_parser("course_selection_query", help="查询选课状态（只读）")
+    course_query_parser.add_argument("--view", default="status", choices=["status"], help="查询视图")
+    course_query_parser.add_argument("--xktype", default="2", help="选课类型")
+
+    course_plan_parser = subparsers.add_parser("course_selection_plan", help="生成选课计划（本地规划）")
+    course_plan_parser.add_argument("--candidates_json", required=True, help="候选课程 JSON")
+    course_plan_parser.add_argument("--existing_schedule_json", default="", help="已有课表 JSON")
+    course_plan_parser.add_argument("--preferences_json", default="", help="偏好 JSON")
+    course_plan_parser.add_argument("--top_k", type=int, default=10, help="返回计划数量")
+
+    course_submit_parser = subparsers.add_parser("course_selection_submit", help="选课提交占位（不执行真实提交）")
+    course_submit_parser.add_argument("--payload_json", default="", help="预留参数，当前不使用")
 
     library_query_parser = subparsers.add_parser("library_query", help="统一查询图书馆信息")
     library_query_parser.add_argument("--view", default="current", choices=["locations", "seats", "current", "records"], help="查询视图")
@@ -238,7 +253,6 @@ def main() -> None:
                 target_date=args.target_date,
                 auto_calibrate=not args.no_auto_calibrate,
             )
-
         elif args.command in {"smart_course_selection", "smart_course_select"}:
             from mcp_server import smart_course_selection
 
@@ -261,6 +275,18 @@ def main() -> None:
                 top_k=args.top_k,
                 max_combinations=args.max_combinations,
             )
+
+        elif args.command == "course_selection_query":
+            result = course_selection_query(view=args.view, xktype=args.xktype)
+        elif args.command == "course_selection_plan":
+            result = course_selection_plan(
+                candidates_json=args.candidates_json,
+                existing_schedule_json=args.existing_schedule_json,
+                preferences_json=args.preferences_json,
+                top_k=args.top_k,
+            )
+        elif args.command == "course_selection_submit":
+            result = course_selection_submit(payload_json=args.payload_json)
         elif args.command == "library_query":
             result = library_query(
                 view=args.view,

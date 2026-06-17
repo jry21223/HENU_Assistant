@@ -15,6 +15,9 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from mcp_server import (  # noqa: E402
+    course_selection_plan,
+    course_selection_query,
+    course_selection_submit,
     library_auto_signin,
     library_cancel,
     library_query,
@@ -40,6 +43,9 @@ __all__ = [
     "setup_account",
     "sync_schedule",
     "schedule_query",
+    "course_selection_query",
+    "course_selection_plan",
+    "course_selection_submit",
     "library_query",
     "library_reserve",
     "library_auto_signin",

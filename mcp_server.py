@@ -24,6 +24,8 @@ from course_schedule import (
     run_fetch,
     save_json,
 )
+from course_planner import generate_ranked_plans
+from course_selection import HenuCourseSelectionClient
 from schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from secure_storage import (
     encrypt_value,
@@ -2715,8 +2717,6 @@ def _library_cancel_impl(record_id: str, record_type: str = "auto") -> dict[str,
     return result
 
 
-
-
 def _smart_course_selection_impl(
     source_path: str = "",
     excel_path: str = "",
@@ -2772,6 +2772,29 @@ def _smart_course_selection_impl(
             "plans": [],
             "warnings": [str(exc)],
         }
+
+
+def _course_selection_status_impl(xktype: str = "2") -> dict[str, Any]:
+    sid, pwd = _resolve_account("", "", use_saved_account=True)
+    if not sid:
+        return {"success": False, "msg": "缺少账号，请先 setup_account"}
+    client = HenuCourseSelectionClient(sid, pwd, saved_cookies=load_json(COOKIE_FILE) or None)
+    if not client.login():
+        return {"success": False, "msg": "教务系统登录失败，无法查询选课状态"}
+    save_json(COOKIE_FILE, client.get_cookies())
+    try:
+        return client.get_selection_status(xktype=str(xktype or "2"))
+    except Exception as exc:
+        return {"success": False, "msg": f"查询选课状态失败: {exc}"}
+
+
+def _course_selection_submit_not_implemented() -> dict[str, Any]:
+    return {
+        "success": False,
+        "code": "not_implemented",
+        "msg": "选课提交端点需要在选课开放后通过真实请求确认，当前版本不执行真实提交。",
+    }
+
 
 # ===== MCP 精简对外工具 =====
 
@@ -3068,6 +3091,50 @@ def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     重要：不要假装取消成功，必须调用此工具执行真实的取消操作。
     """
     return _library_cancel_impl(record_id=record_id, record_type=record_type)
+
+
+@mcp.tool()
+def course_selection_query(view: str = "status", xktype: str = "2") -> dict[str, Any]:
+    """
+    安全查询选课第一阶段状态。
+
+    当前仅支持 view=status，只调用已知只读端点，不执行选课提交。
+    """
+    normalized_view = str(view or "status").strip().lower()
+    if normalized_view != "status":
+        return {"success": False, "msg": "view 目前仅支持 status"}
+    return _course_selection_status_impl(xktype=xktype)
+
+
+@mcp.tool()
+def course_selection_plan(
+    candidates_json: str,
+    existing_schedule_json: str = "",
+    preferences_json: str = "",
+    top_k: int = 10,
+) -> dict[str, Any]:
+    """
+    根据候选课程 JSON 生成不冲突的选课计划。
+
+    该工具只做本地规划，不读取或提交 HENU 选课接口。
+    """
+    try:
+        return generate_ranked_plans(
+            candidates=candidates_json,
+            existing_schedule=existing_schedule_json,
+            preferences=preferences_json,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        return {"success": False, "msg": f"生成选课计划失败: {exc}"}
+
+
+@mcp.tool()
+def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
+    """
+    占位工具：当前版本不执行真实选课提交。
+    """
+    return _course_selection_submit_not_implemented()
 
 
 @mcp.tool()
