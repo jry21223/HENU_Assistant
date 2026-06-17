@@ -1,6 +1,6 @@
 ---
 name: henu_campus_assistant
-description: 河南大学校园助手，支持课表查询、图书馆预约、研讨室预约（与 mcp-server 能力对齐）
+description: 河南大学校园助手，支持课表查询、选课状态/规划、图书馆预约、研讨室预约（与 mcp-server 能力对齐）
 ---
 
 # 河大校园助手
