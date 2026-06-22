@@ -10,7 +10,7 @@ description: 河南大学校园助手，支持课表查询、选课状态/规划
 ## 功能
 
 - 课表：`setup_account`、`sync_schedule`、`schedule_query`
-- 选课：`smart_course_selection`、`course_selection_query`、`course_selection_plan`、`course_selection_submit`
+- 选课：`smart_course_selection`、`course_selection_query`、`course_selection_plan`、`course_selection_submit`、`course_monitor_config`、`course_monitor_once`、`course_monitor_run`、`course_monitor_notify_test`
 - 图书馆：`library_query`、`library_reserve`、`library_auto_signin`、`library_cancel`
 - 研讨室：`seminar_group`、`seminar_query`、`seminar_signin`、`seminar_reserve`、`seminar_cancel`
 - 系统：`set_calibration_source`、`system_status`
@@ -36,6 +36,8 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `course_selection_query --view status --xktype 2`
 - `course_selection_plan --candidates_json "<JSON>"`
 - `course_selection_submit`（当前只返回未实现提示，不执行真实提交）
+- `course_monitor_config --config_json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'`
+- `course_monitor_once`（只读检查余量，必要时提醒，不执行选课提交）
 - `library_query --view locations`
 - `library_query --view seats --location "<区域>" --target_date "2026-03-19" --preferred_time "08:00"`
 - `library_query --view current`
@@ -68,7 +70,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - 首次使用先执行 `setup_account`
 - 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先执行 `system_status`
 - 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
-- `course_selection_query` 只读查询 xk 选课状态，会走统一认证与 frame 菜单入口；`course_selection_submit` 当前不执行真实提交
+- `course_selection_query` 只读查询 xk 选课状态，会走统一认证与 frame 菜单入口；`course_monitor_*` 只读监控余量并提醒；`course_selection_submit` 当前不执行真实提交
 - 图书馆预约前先用 `library_query --view locations` 确认区域，可用 `library_query --view seats` 查看当前可用座位
 - 图书馆查看当前预约或历史记录时，用 `library_query --view current` / `library_query --view records`
 - 研讨室通常先按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 逐步查询

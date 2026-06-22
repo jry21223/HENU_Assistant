@@ -89,6 +89,7 @@ class HenuCourseSelectionClient(HenuXkClient):
             "url": url,
             "status_code": resp.status_code,
             "final_url": resp.url,
+            "full_text": text,
             **parsed,
         }
 
@@ -111,6 +112,68 @@ class HenuCourseSelectionClient(HenuXkClient):
                 "isZY": "0",
             },
             referer=referer or self.selection_entry_url,
+        )
+
+    def get_course_list_table(self, context: dict[str, Any] | None = None, referer: str | None = None) -> dict[str, Any]:
+        ctx = context or {}
+        data = {
+            "xktype": str(ctx.get("xktype") or "2"),
+            "xh": str(ctx.get("xh") or self.student_id),
+            "xn": str(ctx.get("xn") or ""),
+            "xq": str(ctx.get("xq") or ctx.get("xq_m") or "0"),
+            "nj": str(ctx.get("nj") or ""),
+            "zydm": str(ctx.get("zydm") or ""),
+            "_kcfw": str(ctx.get("_kcfw") or ctx.get("kcfw") or "zxbnj"),
+            "lcid": str(ctx.get("lcid") or ""),
+            "kcfw": str(ctx.get("kcfw") or ctx.get("_kcfw") or "zxbnj"),
+            "njzy": str(ctx.get("njzy") or ""),
+            "kcmc": str(ctx.get("kcmc") or ""),
+            "menucode_current": "S2020202",
+        }
+        return self.post_form(
+            "/taglib/DataTable.jsp?tableId=2568&fre=1",
+            data=data,
+            referer=referer or self.selection_entry_url,
+            accept="text/html, */*; q=0.01",
+        )
+
+    def get_teaching_class_table(
+        self,
+        course_id: str,
+        context: dict[str, Any] | None = None,
+        referer: str | None = None,
+    ) -> dict[str, Any]:
+        ctx = context or {}
+        data = {
+            "electiveCourseForm.xktype": str(ctx.get("xktype") or "2"),
+            "electiveCourseForm.lcid": str(ctx.get("lcid") or ""),
+            "electiveCourseForm.xn": str(ctx.get("xn") or ""),
+            "electiveCourseForm.xq": str(ctx.get("xq") or ctx.get("xq_m") or "0"),
+            "electiveCourseForm.xh": str(ctx.get("xh") or self.student_id),
+            "electiveCourseForm.nj": str(ctx.get("nj") or ""),
+            "electiveCourseForm.zydm": str(ctx.get("zydm") or ""),
+            "electiveCourseForm.kcdm": str(course_id or ""),
+            "electiveCourseForm.skbjdm": str(ctx.get("skbjdm") or ""),
+            "electiveCourseForm.kcfw": str(ctx.get("kcfw") or ctx.get("_kcfw") or "zxbnj"),
+            "electiveCourseForm.njzy": str(ctx.get("njzy") or ""),
+        }
+        query = (
+            "/taglib/DataTable.jsp?tableId=6142&fre=1"
+            f"&xn={data['electiveCourseForm.xn']}"
+            f"&xq_m={data['electiveCourseForm.xq']}"
+            f"&xh={data['electiveCourseForm.xh']}"
+            f"&kcdm={course_id}"
+            f"&skbjdm={data['electiveCourseForm.skbjdm']}"
+            f"&xktype={data['electiveCourseForm.xktype']}"
+            f"&kcfw={data['electiveCourseForm.kcfw']}"
+            "&isyxkc=false"
+            f"&lcid={data['electiveCourseForm.lcid']}"
+        )
+        return self.post_form(
+            query,
+            data=data,
+            referer=referer or self.selection_entry_url,
+            accept="text/html, */*; q=0.01",
         )
 
     def get_selection_status(self, xktype: str = "2") -> dict[str, Any]:

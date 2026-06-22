@@ -25,6 +25,21 @@ from course_schedule import (
     save_json,
 )
 from course_planner import generate_ranked_plans
+from course_monitor import (
+    DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
+    MIN_INTERVAL_SECONDS as COURSE_MONITOR_MIN_INTERVAL_SECONDS,
+    evaluate_alerts,
+    evaluate_matches,
+    get_monitor_config_file,
+    load_monitor_config,
+    load_monitor_state,
+    normalize_monitor_config,
+    notify_alerts,
+    parse_teaching_class_rows,
+    save_monitor_config,
+    save_monitor_state,
+    test_notification,
+)
 from course_selection import HenuCourseSelectionClient
 from schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from secure_storage import (
@@ -74,6 +89,37 @@ _LAST_LIBRARY_LOGIN_ERROR = ""
 HenuCampusBot = None
 try:
     from campus_core import HenuCampusBot
+except Exception:
+    pass
+
+# 空教室查询模块
+EmptyClassroomClient = None
+query_free_classrooms = None  # type: ignore[assignment]
+_sync_schedule_impl = None  # type: ignore[assignment]
+try:
+    from campus_core.empty_classroom import (
+        EmptyClassroomClient,
+        query_free_classrooms,
+    )
+    from campus_core.empty_classroom.query import sync_schedule as _sync_schedule_impl
+except Exception:
+    pass
+
+# 全局资源编号映射模块
+_resource_registry_available = False
+try:
+    from campus_core.resource_registry import (  # noqa: F811
+        resolve_resource,
+        search_resources,
+        list_resources as _list_registry_resources,
+        get_stats as _get_registry_stats,
+        upsert_resource,
+        get_resource,
+        sync_classrooms_from_metadata,
+        sync_library_resources,
+        sync_seminar_resources,
+    )
+    _resource_registry_available = True
 except Exception:
     pass
 
@@ -1570,7 +1616,7 @@ def _build_library_bot(student_id: str, password: str):
     bot = HenuCampusBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
 
     # 自动从课程表 cookie 文件注入 CASTGC，实现免密复用
-    # 始终用课程表的 CASTGC 覆盖（不因 library_cookies 里已有旧值而跳过）
+    # 始终用课程表的 CASTGC 覆盖，确保使用最新值
     schedule_cookies = load_json(COOKIE_FILE) or {}
     castgc = schedule_cookies.get("CASTGC", "")
     if castgc:
@@ -2083,13 +2129,17 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
         _save_library_cookies(bot.get_cookies())
         if hasattr(bot, "get_cas_cookies"):
             _save_cas_cookies(bot.get_cas_cookies())
+        # 增量 sync 到 resource_registry
+        _enrich_library_locations(result.get("locations", []))
         return result
 
+    locations = HenuCampusBot.static_locations()
+    _enrich_library_locations(locations)
     return {
         "success": True,
         "msg": "未绑定账号，返回内置兜底区域；绑定后可获取实时可预约区域",
         "date": target_day,
-        "locations": HenuCampusBot.static_locations(),
+        "locations": locations,
         "source": "static_fallback",
         "is_live": False,
     }
@@ -2132,6 +2182,8 @@ def _library_seats_impl(
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):
         _save_cas_cookies(bot.get_cas_cookies())
+    # 增量 sync 到 resource_registry
+    _enrich_library_seats(result.get("seats", []), target_area_id)
     return result
 
 
@@ -2513,6 +2565,12 @@ def _seminar_room_detail_impl(area_id: str, target_date: str = "") -> dict[str, 
     detail = detail_result.get("detail") or {}
     apply_info = apply_result.get("apply_info") or {}
     axis = apply_info.get("axis") or {}
+    categories = axis.get("category") or []
+    titles = detail.get("titles") or []
+
+    # 增量 sync 到 resource_registry
+    _enrich_seminar_resources(categories, titles)
+
     return {
         "success": True,
         "msg": "操作成功",
@@ -2520,8 +2578,8 @@ def _seminar_room_detail_impl(area_id: str, target_date: str = "") -> dict[str, 
         "apply_info": apply_info,
         "date_options": axis.get("date") or [],
         "date_rows": axis.get("list") or [],
-        "categories": axis.get("category") or [],
-        "titles": detail.get("titles") or [],
+        "categories": categories,
+        "titles": titles,
         "constraints": {
             "min_person": detail.get("minPerson"),
             "max_person": detail.get("maxPerson"),
@@ -2796,6 +2854,180 @@ def _course_selection_submit_not_implemented() -> dict[str, Any]:
     }
 
 
+def _json_object(value: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not str(value or "").strip():
+        return default or {}
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError("JSON 必须是对象")
+    return parsed
+
+
+def _course_monitor_config_impl(config_json: str = "", merge: bool = True) -> dict[str, Any]:
+    try:
+        if not str(config_json or "").strip():
+            return {
+                "success": True,
+                "config": load_monitor_config(),
+                "config_file": str(get_monitor_config_file()),
+                "default_config": COURSE_MONITOR_DEFAULT_CONFIG,
+            }
+        saved = save_monitor_config(_json_object(config_json), merge=merge)
+        return {
+            "success": True,
+            "msg": "选课监控配置已保存；配置不包含教务账号或密码。",
+            "config": saved,
+            "config_file": str(get_monitor_config_file()),
+        }
+    except Exception as exc:
+        return {"success": False, "msg": f"保存选课监控配置失败: {exc}"}
+
+
+def _extract_selection_context(status: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    configured = config.get("selection_context")
+    if isinstance(configured, dict):
+        context.update(configured)
+    raw_time_range = (status.get("raw_json") or {}).get("time_range") if isinstance(status.get("raw_json"), dict) else None
+    if isinstance(raw_time_range, dict):
+        payload = raw_time_range
+        result_text = raw_time_range.get("result")
+        if isinstance(result_text, str):
+            try:
+                parsed = json.loads(result_text)
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except Exception:
+                payload = raw_time_range
+        for source, target in {
+            "lcid": "lcid",
+            "xn": "xn",
+            "xqM": "xq",
+            "xq": "xq",
+            "nj": "nj",
+            "zydm": "zydm",
+        }.items():
+            if source in payload and not context.get(target):
+                context[target] = payload[source]
+    context.setdefault("xktype", config.get("xktype") or "2")
+    context.setdefault("kcfw", config.get("kcfw") or "zxbnj")
+    return context
+
+
+def _course_monitor_once_impl(config_json: str = "", send_notifications: bool = True) -> dict[str, Any]:
+    try:
+        config = normalize_monitor_config(
+            _deep_config_merge(load_monitor_config(), _json_object(config_json)) if str(config_json or "").strip() else load_monitor_config()
+        )
+    except Exception as exc:
+        return {"success": False, "msg": f"监控配置 JSON 无效: {exc}"}
+
+    fixture_html = str(config.get("fixture_html") or "")
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    status: dict[str, Any] = {}
+    context: dict[str, Any] = {}
+    if fixture_html:
+        rows = parse_teaching_class_rows(
+            fixture_html,
+            course_id=str(config.get("fixture_course_id") or ""),
+            course_name=str(config.get("fixture_course_name") or ""),
+        )
+    else:
+        sid, pwd = _resolve_account("", "", use_saved_account=True)
+        if not sid:
+            return {"success": False, "msg": "缺少账号，请先 setup_account"}
+        client = HenuCourseSelectionClient(sid, pwd, saved_cookies=load_json(COOKIE_FILE) or None)
+        if not client.login():
+            return {"success": False, "msg": "教务系统登录失败，无法监控选课余量"}
+        save_json(COOKIE_FILE, client.get_cookies())
+        status = client.get_selection_status(xktype=str(config.get("xktype") or "2"))
+        if not status.get("success"):
+            return status
+        context = _extract_selection_context(status, config)
+        context["xh"] = sid
+        targets = [target for target in config.get("targets") or [] if isinstance(target, dict)]
+        for target in targets:
+            course_id = str(target.get("course_id") or "").strip()
+            if not course_id:
+                warnings.append(f"目标缺少 course_id，已跳过: {target.get('course_name') or target.get('keywords') or target}")
+                continue
+            response = client.get_teaching_class_table(course_id, context=context, referer=str(status.get("entry_url") or ""))
+            rows.extend(
+                parse_teaching_class_rows(
+                    str(response.get("full_text") or response.get("raw_text") or ""),
+                    course_id=course_id,
+                    course_name=str(target.get("course_name") or ""),
+                )
+            )
+
+    matches = evaluate_matches(rows, [target for target in config.get("targets") or [] if isinstance(target, dict)])
+    state = load_monitor_state()
+    alerts, new_state = evaluate_alerts(matches, state)
+    save_monitor_state(new_state)
+    notify_result = notify_alerts(alerts, config) if send_notifications else {"success": True, "sent": False, "msg": "已禁用通知发送"}
+    return {
+        "success": True,
+        "msg": "选课余量检查完成；本工具只提醒，不会自动选课或提交。",
+        "checked_at": _now_dt().isoformat(),
+        "rows_count": len(rows),
+        "matches_count": len(matches),
+        "alerts_count": len(alerts),
+        "matches": matches,
+        "alerts": alerts,
+        "notify": notify_result,
+        "warnings": warnings,
+        "selection_context": {key: value for key, value in context.items() if key != "xh"},
+        "status": {
+            "is_open": status.get("is_open"),
+            "message": status.get("message"),
+            "entry_url": status.get("entry_url"),
+        } if status else {},
+    }
+
+
+def _deep_config_merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_config_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _course_monitor_run_impl(
+    config_json: str = "",
+    max_checks: int = 1,
+    duration_seconds: int = 0,
+    send_notifications: bool = True,
+) -> dict[str, Any]:
+    config = normalize_monitor_config(
+        _deep_config_merge(load_monitor_config(), _json_object(config_json)) if str(config_json or "").strip() else load_monitor_config()
+    )
+    interval = max(COURSE_MONITOR_MIN_INTERVAL_SECONDS, int(config.get("interval_seconds") or COURSE_MONITOR_MIN_INTERVAL_SECONDS))
+    if max_checks <= 0 and duration_seconds <= 0:
+        max_checks = 1
+    started = time.time()
+    results: list[dict[str, Any]] = []
+    checks = 0
+    while True:
+        checks += 1
+        results.append(_course_monitor_once_impl(config_json=json.dumps(config, ensure_ascii=False), send_notifications=send_notifications))
+        if max_checks > 0 and checks >= max_checks:
+            break
+        if duration_seconds > 0 and time.time() - started >= duration_seconds:
+            break
+        time.sleep(interval)
+    return {
+        "success": all(item.get("success") for item in results),
+        "msg": "选课余量监控运行完成；未执行任何选课提交。",
+        "checks": checks,
+        "interval_seconds": interval,
+        "results": results,
+    }
+
+
 # ===== MCP 精简对外工具 =====
 
 
@@ -2896,7 +3128,7 @@ def setup_account(
     【必须调用】初始化河大账号 - 这是使用其他功能的前提
     
     【执行协议（必须遵守）】
-    1) 在给用户任何“已完成/已成功”结论前，必须先真实调用本工具并等待返回。
+    1) 在给用户任何"已完成/已成功"结论前，必须先真实调用本工具并等待返回。
     2) 回复时必须基于本次返回中的 success/msg/account 字段，不得凭空补全。
     3) 若调用失败或未调用，必须明确说明未完成，禁止使用完成时态描述结果。
     
@@ -2941,7 +3173,7 @@ def sync_schedule(
     【必须调用】同步课表 - 从教务系统获取真实课表数据
     
     【执行协议（必须遵守）】
-    1) 禁止直接口述“已同步课表”，必须先调用此工具。
+    1) 禁止直接口述"已同步课表"，必须先调用此工具。
     2) 回复中必须转述本次返回的 success/msg 与关键文件字段。
     3) 如果工具失败，必须如实返回失败原因，不得伪造课表内容。
     
@@ -3010,6 +3242,184 @@ def library_query(
     return {"success": False, "msg": "view 仅支持 locations/seats/current/records"}
 
 
+def _enrich_library_locations(locations: list[dict[str, Any]]) -> None:
+    """为图书馆区域列表添加 resource_id，并增量 upsert 到 registry。"""
+    if not locations or not _resource_registry_available:
+        return
+    try:
+        from campus_core.resource_registry import (
+            build_resource_id,
+            upsert_resource,
+            ResourceRecord,
+        )
+        from datetime import datetime
+
+        library_id = "henu_library"
+        now = datetime.now().isoformat()
+
+        for loc in locations:
+            area_id = str(loc.get("areaId", loc.get("area_id", loc.get("id", ""))))
+            area_name = str(loc.get("areaName", loc.get("area_name", loc.get("name", ""))))
+            if not area_id or not area_name:
+                continue
+
+            rid = build_resource_id("library_area", library_id=library_id, area_id=area_id)
+            loc["resourceId"] = rid
+            loc["resourceType"] = "library_area"
+
+            # 增量 upsert
+            record = ResourceRecord(
+                resource_id=rid,
+                resource_type="library_area",
+                display_name=f"图书馆 {area_name}",
+                canonical_name=area_name,
+                aliases=[area_name, f"图书馆{area_name}"],
+                source={"system": "library", "source_id": area_id},
+                location={"libraryId": library_id, "areaId": area_id, "areaName": area_name},
+                updated_at=now,
+            )
+            upsert_resource(record)
+    except Exception:
+        pass
+
+
+def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "") -> None:
+    """为图书馆座位列表添加 resource_id，并增量 upsert 到 registry。"""
+    if not seats or not _resource_registry_available:
+        return
+    try:
+        from campus_core.resource_registry import (
+            build_resource_id,
+            upsert_resource,
+            ResourceRecord,
+        )
+        from datetime import datetime
+
+        library_id = "henu_library"
+        now = datetime.now().isoformat()
+
+        for seat in seats:
+            seat_no = str(seat.get("seatNo", seat.get("seat_no", seat.get("name", ""))))
+            area_id = str(seat.get("areaId", seat.get("area_id", fallback_area_id)))
+            if not seat_no or not area_id:
+                continue
+
+            rid = build_resource_id(
+                "library_seat",
+                library_id=library_id,
+                area_id=area_id,
+                seat_no=seat_no,
+            )
+            seat["resourceId"] = rid
+            seat["resourceType"] = "library_seat"
+            seat["parentResourceType"] = "library_area"
+            seat["areaResourceId"] = build_resource_id(
+                "library_area", library_id=library_id, area_id=area_id
+            )
+
+            # 增量 upsert
+            record = ResourceRecord(
+                resource_id=rid,
+                resource_type="library_seat",
+                display_name=f"图书馆座位 {seat_no}",
+                canonical_name=seat_no,
+                aliases=[seat_no, f"座位{seat_no}"],
+                source={"system": "library", "source_id": seat_no},
+                location={
+                    "libraryId": library_id,
+                    "areaId": area_id,
+                    "seatNo": seat_no,
+                },
+                updated_at=now,
+            )
+            upsert_resource(record)
+    except Exception:
+        pass
+
+
+def _enrich_seminar_resources(
+    categories: list[dict[str, Any]],
+    titles: list[dict[str, Any]],
+) -> None:
+    """为研讨室 categories/titles 添加 resource_id，并增量 upsert 到 registry。"""
+    if not _resource_registry_available:
+        return
+    try:
+        from campus_core.resource_registry import (
+            build_resource_id,
+            upsert_resource,
+            ResourceRecord,
+        )
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+
+        for cat in (categories or []):
+            area_id = str(cat.get("id", cat.get("areaId", cat.get("area_id", ""))))
+            cat_name = str(cat.get("name", cat.get("categoryName", "")))
+            if not area_id:
+                continue
+
+            rid = build_resource_id("seminar_room", area_id=area_id)
+            cat["resourceId"] = rid
+            cat["resourceType"] = "seminar_room"
+
+            display = f"研讨室 {cat_name}" if cat_name else f"研讨室 {area_id}"
+            record = ResourceRecord(
+                resource_id=rid,
+                resource_type="seminar_room",
+                display_name=display,
+                canonical_name=cat_name or area_id,
+                aliases=[cat_name, f"研讨室{cat_name}"] if cat_name else [f"研讨室{area_id}"],
+                source={"system": "seminar", "source_id": area_id},
+                location={"areaId": area_id, "roomName": cat_name},
+                attributes={"category": cat_name},
+                updated_at=now,
+            )
+            upsert_resource(record)
+
+        for title in (titles or []):
+            title_id = str(title.get("id", title.get("titleId", "")))
+            title_name = str(title.get("name", title.get("title", "")))
+            if not title_id:
+                continue
+
+            rid = build_resource_id("seminar_room", area_id=title_id)
+            title["resourceId"] = rid
+            title["resourceType"] = "seminar_room"
+
+            display = f"研讨室 {title_name}" if title_name else f"研讨室 {title_id}"
+            record = ResourceRecord(
+                resource_id=rid,
+                resource_type="seminar_room",
+                display_name=display,
+                canonical_name=title_name or title_id,
+                aliases=[title_name, f"研讨室{title_name}"] if title_name else [],
+                source={"system": "seminar", "source_id": title_id},
+                location={"areaId": title_id, "roomName": title_name},
+                updated_at=now,
+            )
+            upsert_resource(record)
+    except Exception:
+        pass
+
+
+def _resolve_resource_id_to_params(resource_id: str) -> dict[str, str]:
+    """将 resource_id 解析为 library_reserve 可用的参数。"""
+    if not resource_id or not _resource_registry_available:
+        return {}
+    from campus_core.resource_registry import parse_resource_id
+    parsed = parse_resource_id(resource_id)
+    if parsed.get("type") == "library_seat":
+        return {
+            "area_id": parsed.get("area_id", ""),
+            "seat_no": parsed.get("seat_no", ""),
+        }
+    elif parsed.get("type") == "library_area":
+        return {"area_id": parsed.get("area_id", "")}
+    return {}
+
+
 @mcp.tool()
 def library_reserve(
     location: str = "",
@@ -3017,35 +3427,46 @@ def library_reserve(
     target_date: str = "",
     preferred_time: str = "08:00",
     preferred_end_time: str = "",
+    resource_id: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
-    
+
     【执行协议（必须遵守）】
-    1) 禁止在未调用工具时说“已预约成功/已帮你预约”。
+    1) 禁止在未调用工具时说"已预约成功/已帮你预约"。
     2) 回复必须包含本次返回的 success/msg/date（以及 applied_time 如有）。
     3) 调用失败时必须原样转述失败原因，不得改写为成功。
-    
+
     功能：向图书馆系统提交座位预约请求
     参数：
     - location: 图书馆区域名称（如"一楼东"）
     - seat_no: 座位号（如"001"）
+    - resource_id: 资源ID（如 henu:library:seat:...），优先级高于 location/seat_no
     - target_date: 预约日期（格式：YYYY-MM-DD，默认明天）
     - preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）
     - preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）
     - retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）
     - retry_interval_seconds: 抢约重试间隔秒数（1-60）
     - max_attempts: 最大尝试次数（1-120）
-    
+
     ⚠️ 严禁编造预约结果！
     - 不要说"预约成功"除非此工具返回 success: true
     - 不要假装已经预约，必须实际调用此工具
     - 预约失败时必须如实告知用户失败原因
     - 只有工具返回的结果才是真实的预约状态
     """
+    # resource_id 优先：解析出 area_id / seat_no（不覆盖显式传入的 location/seat_no）
+    if resource_id and _resource_registry_available:
+        resolved = _resolve_resource_id_to_params(resource_id)
+        if resolved:
+            if not location and resolved.get("area_id"):
+                location = resolved["area_id"]
+            if not seat_no and resolved.get("seat_no"):
+                seat_no = resolved["seat_no"]
+
     return _library_reserve_impl(
         location=location,
         seat_no=seat_no,
@@ -3064,7 +3485,7 @@ def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     【必须调用】图书馆自动签到 - 对当前预约执行真实签到操作
 
     【执行协议（必须遵守）】
-    1) 禁止在未调用本工具前说“已签到”。
+    1) 禁止在未调用本工具前说"已签到"。
     2) 回复时只可依据本次返回的 success/msg/sign_path/record 字段。
     3) 若没有可签到记录或签到失败，必须如实说明原因。
 
@@ -3081,9 +3502,9 @@ def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     【必须调用】取消图书馆预约 - 执行真实的取消操作
     
     【执行协议（必须遵守）】
-    1) 禁止在未调用本工具前说“已取消”。
+    1) 禁止在未调用本工具前说"已取消"。
     2) 只可依据本次返回 success/msg 输出取消结果。
-    3) 失败时必须明确为“取消失败”，并附原始原因。
+    3) 失败时必须明确为"取消失败"，并附原始原因。
     
     功能：向图书馆系统提交取消预约请求
     record_type 支持 auto 自动识别
@@ -3135,6 +3556,65 @@ def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
     占位工具：当前版本不执行真实选课提交。
     """
     return _course_selection_submit_not_implemented()
+
+
+@mcp.tool()
+def course_monitor_config(config_json: str = "", merge: bool = True) -> dict[str, Any]:
+    """
+    查看或保存选课余量监控配置。
+
+    配置只保存课程目标、偏好和通知环境变量名，不保存教务账号或密码。
+    """
+    return _course_monitor_config_impl(config_json=config_json, merge=merge)
+
+
+@mcp.tool()
+def course_monitor_once(config_json: str = "", send_notifications: bool = True) -> dict[str, Any]:
+    """
+    执行一次只读选课余量检查。
+
+    检测到目标教学班余量变化时可发送飞书提醒；不会点击选课、提交或退选。
+    """
+    return _course_monitor_once_impl(config_json=config_json, send_notifications=send_notifications)
+
+
+@mcp.tool()
+def course_monitor_run(
+    config_json: str = "",
+    max_checks: int = 1,
+    duration_seconds: int = 0,
+    send_notifications: bool = True,
+) -> dict[str, Any]:
+    """
+    按配置间隔运行选课余量监控。
+
+    默认只检查一次；传入 max_checks 或 duration_seconds 可持续运行。间隔最低 60 秒。
+    """
+    try:
+        return _course_monitor_run_impl(
+            config_json=config_json,
+            max_checks=max_checks,
+            duration_seconds=duration_seconds,
+            send_notifications=send_notifications,
+        )
+    except Exception as exc:
+        return {"success": False, "msg": f"选课监控运行失败: {exc}"}
+
+
+@mcp.tool()
+def course_monitor_notify_test(config_json: str = "") -> dict[str, Any]:
+    """
+    测试选课余量飞书通知。
+
+    不访问教务系统，不执行选课提交。
+    """
+    try:
+        config = normalize_monitor_config(
+            _deep_config_merge(load_monitor_config(), _json_object(config_json)) if str(config_json or "").strip() else load_monitor_config()
+        )
+        return test_notification(config)
+    except Exception as exc:
+        return {"success": False, "msg": f"测试通知失败: {exc}"}
 
 
 @mcp.tool()
@@ -3264,7 +3744,7 @@ def seminar_cancel(record_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def seminar_reserve(
-    area_id: str,
+    area_id: str = "",
     target_date: str = "",
     start_time: str = "",
     end_time: str = "",
@@ -3278,18 +3758,27 @@ def seminar_reserve(
     is_open: int = 0,
     cate_id: str = "",
     time_ranges_json: str = "",
+    resource_id: str = "",
 ) -> dict[str, Any]:
     """
     预约研讨室。
 
     重要规则：
     1) 申请内容 `content` 必须多于 10 个字。
-    2) 实际总人数按“当前账号 + group/member_ids 成员”计算。
+    2) 实际总人数按"当前账号 + group/member_ids 成员"计算。
     3) 支持通过 `group_name` 使用已保存 group，也支持直接传 `member_ids`。
     4) 对于预设主题房间，需要传 `title_id`；普通房间传 `title`。
     5) `time_ranges_json` 可传 JSON 数组以支持多时间段，例如
        `[{"start_time":"09:00","end_time":"11:00"}]`
+    6) `resource_id`（如 henu:seminar:room:...）优先级高于 area_id
     """
+    # resource_id 优先：解析出 area_id
+    if resource_id and _resource_registry_available:
+        from campus_core.resource_registry import parse_resource_id
+        parsed = parse_resource_id(resource_id)
+        if parsed.get("type") == "seminar_room" and parsed.get("area_id"):
+            area_id = parsed["area_id"]
+
     return _seminar_reserve_impl(
         area_id=area_id,
         target_date=target_date,
@@ -3375,7 +3864,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     查看系统状态：账号、时间、节次配置、最近校准状态、输出文件。
 
     【执行协议（必须遵守）】
-    1) 当用户提到“现在/今天/明天/当前/待签到/是否过期”等相对时间时，必须先调用本工具。
+    1) 当用户提到"现在/今天/明天/当前/待签到/是否过期"等相对时间时，必须先调用本工具。
     2) 在查询图书馆或研讨室预约前，也必须先调用本工具确认当前日期时间。
     3) 回复中的时间判断只允许基于本次返回的 `server_time`。
     """
@@ -3641,6 +4130,683 @@ def yunfz_collection_query(
         return result
 
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
+
+
+# ── 空教室查询 ──────────────────────────────────────────────
+
+
+def _get_empty_classroom_client() -> Any:
+    """获取已认证的 EmptyClassroomClient（复用教务登录态）。"""
+    if EmptyClassroomClient is None:
+        return None
+
+    sid, pwd = _resolve_account("", "", use_saved_account=True)
+    if not sid:
+        return None
+
+    xk_client = HenuXkClient(sid, pwd, saved_cookies=load_json(COOKIE_FILE) or None)
+    if not xk_client.login():
+        return None
+
+    save_json(COOKIE_FILE, xk_client.get_cookies())
+    return EmptyClassroomClient(xk_client)
+
+
+def _resolve_campus_and_building(
+    campus_text: str,
+    building_text: str = "",
+    classroom_text: str = "",
+) -> dict[str, Any]:
+    """通过资源 registry 将自然语言校区/楼房名解析为代码。
+
+    Returns:
+        成功: {"campus_code": "01", "campus_name": "...", "building_code": "...", ...}
+        失败: {"success": False, "msg": "...", "candidates": [...]}
+    """
+    if not _resource_registry_available:
+        return {"success": False, "msg": "资源 registry 不可用，请使用 campus_code/building_code"}
+
+    # 预加载 seed 数据
+    try:
+        from campus_core.resource_registry import preload_seed_if_needed
+        preload_seed_if_needed()
+    except Exception:
+        pass
+
+    # 组合查询文本
+    query_parts = [campus_text]
+    if building_text:
+        query_parts.append(building_text)
+    if classroom_text:
+        query_parts.append(classroom_text)
+    full_query = " ".join(query_parts)
+
+    # 1. 先解析校区
+    campus_code = ""
+    campus_name = ""
+    if campus_text:
+        result = resolve_resource(campus_text, resource_type="campus", limit=3)
+        campus_candidates = result.get("candidates", [])
+        if campus_candidates and campus_candidates[0].get("score", 0) >= 0.7:
+            # 通过 resource_id 解析 campus_code
+            rid = campus_candidates[0]["resourceId"]
+            parts = rid.split(":")
+            if len(parts) >= 3:
+                campus_code = parts[2]
+            campus_name = campus_candidates[0].get("displayName", "")
+        else:
+            # 返回候选让用户选
+            return {
+                "success": False,
+                "msg": f"未找到匹配校区: '{campus_text}'，请从候选中选择",
+                "candidates": campus_candidates,
+            }
+
+    # 2. 再解析楼房（可选）
+    building_code = ""
+    building_name = ""
+    if building_text and campus_code:
+        result = resolve_resource(
+            building_text,
+            resource_type="building",
+            campus_code=campus_code,
+            limit=5,
+        )
+        building_candidates = result.get("candidates", [])
+        if building_candidates and building_candidates[0].get("score", 0) >= 0.5:
+            rid = building_candidates[0]["resourceId"]
+            parts = rid.split(":")
+            if len(parts) >= 4:
+                building_code = parts[3]
+            building_name = building_candidates[0].get("displayName", "")
+        else:
+            return {
+                "success": False,
+                "msg": f"在{campus_name}中未找到匹配楼房: '{building_text}'",
+                "candidates": building_candidates,
+            }
+
+    # 3. 教室文本暂不解析（由 keyword 参数处理）
+    if classroom_text and not building_text:
+        # 尝试从教室名直接解析楼房
+        pass
+
+    return {
+        "campus_code": campus_code,
+        "campus_name": campus_name,
+        "building_code": building_code,
+        "building_name": building_name,
+    }
+
+
+@mcp.tool()
+def empty_classroom_query(
+    view: str = "free",
+    term_code: str = "",
+    week: int = 0,
+    day_of_week: int = 0,
+    period: int = 0,
+    campus_code: str = "",
+    building_code: str = "",
+    campus_text: str = "",
+    building_text: str = "",
+    classroom_text: str = "",
+    type_code: str = "",
+    min_capacity: int = 0,
+    keyword: str = "",
+    room_id: str = "",
+    freshness: str = "cache_first",
+    force_refresh: bool = False,
+    ttl_seconds: int = 300,
+    max_stale_seconds: int = 86400,
+) -> dict[str, Any]:
+    """
+    查询空教室 / 教室信息 / 校区楼房列表
+
+    数据来源：学校教务系统教室课表。仅反映学校系统中已登记的课程/占用信息，
+    不包含未录入系统的临时占用。
+
+    view 模式：
+    - "free": 查询指定时间的空闲教室
+    - "day_matrix": 查询某天所有大节的空闲教室矩阵
+    - "occupancy": 查询单个教室某时间段的占用详情
+    - "terms": 查询可用学期列表
+    - "campuses": 查询校区列表
+    - "buildings": 查询楼房列表（需 campus_code）
+    - "classrooms": 查询教室列表
+    - "types": 查询教室类型列表
+
+    参数优先级（校区/楼房）：
+    - campus_code/building_code 显式传入时优先
+    - 否则使用 campus_text/building_text 通过资源 registry 解析
+    - 解析失败时返回候选列表供用户选择
+
+    freshness 策略：
+    - "cache_first"（默认）: 未过期用缓存，过期再刷新
+    - "live": 每次请求都尝试刷新上游
+    - "stale_while_revalidate": 先返回旧缓存，同时标记需要刷新
+    - "cache_only": 只查缓存，不访问学校系统
+    """
+    if EmptyClassroomClient is None or query_free_classrooms is None:
+        return {
+            "success": False,
+            "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
+        }
+
+    # ── 文本参数解析 ──
+    resolution: dict[str, Any] = {}
+    if not campus_code and campus_text:
+        resolution = _resolve_campus_and_building(campus_text, building_text, classroom_text)
+        if not resolution.get("campus_code"):
+            # 解析失败，返回候选列表
+            return resolution
+        campus_code = resolution["campus_code"]
+        if not building_code and resolution.get("building_code"):
+            building_code = resolution["building_code"]
+
+    client = _get_empty_classroom_client()
+    if client is None:
+        return {
+            "success": False,
+            "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
+        }
+
+    # ── 无登录态也能查的 view ──
+    if view in ("terms", "campuses", "buildings", "classrooms", "types"):
+        return _empty_classroom_meta_query(client, view, campus_code, building_code, type_code, keyword)
+
+    # ── 需要登录态的 view ──
+    if view == "free":
+        if not term_code or week <= 0 or day_of_week <= 0 or period <= 0:
+            return {
+                "success": False,
+                "msg": "view=free 需要提供 term_code, week, day_of_week, period",
+            }
+
+        result = query_free_classrooms(
+            client=client,
+            term_code=term_code,
+            week=week,
+            day_of_week=day_of_week,
+            period=period,
+            campus_code=campus_code,
+            building_code=building_code,
+            type_code=type_code,
+            min_capacity=min_capacity,
+            keyword=keyword,
+            freshness=freshness,
+            force_refresh=force_refresh,
+            ttl_seconds=ttl_seconds,
+            max_stale_seconds=max_stale_seconds,
+        )
+        data = result.to_dict()
+        data["success"] = True
+        data["msg"] = f"找到 {result.total} 间空闲教室"
+        return data
+
+    if view == "day_matrix":
+        if not term_code or week <= 0 or day_of_week <= 0:
+            return {
+                "success": False,
+                "msg": "view=day_matrix 需要提供 term_code, week, day_of_week",
+            }
+
+        periods_result: list[dict[str, Any]] = []
+        for p in (1, 2, 3, 4, 5):
+            result = query_free_classrooms(
+                client=client,
+                term_code=term_code,
+                week=week,
+                day_of_week=day_of_week,
+                period=p,
+                campus_code=campus_code,
+                building_code=building_code,
+                type_code=type_code,
+                min_capacity=min_capacity,
+                keyword=keyword,
+                freshness=freshness,
+                force_refresh=force_refresh,
+                ttl_seconds=ttl_seconds,
+                max_stale_seconds=max_stale_seconds,
+            )
+            period_name_map = {1: "第一大节", 2: "第二大节", 3: "第三大节", 4: "第四大节", 5: "第五大节"}
+            periods_result.append(
+                {
+                    "period": p,
+                    "periodName": period_name_map.get(p, ""),
+                    "total": result.total,
+                    "rooms": [
+                        {
+                            "roomId": r.get("roomId", ""),
+                            "roomName": r.get("roomName", ""),
+                            "capacity": r.get("capacity", 0),
+                        }
+                        for r in result.rooms
+                    ],
+                }
+            )
+
+        return {
+            "success": True,
+            "msg": f"已查询 {len(periods_result)} 个大节",
+            "data": {
+                "termCode": term_code,
+                "week": week,
+                "dayOfWeek": day_of_week,
+                "periods": periods_result,
+            },
+        }
+
+    if view == "occupancy":
+        # 查询单个教室指定时间段的占用详情
+        if not term_code or not room_id or week <= 0 or day_of_week <= 0 or period <= 0:
+            return {
+                "success": False,
+                "msg": "view=occupancy 需要提供 term_code, room_id, week, day_of_week, period",
+            }
+        return _empty_classroom_occupancy_query(
+            client, term_code, room_id, week, day_of_week, period,
+            campus_code, building_code, freshness, force_refresh, ttl_seconds, max_stale_seconds,
+        )
+
+    return {"success": False, "msg": f"不支持的 view: {view}"}
+
+
+def _empty_classroom_meta_query(
+    client: Any,
+    view: str,
+    campus_code: str,
+    building_code: str,
+    type_code: str,
+    keyword: str,
+) -> dict[str, Any]:
+    """处理 terms/campuses/buildings/classrooms/types 等元数据查询。"""
+    if view == "terms":
+        terms = client.fetch_terms()
+        return {
+            "success": True,
+            "msg": f"共 {len(terms)} 个学期",
+            "data": [t.to_dict() for t in terms],
+        }
+
+    if view == "campuses":
+        campuses = client.fetch_campuses()
+        return {
+            "success": True,
+            "msg": f"共 {len(campuses)} 个校区",
+            "data": [c.to_dict() for c in campuses],
+        }
+
+    if view == "buildings":
+        if not campus_code:
+            # 返回所有校区的楼房
+            all_buildings: list[dict[str, Any]] = []
+            campuses = client.fetch_campuses()
+            for campus in campuses:
+                buildings = client.fetch_buildings(campus.campus_code)
+                for b in buildings:
+                    all_buildings.append(b.to_dict())
+            return {
+                "success": True,
+                "msg": f"共 {len(all_buildings)} 个楼房",
+                "data": all_buildings,
+            }
+        buildings = client.fetch_buildings(campus_code)
+        return {
+            "success": True,
+            "msg": f"校区 {campus_code} 共 {len(buildings)} 个楼房",
+            "data": [b.to_dict() for b in buildings],
+        }
+
+    if view == "classrooms":
+        classrooms = client.fetch_classrooms(
+            campus_code=campus_code,
+            building_code=building_code,
+            type_code=type_code,
+        )
+        # 补充 campusName/buildingName
+        campus_map = client.get_campus_map()
+        building_map = client.get_building_map(campus_code) if campus_code else {}
+        result_list: list[dict[str, Any]] = []
+        for c in classrooms:
+            d = c.to_dict()
+            if campus_code and campus_code in campus_map:
+                d["campusName"] = campus_map[campus_code]
+            if building_code and building_code in building_map:
+                d["buildingName"] = building_map[building_code]
+            if keyword and keyword not in d.get("roomName", ""):
+                continue
+            result_list.append(d)
+        return {
+            "success": True,
+            "msg": f"共 {len(result_list)} 个教室",
+            "data": result_list,
+        }
+
+    if view == "types":
+        types = client.fetch_room_types()
+        return {
+            "success": True,
+            "msg": f"共 {len(types)} 种教室类型",
+            "data": [t.to_dict() for t in types],
+        }
+
+    return {"success": False, "msg": f"不支持的 view: {view}"}
+
+
+def _empty_classroom_occupancy_query(
+    client: Any,
+    term_code: str,
+    room_id: str,
+    week: int,
+    day_of_week: int,
+    period: int,
+    campus_code: str,
+    building_code: str,
+    freshness: str,
+    force_refresh: bool,
+    ttl_seconds: int,
+    max_stale_seconds: int,
+) -> dict[str, Any]:
+    """查询单个教室某时间段的占用详情。"""
+    # 先拉取课表数据
+    result = query_free_classrooms(
+        client=client,
+        term_code=term_code,
+        week=week,
+        day_of_week=day_of_week,
+        period=period,
+        campus_code=campus_code,
+        building_code=building_code,
+        freshness=freshness,
+        force_refresh=force_refresh,
+        ttl_seconds=ttl_seconds,
+        max_stale_seconds=max_stale_seconds,
+    )
+
+    # 从缓存中查找该教室的课程
+    from campus_core.empty_classroom.storage import load_parsed_schedule
+
+    parsed = load_parsed_schedule(term_code, campus_code, building_code)
+    cells = parsed.get("cells", []) if parsed else []
+    classrooms = parsed.get("classrooms", []) if parsed else []
+
+    # 找到教室名
+    room_name = room_id
+    for cr in classrooms:
+        if cr.get("room_id") == room_id:
+            room_name = cr.get("room_name", room_id)
+            break
+
+    # 筛选该教室该时间段的课程
+    courses: list[dict[str, Any]] = []
+    for cell_dict in cells:
+        if cell_dict.get("roomId") != room_id and cell_dict.get("room_id") != room_id:
+            # 也按 roomName 匹配
+            if cell_dict.get("roomName", "") != room_name and cell_dict.get("room_name", "") != room_name:
+                continue
+        cell_day = cell_dict.get("dayOfWeek", cell_dict.get("day_of_week", 0))
+        cell_period = cell_dict.get("period", 0)
+        if cell_day == day_of_week and cell_period == period:
+            weeks_list = cell_dict.get("weeks", cell_dict.get("week_bitmap", []))
+            if week in weeks_list:
+                courses.append(
+                    {
+                        "courseName": cell_dict.get("courseName", cell_dict.get("course_name", "")),
+                        "teacherName": cell_dict.get("teacherName", cell_dict.get("teacher_name", "")),
+                        "weekExpr": cell_dict.get("weekExpr", cell_dict.get("week_expr", "")),
+                        "weeks": weeks_list,
+                        "sectionText": cell_dict.get("sectionText", cell_dict.get("section_text", "")),
+                        "className": cell_dict.get("className", cell_dict.get("class_name", "")),
+                        "studentCount": cell_dict.get("studentCount", cell_dict.get("student_count", 0)),
+                        "departmentName": cell_dict.get("departmentName", cell_dict.get("department_name", "")),
+                        "rawText": cell_dict.get("rawText", cell_dict.get("raw_text", "")),
+                    }
+                )
+
+    status = "occupied" if courses else "free"
+    return {
+        "success": True,
+        "msg": "该时段有课程占用" if courses else "该时段空闲",
+        "data": {
+            "roomId": room_id,
+            "roomName": room_name,
+            "week": week,
+            "dayOfWeek": day_of_week,
+            "period": period,
+            "status": status,
+            "courses": courses,
+        },
+    }
+
+
+@mcp.tool()
+def empty_classroom_sync(
+    term_code: str = "",
+    campus_code: str = "",
+    building_code: str = "",
+    type_code: str = "",
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """
+    同步指定楼房的教室课表缓存
+
+    从学校教务系统拉取教室课表 HTML，解析后写入共享缓存。
+    建议在查询空教室前先同步相关楼房数据。
+
+    参数：
+    - term_code: 学期代码，如 "2025,1"（必填）
+    - campus_code: 校区代码，如 "01"（必填）
+    - building_code: 楼房代码，如 "0013"（必填）
+    - type_code: 教室类型代码，空表示全部
+    - force_refresh: 是否强制刷新
+
+    返回同步状态和统计信息。
+    """
+    if EmptyClassroomClient is None or _sync_schedule_impl is None:
+        return {
+            "success": False,
+            "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
+        }
+
+    if not term_code or not campus_code or not building_code:
+        return {
+            "success": False,
+            "msg": "term_code, campus_code, building_code 均为必填参数",
+        }
+
+    client = _get_empty_classroom_client()
+    if client is None:
+        return {
+            "success": False,
+            "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
+        }
+
+    result = _sync_schedule_impl(
+        client=client,
+        term_code=term_code,
+        campus_code=campus_code,
+        building_code=building_code,
+        type_code=type_code,
+        force_refresh=force_refresh,
+    )
+
+    data = result.to_dict()
+    data["success"] = result.sync_status in ("success", "skipped")
+    data["msg"] = {
+        "success": "同步成功",
+        "skipped": "缓存未过期，已跳过",
+        "failed": f"同步失败: {result.error}",
+    }.get(result.sync_status, "")
+    return data
+
+
+# ── 全局资源编号映射 ──────────────────────────────────────
+
+
+@mcp.tool()
+def resource_registry_query(
+    view: str = "search",
+    query: str = "",
+    resource_type: str = "",
+    campus_code: str = "",
+    building_code: str = "",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """
+    查询全局资源编号映射
+
+    统一查询教室、图书馆区域/座位、研讨室、楼房、校区等资源。
+    支持通过校园自然语言（"十号楼101"、"明伦十号楼"、"研讨室A203"）搜索。
+
+    view 模式：
+    - "search": 按关键词搜索资源
+    - "resolve": 自然语言解析，返回候选项及匹配分数
+    - "list": 列出资源（可筛选类型/校区/楼房）
+    - "stats": 查看 registry 统计信息
+    """
+    if not _resource_registry_available:
+        return {
+            "success": False,
+            "msg": "资源 registry 模块未加载，请检查 campus_core/resource_registry/ 是否完整",
+        }
+
+    if view == "search":
+        records = search_resources(
+            query=query,
+            resource_type=resource_type,
+            campus_code=campus_code,
+            building_code=building_code,
+            limit=limit,
+        )
+        return {
+            "success": True,
+            "msg": f"找到 {len(records)} 条资源记录",
+            "data": [r.to_dict() for r in records],
+        }
+
+    if view == "resolve":
+        result = resolve_resource(
+            text=query,
+            resource_type=resource_type,
+            campus_code=campus_code,
+            limit=limit,
+        )
+        return result
+
+    if view == "list":
+        records = _list_registry_resources(
+            resource_type=resource_type,
+            campus_code=campus_code,
+            building_code=building_code,
+            limit=limit,
+        )
+        return {
+            "success": True,
+            "msg": f"共 {len(records)} 条资源记录",
+            "data": [r.to_dict() for r in records],
+        }
+
+    if view == "stats":
+        stats = _get_registry_stats()
+        return {
+            "success": True,
+            "msg": f"共 {stats.get('total', 0)} 条资源记录",
+            "data": stats,
+        }
+
+    return {"success": False, "msg": f"不支持的 view: {view}，支持 search/resolve/list/stats"}
+
+
+@mcp.tool()
+def resource_registry_sync(
+    scope: str = "all",
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """
+    同步资源到全局编号映射
+
+    将上游系统（教务、图书馆、研讨室）的资源数据同步到 registry。
+    同步后的数据存入 data/shared/resource_registry/。
+
+    参数：
+    - scope: "classrooms" | "library" | "seminar" | "all"
+    - force_refresh: 是否强制重新拉取上游数据
+    """
+    if not _resource_registry_available:
+        return {
+            "success": False,
+            "msg": "资源 registry 模块未加载，请检查 campus_core/resource_registry/ 是否完整",
+        }
+
+    results: dict[str, Any] = {}
+    total_synced = 0
+
+    if scope in ("classrooms", "all"):
+        # 使用空教室客户端获取元数据
+        if EmptyClassroomClient is not None:
+            try:
+                client = _get_empty_classroom_client()
+                if client:
+                    campuses = client.fetch_campuses()
+                    campus_list = [{"code": c.campus_code, "name": c.campus_name} for c in campuses]
+
+                    buildings_by_campus: dict[str, list[dict[str, str]]] = {}
+                    classrooms_by_building: dict[str, list[dict[str, Any]]] = {}
+
+                    for campus in campuses:
+                        buildings = client.fetch_buildings(campus.campus_code)
+                        buildings_by_campus[campus.campus_code] = [
+                            {"code": b.building_code, "name": b.building_name}
+                            for b in buildings
+                        ]
+                        for building in buildings:
+                            classrooms = client.fetch_classrooms(
+                                campus_code=campus.campus_code,
+                                building_code=building.building_code,
+                            )
+                            classrooms_by_building[building.building_code] = [
+                                c.to_dict() for c in classrooms
+                            ]
+
+                    result = sync_classrooms_from_metadata(
+                        campuses=campus_list,
+                        buildings_by_campus=buildings_by_campus,
+                        classrooms_by_building=classrooms_by_building,
+                    )
+                    results["classrooms"] = result
+                    total_synced += result.get("synced_count", 0)
+                else:
+                    results["classrooms"] = {"success": False, "error": "无法创建空教室客户端（需先 setup_account）"}
+            except Exception as exc:
+                results["classrooms"] = {"success": False, "error": str(exc)}
+        else:
+            results["classrooms"] = {"success": False, "error": "空教室模块未加载"}
+
+    if scope in ("library", "all"):
+        # 图书馆同步需要 library_query 的返回数据，此处先提供接口
+        results["library"] = {
+            "success": True,
+            "msg": "图书馆资源同步需在 library_query 时增量完成，此处仅提供接口占位",
+            "synced_count": 0,
+        }
+
+    if scope in ("seminar", "all"):
+        # 研讨室同步需要 seminar_query 的返回数据，此处先提供接口
+        results["seminar"] = {
+            "success": True,
+            "msg": "研讨室资源同步需在 seminar_query 时增量完成，此处仅提供接口占位",
+            "synced_count": 0,
+        }
+
+    return {
+        "success": True,
+        "msg": f"同步完成，共 {total_synced} 条资源",
+        "data": {
+            "totalSynced": total_synced,
+            "results": results,
+        },
+    }
 
 
 if __name__ == "__main__":

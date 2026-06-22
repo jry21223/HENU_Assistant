@@ -12,13 +12,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 from henu_campus_mcp import (  # noqa: E402
+    course_monitor_config,
+    course_monitor_notify_test,
+    course_monitor_once,
+    course_monitor_run,
     course_selection_plan,
     course_selection_query,
     course_selection_submit,
+    empty_classroom_query,
+    empty_classroom_sync,
     library_auto_signin,
     library_cancel,
     library_query,
     library_reserve,
+    resource_registry_query,
+    resource_registry_sync,
     schedule_query,
     seminar_cancel,
     seminar_group,
@@ -95,6 +103,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     course_submit_parser = subparsers.add_parser("course_selection_submit", help="选课提交占位（不执行真实提交）")
     course_submit_parser.add_argument("--payload_json", default="", help="预留参数，当前不使用")
+
+    course_monitor_config_parser = subparsers.add_parser("course_monitor_config", help="查看或保存选课余量监控配置")
+    course_monitor_config_parser.add_argument("--config_json", default="", help="监控配置 JSON；留空表示查看")
+    course_monitor_config_parser.add_argument("--replace", action="store_true", help="替换而不是合并现有配置")
+
+    course_monitor_once_parser = subparsers.add_parser("course_monitor_once", help="执行一次选课余量监控（只读）")
+    course_monitor_once_parser.add_argument("--config_json", default="", help="临时覆盖配置 JSON")
+    course_monitor_once_parser.add_argument("--no_notify", action="store_true", help="不发送通知")
+
+    course_monitor_run_parser = subparsers.add_parser("course_monitor_run", help="按间隔运行选课余量监控（只提醒不提交）")
+    course_monitor_run_parser.add_argument("--config_json", default="", help="临时覆盖配置 JSON")
+    course_monitor_run_parser.add_argument("--max_checks", type=int, default=1, help="最大检查次数，默认 1")
+    course_monitor_run_parser.add_argument("--duration_seconds", type=int, default=0, help="最长运行秒数")
+    course_monitor_run_parser.add_argument("--no_notify", action="store_true", help="不发送通知")
+
+    course_monitor_notify_parser = subparsers.add_parser("course_monitor_notify_test", help="测试选课余量飞书通知")
+    course_monitor_notify_parser.add_argument("--config_json", default="", help="临时覆盖配置 JSON")
 
     library_query_parser = subparsers.add_parser("library_query", help="统一查询图书馆信息")
     library_query_parser.add_argument("--view", default="current", choices=["locations", "seats", "current", "records"], help="查询视图")
@@ -193,6 +218,38 @@ def build_parser() -> argparse.ArgumentParser:
     system_parser = subparsers.add_parser("system_status", help="查看系统状态")
     system_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
 
+    # 空教室查询
+    empty_classroom_parser = subparsers.add_parser("empty_classroom_query", help="查询空教室/教室信息")
+    empty_classroom_parser.add_argument("--view", default="free", help="free/day_matrix/occupancy/terms/campuses/buildings/classrooms/types")
+    empty_classroom_parser.add_argument("--term_code", default="", help="学期代码")
+    empty_classroom_parser.add_argument("--week", type=int, default=0, help="教学周")
+    empty_classroom_parser.add_argument("--day_of_week", type=int, default=0, help="星期 1-7")
+    empty_classroom_parser.add_argument("--period", type=int, default=0, help="大节 1-5")
+    empty_classroom_parser.add_argument("--campus_code", default="", help="校区代码")
+    empty_classroom_parser.add_argument("--building_code", default="", help="楼房代码")
+    empty_classroom_parser.add_argument("--campus_text", default="", help="校区自然语言（如 明伦）")
+    empty_classroom_parser.add_argument("--building_text", default="", help="楼房自然语言（如 十号楼）")
+    empty_classroom_parser.add_argument("--freshness", default="cache_first", help="缓存策略")
+    empty_classroom_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
+
+    empty_classroom_sync_parser = subparsers.add_parser("empty_classroom_sync", help="同步教室课表缓存")
+    empty_classroom_sync_parser.add_argument("--term_code", required=True, help="学期代码")
+    empty_classroom_sync_parser.add_argument("--campus_code", required=True, help="校区代码")
+    empty_classroom_sync_parser.add_argument("--building_code", required=True, help="楼房代码")
+    empty_classroom_sync_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
+
+    # 资源编号映射
+    resource_query_parser = subparsers.add_parser("resource_registry_query", help="查询全局资源编号映射")
+    resource_query_parser.add_argument("--view", default="search", help="search/resolve/list/stats")
+    resource_query_parser.add_argument("--query", default="", help="搜索关键词")
+    resource_query_parser.add_argument("--resource_type", default="", help="资源类型")
+    resource_query_parser.add_argument("--campus_code", default="", help="校区代码")
+    resource_query_parser.add_argument("--limit", type=int, default=20, help="返回数量")
+
+    resource_sync_parser = subparsers.add_parser("resource_registry_sync", help="同步资源到全局编号映射")
+    resource_sync_parser.add_argument("--scope", default="all", help="classrooms/library/seminar/all")
+    resource_sync_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
+
     yunfz_leave_parser = subparsers.add_parser("yunfz_leave_query", help="查询河宝社区请假信息")
     yunfz_leave_parser.add_argument("--view", default="list", choices=["list", "detail", "statistics"], help="查询视图")
     yunfz_leave_parser.add_argument("--leave_id", default="", help="请假记录 ID，仅 view=detail 时使用")
@@ -287,6 +344,19 @@ def main() -> None:
             )
         elif args.command == "course_selection_submit":
             result = course_selection_submit(payload_json=args.payload_json)
+        elif args.command == "course_monitor_config":
+            result = course_monitor_config(config_json=args.config_json, merge=not args.replace)
+        elif args.command == "course_monitor_once":
+            result = course_monitor_once(config_json=args.config_json, send_notifications=not args.no_notify)
+        elif args.command == "course_monitor_run":
+            result = course_monitor_run(
+                config_json=args.config_json,
+                max_checks=args.max_checks,
+                duration_seconds=args.duration_seconds,
+                send_notifications=not args.no_notify,
+            )
+        elif args.command == "course_monitor_notify_test":
+            result = course_monitor_notify_test(config_json=args.config_json)
         elif args.command == "library_query":
             result = library_query(
                 view=args.view,
@@ -374,6 +444,40 @@ def main() -> None:
             )
         elif args.command == "system_status":
             result = system_status(timezone=args.timezone)
+        elif args.command == "empty_classroom_query":
+            result = empty_classroom_query(
+                view=args.view,
+                term_code=args.term_code,
+                week=args.week,
+                day_of_week=args.day_of_week,
+                period=args.period,
+                campus_code=args.campus_code,
+                building_code=args.building_code,
+                campus_text=args.campus_text,
+                building_text=args.building_text,
+                freshness=args.freshness,
+                force_refresh=args.force_refresh,
+            )
+        elif args.command == "empty_classroom_sync":
+            result = empty_classroom_sync(
+                term_code=args.term_code,
+                campus_code=args.campus_code,
+                building_code=args.building_code,
+                force_refresh=args.force_refresh,
+            )
+        elif args.command == "resource_registry_query":
+            result = resource_registry_query(
+                view=args.view,
+                query=args.query,
+                resource_type=args.resource_type,
+                campus_code=args.campus_code,
+                limit=args.limit,
+            )
+        elif args.command == "resource_registry_sync":
+            result = resource_registry_sync(
+                scope=args.scope,
+                force_refresh=args.force_refresh,
+            )
         elif args.command == "yunfz_leave_query":
             result = yunfz_leave_query(
                 view=args.view,
