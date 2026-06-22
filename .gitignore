@@ -42,6 +42,7 @@ Thumbs.db
 !campus_core/config/
 !campus_core/config/*.json
 output/
+data/
 logs/
 
 # Sensitive data

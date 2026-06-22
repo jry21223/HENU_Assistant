@@ -1,0 +1,2125 @@
+{
+  "01": {
+    "campus_code": "01",
+    "campus_name": "明伦校区",
+    "buildings": {
+      "0013": {
+        "building_code": "0013",
+        "building_name": "十号楼",
+        "classrooms": [
+          {
+            "room_id": "0000231",
+            "room_name": "十号楼101",
+            "capacity": 160,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000232",
+            "room_name": "十号楼102",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000233",
+            "room_name": "十号楼103",
+            "capacity": 160,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000241",
+            "room_name": "十号楼116",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000242",
+            "room_name": "十号楼117",
+            "capacity": 160,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000243",
+            "room_name": "十号楼119",
+            "capacity": 160,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000246",
+            "room_name": "十号楼128",
+            "capacity": 280,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000247",
+            "room_name": "十号楼129",
+            "capacity": 280,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000248",
+            "room_name": "十号楼201",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000249",
+            "room_name": "十号楼202",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000250",
+            "room_name": "十号楼203",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000254",
+            "room_name": "十号楼220",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000255",
+            "room_name": "十号楼221",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000258",
+            "room_name": "十号楼301",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000259",
+            "room_name": "十号楼302",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000260",
+            "room_name": "十号楼303",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000265",
+            "room_name": "十号楼319",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000266",
+            "room_name": "十号楼320",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000267",
+            "room_name": "十号楼321",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "0003": {
+        "building_code": "0003",
+        "building_name": "综合教学楼",
+        "classrooms": [
+          {
+            "room_id": "443",
+            "room_name": "板书室（综合楼606）",
+            "capacity": 45,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "439",
+            "room_name": "管理办公室（综合楼607）",
+            "capacity": 1,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "441",
+            "room_name": "微格教室2（综合楼605-2)",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "442",
+            "room_name": "微格教室3（综合楼605-3）",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "444",
+            "room_name": "微课（综合楼608）",
+            "capacity": 2,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000282",
+            "room_name": "综合教学楼103",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000283",
+            "room_name": "综合教学楼104",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000284",
+            "room_name": "综合教学楼105",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000285",
+            "room_name": "综合教学楼106",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000286",
+            "room_name": "综合教学楼107",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000287",
+            "room_name": "综合教学楼108",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000288",
+            "room_name": "综合教学楼109",
+            "capacity": 203,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000289",
+            "room_name": "综合教学楼110",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000290",
+            "room_name": "综合教学楼111",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000291",
+            "room_name": "综合教学楼112",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000292",
+            "room_name": "综合教学楼113",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000293",
+            "room_name": "综合教学楼114",
+            "capacity": 95,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000294",
+            "room_name": "综合教学楼115",
+            "capacity": 95,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000295",
+            "room_name": "综合教学楼116",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000296",
+            "room_name": "综合教学楼117",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000297",
+            "room_name": "综合教学楼201",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000298",
+            "room_name": "综合教学楼202",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000299",
+            "room_name": "综合教学楼203",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000300",
+            "room_name": "综合教学楼204",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000301",
+            "room_name": "综合教学楼205",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000302",
+            "room_name": "综合教学楼206",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000303",
+            "room_name": "综合教学楼207",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000304",
+            "room_name": "综合教学楼208",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000305",
+            "room_name": "综合教学楼209",
+            "capacity": 203,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000306",
+            "room_name": "综合教学楼210",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000307",
+            "room_name": "综合教学楼211",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000308",
+            "room_name": "综合教学楼212",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000309",
+            "room_name": "综合教学楼213",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000310",
+            "room_name": "综合教学楼215",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000311",
+            "room_name": "综合教学楼216",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000312",
+            "room_name": "综合教学楼217",
+            "capacity": 100,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000313",
+            "room_name": "综合教学楼218",
+            "capacity": 100,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000314",
+            "room_name": "综合教学楼219",
+            "capacity": 100,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000315",
+            "room_name": "综合教学楼301",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000316",
+            "room_name": "综合教学楼302",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000317",
+            "room_name": "综合教学楼303",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000318",
+            "room_name": "综合教学楼304",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000319",
+            "room_name": "综合教学楼305",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000320",
+            "room_name": "综合教学楼306",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000321",
+            "room_name": "综合教学楼307",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000322",
+            "room_name": "综合教学楼308",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000323",
+            "room_name": "综合教学楼309",
+            "capacity": 203,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000324",
+            "room_name": "综合教学楼310",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000325",
+            "room_name": "综合教学楼311",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000326",
+            "room_name": "综合教学楼312",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000327",
+            "room_name": "综合教学楼313",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000328",
+            "room_name": "综合教学楼315",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000329",
+            "room_name": "综合教学楼316",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000330",
+            "room_name": "综合教学楼317",
+            "capacity": 95,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000331",
+            "room_name": "综合教学楼318",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000333",
+            "room_name": "综合教学楼401",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000334",
+            "room_name": "综合教学楼402",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000335",
+            "room_name": "综合教学楼403",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000336",
+            "room_name": "综合教学楼404",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000337",
+            "room_name": "综合教学楼405",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000338",
+            "room_name": "综合教学楼406",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000339",
+            "room_name": "综合教学楼407",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000340",
+            "room_name": "综合教学楼408",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000341",
+            "room_name": "综合教学楼409",
+            "capacity": 203,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000342",
+            "room_name": "综合教学楼410",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000343",
+            "room_name": "综合教学楼411",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000345",
+            "room_name": "综合教学楼413",
+            "capacity": 67,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000346",
+            "room_name": "综合教学楼414",
+            "capacity": 95,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000348",
+            "room_name": "综合教学楼416",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000349",
+            "room_name": "综合教学楼417",
+            "capacity": 100,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000350",
+            "room_name": "综合教学楼501",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000351",
+            "room_name": "综合教学楼502",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000352",
+            "room_name": "综合教学楼503",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000353",
+            "room_name": "综合教学楼504",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000354",
+            "room_name": "综合教学楼505",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000355",
+            "room_name": "综合教学楼506",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000356",
+            "room_name": "综合教学楼507",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000357",
+            "room_name": "综合教学楼508",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000358",
+            "room_name": "综合教学楼509",
+            "capacity": 260,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000363",
+            "room_name": "综合教学楼514",
+            "capacity": 95,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000365",
+            "room_name": "综合教学楼601",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000366",
+            "room_name": "综合教学楼602",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000367",
+            "room_name": "综合教学楼603",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000370",
+            "room_name": "综合教学楼614",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          }
+        ]
+      }
+    }
+  },
+  "02": {
+    "campus_code": "02",
+    "campus_name": "金明校区",
+    "buildings": {
+      "0007": {
+        "building_code": "0007",
+        "building_name": "7号教学楼",
+        "classrooms": [
+          {
+            "room_id": "0000050",
+            "room_name": "7号教学楼7#402（7#402）",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000036",
+            "room_name": "7号教学楼7101",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000037",
+            "room_name": "7号教学楼7102",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000038",
+            "room_name": "7号教学楼7103",
+            "capacity": 154,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000039",
+            "room_name": "7号教学楼7201",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000040",
+            "room_name": "7号教学楼7202",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000041",
+            "room_name": "7号教学楼7203",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000042",
+            "room_name": "7号教学楼7204",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000043",
+            "room_name": "7号教学楼7205",
+            "capacity": 240,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000045",
+            "room_name": "7号教学楼7302",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000046",
+            "room_name": "7号教学楼7303",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000047",
+            "room_name": "7号教学楼7304",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000048",
+            "room_name": "7号教学楼7305",
+            "capacity": 300,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000055",
+            "room_name": "7号教学楼7502",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "397",
+            "room_name": "板书室（7#403）",
+            "capacity": 45,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000049",
+            "room_name": "教学设计与分析室（7#401）",
+            "capacity": 48,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000053",
+            "room_name": "名师工作室（7#405）",
+            "capacity": 1,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "437",
+            "room_name": "微格教室1（7#404-1）",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "438",
+            "room_name": "微格教室2（7#404-2）",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000052",
+            "room_name": "微格教室3（7#404-3）",
+            "capacity": 16,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "0000044",
+            "room_name": "微课（7#301-1）",
+            "capacity": 2,
+            "type_name": "师范生实训中心教室"
+          },
+          {
+            "room_id": "436",
+            "room_name": "音视频（7#301-2）",
+            "capacity": 2,
+            "type_name": "师范生实训中心教室"
+          }
+        ]
+      },
+      "0002": {
+        "building_code": "0002",
+        "building_name": "计算机大楼",
+        "classrooms": [
+          {
+            "room_id": "0000083",
+            "room_name": "计算机大楼101",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000084",
+            "room_name": "计算机大楼102",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000085",
+            "room_name": "计算机大楼103",
+            "capacity": 210,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000086",
+            "room_name": "计算机大楼104",
+            "capacity": 210,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "0006": {
+        "building_code": "0006",
+        "building_name": "金明综合楼1",
+        "classrooms": [
+          {
+            "room_id": "0000087",
+            "room_name": "金明综合楼1201",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000088",
+            "room_name": "金明综合楼1202",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000089",
+            "room_name": "金明综合楼1203",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000090",
+            "room_name": "金明综合楼1301",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000091",
+            "room_name": "金明综合楼1302",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000092",
+            "room_name": "金明综合楼1303",
+            "capacity": 242,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "17": {
+        "building_code": "17",
+        "building_name": "金明综合楼2",
+        "classrooms": [
+          {
+            "room_id": "0000093",
+            "room_name": "金明综合楼2101",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000094",
+            "room_name": "金明综合楼2102",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000095",
+            "room_name": "金明综合楼2103",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000096",
+            "room_name": "金明综合楼2201",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000097",
+            "room_name": "金明综合楼2202",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000098",
+            "room_name": "金明综合楼2203",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000099",
+            "room_name": "金明综合楼2204",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000100",
+            "room_name": "金明综合楼2205",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000101",
+            "room_name": "金明综合楼2301",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000102",
+            "room_name": "金明综合楼2302",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000103",
+            "room_name": "金明综合楼2303",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000104",
+            "room_name": "金明综合楼2304",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000105",
+            "room_name": "金明综合楼2305",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000106",
+            "room_name": "金明综合楼2306",
+            "capacity": 305,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000108",
+            "room_name": "金明综合楼2402",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000111",
+            "room_name": "金明综合楼2405",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000112",
+            "room_name": "金明综合楼2406",
+            "capacity": 305,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "18": {
+        "building_code": "18",
+        "building_name": "金明综合楼3",
+        "classrooms": [
+          {
+            "room_id": "0000118",
+            "room_name": "金明综合楼3101",
+            "capacity": 94,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000119",
+            "room_name": "金明综合楼3102",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000120",
+            "room_name": "金明综合楼3103",
+            "capacity": 94,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000121",
+            "room_name": "金明综合楼3104",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000122",
+            "room_name": "金明综合楼3105",
+            "capacity": 94,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000123",
+            "room_name": "金明综合楼3106",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000124",
+            "room_name": "金明综合楼3107",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000125",
+            "room_name": "金明综合楼3108",
+            "capacity": 94,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000126",
+            "room_name": "金明综合楼3109",
+            "capacity": 94,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000127",
+            "room_name": "金明综合楼3201",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000128",
+            "room_name": "金明综合楼3202",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000129",
+            "room_name": "金明综合楼3203",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000130",
+            "room_name": "金明综合楼3204",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000131",
+            "room_name": "金明综合楼3205",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000132",
+            "room_name": "金明综合楼3206",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000133",
+            "room_name": "金明综合楼3207",
+            "capacity": 58,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000134",
+            "room_name": "金明综合楼3208",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000135",
+            "room_name": "金明综合楼3209",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000136",
+            "room_name": "金明综合楼3301",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000137",
+            "room_name": "金明综合楼3302",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000138",
+            "room_name": "金明综合楼3303",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000139",
+            "room_name": "金明综合楼3304",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000140",
+            "room_name": "金明综合楼3305",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000141",
+            "room_name": "金明综合楼3306",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000142",
+            "room_name": "金明综合楼3307",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000143",
+            "room_name": "金明综合楼3308",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000144",
+            "room_name": "金明综合楼3309",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000145",
+            "room_name": "金明综合楼3401",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000146",
+            "room_name": "金明综合楼3402",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000147",
+            "room_name": "金明综合楼3403",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000148",
+            "room_name": "金明综合楼3404",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000149",
+            "room_name": "金明综合楼3405",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000150",
+            "room_name": "金明综合楼3406",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000151",
+            "room_name": "金明综合楼3407",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000152",
+            "room_name": "金明综合楼3408",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000153",
+            "room_name": "金明综合楼3409",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000154",
+            "room_name": "金明综合楼3501",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000155",
+            "room_name": "金明综合楼3502",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000156",
+            "room_name": "金明综合楼3503",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000157",
+            "room_name": "金明综合楼3504",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000158",
+            "room_name": "金明综合楼3505",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000159",
+            "room_name": "金明综合楼3506",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000160",
+            "room_name": "金明综合楼3507",
+            "capacity": 57,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000161",
+            "room_name": "金明综合楼3508",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000162",
+            "room_name": "金明综合楼3509",
+            "capacity": 110,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "19": {
+        "building_code": "19",
+        "building_name": "金明综合楼4",
+        "classrooms": [
+          {
+            "room_id": "0000163",
+            "room_name": "金明综合楼4101",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000164",
+            "room_name": "金明综合楼4102",
+            "capacity": 130,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000165",
+            "room_name": "金明综合楼4103",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000166",
+            "room_name": "金明综合楼4201",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000167",
+            "room_name": "金明综合楼4202",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000168",
+            "room_name": "金明综合楼4203",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000169",
+            "room_name": "金明综合楼4204",
+            "capacity": 50,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "20": {
+        "building_code": "20",
+        "building_name": "金明综合楼5",
+        "classrooms": [
+          {
+            "room_id": "0000170",
+            "room_name": "金明综合楼5101",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000171",
+            "room_name": "金明综合楼5102",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000172",
+            "room_name": "金明综合楼5103",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000173",
+            "room_name": "金明综合楼5104",
+            "capacity": 138,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000174",
+            "room_name": "金明综合楼5105",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000175",
+            "room_name": "金明综合楼5106",
+            "capacity": 138,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000176",
+            "room_name": "金明综合楼5107",
+            "capacity": 138,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000177",
+            "room_name": "金明综合楼5201",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000178",
+            "room_name": "金明综合楼5202",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000179",
+            "room_name": "金明综合楼5203",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000180",
+            "room_name": "金明综合楼5204",
+            "capacity": 138,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000181",
+            "room_name": "金明综合楼5206",
+            "capacity": 138,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000182",
+            "room_name": "金明综合楼5301",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000183",
+            "room_name": "金明综合楼5302",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000184",
+            "room_name": "金明综合楼5303",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000185",
+            "room_name": "金明综合楼5304",
+            "capacity": 144,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000186",
+            "room_name": "金明综合楼5305",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000187",
+            "room_name": "金明综合楼5306",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000188",
+            "room_name": "金明综合楼5307",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000189",
+            "room_name": "金明综合楼5401",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000190",
+            "room_name": "金明综合楼5402",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000191",
+            "room_name": "金明综合楼5403",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000192",
+            "room_name": "金明综合楼5404",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000193",
+            "room_name": "金明综合楼5405",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000194",
+            "room_name": "金明综合楼5406",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000195",
+            "room_name": "金明综合楼5407",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000196",
+            "room_name": "金明综合楼5408",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000198",
+            "room_name": "金明综合楼5502",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000199",
+            "room_name": "金明综合楼5503",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000200",
+            "room_name": "金明综合楼5504",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000201",
+            "room_name": "金明综合楼5505",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000202",
+            "room_name": "金明综合楼5506",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000203",
+            "room_name": "金明综合楼5507",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000204",
+            "room_name": "金明综合楼5508",
+            "capacity": 96,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "21": {
+        "building_code": "21",
+        "building_name": "金明综合楼6",
+        "classrooms": [
+          {
+            "room_id": "0000205",
+            "room_name": "金明综合楼6101",
+            "capacity": 178,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000206",
+            "room_name": "金明综合楼6102",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000207",
+            "room_name": "金明综合楼6103",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000208",
+            "room_name": "金明综合楼6104",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000209",
+            "room_name": "金明综合楼6201",
+            "capacity": 164,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000210",
+            "room_name": "金明综合楼6202",
+            "capacity": 134,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000211",
+            "room_name": "金明综合楼6203",
+            "capacity": 134,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000212",
+            "room_name": "金明综合楼6204",
+            "capacity": 134,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000213",
+            "room_name": "金明综合楼6301",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000214",
+            "room_name": "金明综合楼6302",
+            "capacity": 136,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000215",
+            "room_name": "金明综合楼6303",
+            "capacity": 136,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000216",
+            "room_name": "金明综合楼6304",
+            "capacity": 136,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000217",
+            "room_name": "金明综合楼6305",
+            "capacity": 305,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000218",
+            "room_name": "金明综合楼6401",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000219",
+            "room_name": "金明综合楼6402",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000220",
+            "room_name": "金明综合楼6403",
+            "capacity": 140,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000221",
+            "room_name": "金明综合楼6404",
+            "capacity": 122,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000222",
+            "room_name": "金明综合楼6405",
+            "capacity": 305,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000223",
+            "room_name": "金明综合楼6501",
+            "capacity": 150,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000224",
+            "room_name": "金明综合楼6502",
+            "capacity": 132,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000225",
+            "room_name": "金明综合楼6503",
+            "capacity": 132,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000226",
+            "room_name": "金明综合楼6504",
+            "capacity": 132,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "0001": {
+        "building_code": "0001",
+        "building_name": "曾宪梓楼",
+        "classrooms": [
+          {
+            "room_id": "0000079",
+            "room_name": "曾宪梓楼501",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000080",
+            "room_name": "曾宪梓楼502",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000081",
+            "room_name": "曾宪梓楼503",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "0000082",
+            "room_name": "曾宪梓楼504",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "378",
+            "room_name": "曾宪梓楼601",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "379",
+            "room_name": "曾宪梓楼602",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "380",
+            "room_name": "曾宪梓楼603",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "381",
+            "room_name": "曾宪梓楼604",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "382",
+            "room_name": "曾宪梓楼606",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "383",
+            "room_name": "曾宪梓楼608",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "384",
+            "room_name": "曾宪梓楼609",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "371",
+            "room_name": "曾宪梓楼610",
+            "capacity": 300,
+            "type_name": "多媒体教室"
+          }
+        ]
+      }
+    }
+  },
+  "03": {
+    "campus_code": "03",
+    "campus_name": "郑州校区",
+    "buildings": {
+      "26": {
+        "building_code": "26",
+        "building_name": "九章学堂北楼B座",
+        "classrooms": [
+          {
+            "room_id": "456",
+            "room_name": "九章北B座301",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "470",
+            "room_name": "九章北B座302",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "462",
+            "room_name": "九章北B座303",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "465",
+            "room_name": "九章北B座401",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "463",
+            "room_name": "九章北B座402",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "24": {
+        "building_code": "24",
+        "building_name": "九章学堂南楼B座",
+        "classrooms": [
+          {
+            "room_id": "459",
+            "room_name": "九章南B座101",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "455",
+            "room_name": "九章南B座201",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "434",
+            "room_name": "九章南B座301",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "449",
+            "room_name": "九章南B座302",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "448",
+            "room_name": "九章南B座303",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "431",
+            "room_name": "九章南B座401",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "432",
+            "room_name": "九章南B座402",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "433",
+            "room_name": "九章南B座403",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "25": {
+        "building_code": "25",
+        "building_name": "友兰学堂北楼B座",
+        "classrooms": [
+          {
+            "room_id": "458",
+            "room_name": "友兰北B座301",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "457",
+            "room_name": "友兰北B座302",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "469",
+            "room_name": "友兰北B座304",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "460",
+            "room_name": "友兰北B座305",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "450",
+            "room_name": "友兰北B座306",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "454",
+            "room_name": "友兰北B座307",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "466",
+            "room_name": "友兰北B座308",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "464",
+            "room_name": "友兰北B座309",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "453",
+            "room_name": "友兰北B座401",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "471",
+            "room_name": "友兰北B座402",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "446",
+            "room_name": "友兰北B座404",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "447",
+            "room_name": "友兰北B座405",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "468",
+            "room_name": "友兰北B座406",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "452",
+            "room_name": "友兰北B座407",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "461",
+            "room_name": "友兰北B座408",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "467",
+            "room_name": "友兰北B座409",
+            "capacity": 78,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "22": {
+        "building_code": "22",
+        "building_name": "友兰学堂南楼B座",
+        "classrooms": [
+          {
+            "room_id": "435",
+            "room_name": "友兰南B座204",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "424",
+            "room_name": "友兰南B座304",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "425",
+            "room_name": "友兰南B座305",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "426",
+            "room_name": "友兰南B座306",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "427",
+            "room_name": "友兰南B座404",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "428",
+            "room_name": "友兰南B座405",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "429",
+            "room_name": "友兰南B座406",
+            "capacity": 120,
+            "type_name": "多媒体教室"
+          }
+        ]
+      },
+      "23": {
+        "building_code": "23",
+        "building_name": "友兰学堂南楼C座",
+        "classrooms": [
+          {
+            "room_id": "408",
+            "room_name": "友兰南C座301",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "410",
+            "room_name": "友兰南C座302",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "420",
+            "room_name": "友兰南C座303",
+            "capacity": 48,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "400",
+            "room_name": "友兰南C座304",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "414",
+            "room_name": "友兰南C座305",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "402",
+            "room_name": "友兰南C座306",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "398",
+            "room_name": "友兰南C座307",
+            "capacity": 48,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "403",
+            "room_name": "友兰南C座308",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "422",
+            "room_name": "友兰南C座309",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "412",
+            "room_name": "友兰南C座310",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "416",
+            "room_name": "友兰南C座311",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "418",
+            "room_name": "友兰南C座315",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "406",
+            "room_name": "友兰南C座316",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "409",
+            "room_name": "友兰南C座401",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "411",
+            "room_name": "友兰南C座402",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "421",
+            "room_name": "友兰南C座403",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "401",
+            "room_name": "友兰南C座404",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "415",
+            "room_name": "友兰南C座405",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "404",
+            "room_name": "友兰南C座406",
+            "capacity": 60,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "399",
+            "room_name": "友兰南C座407",
+            "capacity": 90,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "405",
+            "room_name": "友兰南C座408",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "423",
+            "room_name": "友兰南C座409",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "413",
+            "room_name": "友兰南C座410",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "417",
+            "room_name": "友兰南C座411",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "419",
+            "room_name": "友兰南C座415",
+            "capacity": 80,
+            "type_name": "多媒体教室"
+          },
+          {
+            "room_id": "407",
+            "room_name": "友兰南C座416",
+            "capacity": 70,
+            "type_name": "多媒体教室"
+          }
+        ]
+      }
+    }
+  },
+  "04": {
+    "campus_code": "04",
+    "campus_name": "其他校区",
+    "buildings": {}
+  }
+}

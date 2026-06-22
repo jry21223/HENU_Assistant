@@ -49,7 +49,7 @@ Cherry Studio 示例：
 | --- | --- |
 | 账号/系统 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query` |
-| 选课 | `smart_course_selection`, `smart_course_select`, `course_selection_query`, `course_selection_plan`, `course_selection_submit` |
+| 选课 | `smart_course_selection`, `smart_course_select`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
 | 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
@@ -73,11 +73,14 @@ Cherry Studio 示例：
 - 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
 - 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
 - `course_selection_query` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
+- `course_monitor_*` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
 
 MCP / OpenClaw 示例：
 
 ```bash
 python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
+python3 henu_cli.py course_monitor_config --config_json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
+python3 henu_cli.py course_monitor_once
 ```
 
 Langbot CLI 示例：
