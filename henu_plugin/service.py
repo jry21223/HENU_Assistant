@@ -69,6 +69,7 @@ class UserStoragePaths:
     yunfz_token_file: Path
     cas_cookie_file: Path
     output_dir: Path
+    shared_data_dir: Path  # 公共共享缓存目录（data/shared/）
 
 
 def _text(value: Any, *, strip: bool = True) -> str:
@@ -118,6 +119,10 @@ class HenuPluginService:
             "course_selection_query": self._course_selection_query,
             "course_selection_plan": self._course_selection_plan,
             "course_selection_submit": self._course_selection_submit,
+            "course_monitor_config": self._course_monitor_config,
+            "course_monitor_once": self._course_monitor_once,
+            "course_monitor_run": self._course_monitor_run,
+            "course_monitor_notify_test": self._course_monitor_notify_test,
             "library_query": self._library_query,
             "library_reserve": self._library_reserve,
             "library_auto_signin": self._library_auto_signin,
@@ -134,6 +139,10 @@ class HenuPluginService:
             "yunfz_checksleep_query": self._yunfz_checksleep_query,
             "yunfz_activity_query": self._yunfz_activity_query,
             "yunfz_collection_query": self._yunfz_collection_query,
+            "empty_classroom_query": self._empty_classroom_query,
+            "empty_classroom_sync": self._empty_classroom_sync,
+            "resource_registry_query": self._resource_registry_query,
+            "resource_registry_sync": self._resource_registry_sync,
         }
 
     def get_sender_account_context(
@@ -437,11 +446,15 @@ class HenuPluginService:
 
         This sets global variables in course_schedule and mcp_server modules
         to point to the user-specific paths.
+        Also sets storage_paths base dir for shared cache (data/shared/).
         """
         paths.user_root.mkdir(parents=True, exist_ok=True)
         paths.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Shared files use user's temp directory (will be synced separately)
+        # Shared files: persistent data/shared/ under plugin root (NOT per-user temp)
+        import campus_core.storage_paths as _sp
+        _sp.set_base_dir(self.base_dir)
+
         shared_dir = paths.user_root / "shared"
         shared_dir.mkdir(parents=True, exist_ok=True)
         period_time_file = shared_dir / "period_time_config.json"
@@ -673,6 +686,31 @@ class HenuPluginService:
             payload_json=_text(params.get("payload_json")),
         )
 
+    def _course_monitor_config(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_monitor_config(
+            config_json=_text(params.get("config_json")),
+            merge=bool(params.get("merge", True)),
+        )
+
+    def _course_monitor_once(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_monitor_once(
+            config_json=_text(params.get("config_json")),
+            send_notifications=bool(params.get("send_notifications", True)),
+        )
+
+    def _course_monitor_run(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_monitor_run(
+            config_json=_text(params.get("config_json")),
+            max_checks=_int(params.get("max_checks"), 1),
+            duration_seconds=_int(params.get("duration_seconds"), 0),
+            send_notifications=bool(params.get("send_notifications", True)),
+        )
+
+    def _course_monitor_notify_test(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.course_monitor_notify_test(
+            config_json=_text(params.get("config_json")),
+        )
+
     def _library_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.library_reserve(
             location=_text(params.get("location")),
@@ -823,4 +861,51 @@ class HenuPluginService:
             view=_text(params.get("view")) or "list",
             page=_int(params.get("page"), 1),
             page_size=_int(params.get("page_size"), 20),
+        )
+
+    def _empty_classroom_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.empty_classroom_query(
+            view=_text(params.get("view")) or "free",
+            term_code=_text(params.get("term_code")),
+            week=_int(params.get("week"), 0),
+            day_of_week=_int(params.get("day_of_week"), 0),
+            period=_int(params.get("period"), 0),
+            campus_code=_text(params.get("campus_code")),
+            building_code=_text(params.get("building_code")),
+            campus_text=_text(params.get("campus_text")),
+            building_text=_text(params.get("building_text")),
+            classroom_text=_text(params.get("classroom_text")),
+            type_code=_text(params.get("type_code")),
+            min_capacity=_int(params.get("min_capacity"), 0),
+            keyword=_text(params.get("keyword")),
+            room_id=_text(params.get("room_id")),
+            freshness=_text(params.get("freshness")) or "cache_first",
+            force_refresh=_bool(params.get("force_refresh"), False),
+            ttl_seconds=_int(params.get("ttl_seconds"), 300),
+            max_stale_seconds=_int(params.get("max_stale_seconds"), 86400),
+        )
+
+    def _empty_classroom_sync(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.empty_classroom_sync(
+            term_code=_text(params.get("term_code")),
+            campus_code=_text(params.get("campus_code")),
+            building_code=_text(params.get("building_code")),
+            type_code=_text(params.get("type_code")),
+            force_refresh=_bool(params.get("force_refresh"), False),
+        )
+
+    def _resource_registry_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.resource_registry_query(
+            view=_text(params.get("view")) or "search",
+            query=_text(params.get("query")),
+            resource_type=_text(params.get("resource_type")),
+            campus_code=_text(params.get("campus_code")),
+            building_code=_text(params.get("building_code")),
+            limit=_int(params.get("limit"), 20),
+        )
+
+    def _resource_registry_sync(self, params: dict[str, Any]) -> dict[str, Any]:
+        return mcp_server.resource_registry_sync(
+            scope=_text(params.get("scope")) or "all",
+            force_refresh=_bool(params.get("force_refresh"), False),
         )

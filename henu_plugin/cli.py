@@ -68,6 +68,10 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_calibration(raw, argv)
     if head in {"yunfz", "hebao"}:
         return _parse_yunfz(raw, argv)
+    if head in {"empty_classroom", "空教室", "教室"}:
+        return _parse_empty_classroom(raw, argv)
+    if head in {"resource", "资源", "registry"}:
+        return _parse_resource(raw, argv)
 
     return _error_spec(
         raw,
@@ -181,6 +185,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "course filter --excel <课表.xlsx> --class <班级> [--sheet 2026-2027-1学期]",
                 "course plan --excel <课表.xlsx> --class <班级> [--like-early8|--avoid-early8] [--compact-days --target-days 3]",
                 "course plan --candidates-json '<json>' [--preferences-json '<json>'] [--top-k 10]",
+                "course monitor config [--config-json '<json>']",
+                "course monitor once [--config-json '<json>'] [--no-notify]",
+                "course monitor run [--max-checks 3] [--no-notify]",
+                "course monitor notify-test",
                 "course submit",
             ],
             "examples": [
@@ -189,11 +197,14 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "course filter --excel ./2026-2027-1.xlsx --class 25软工1",
                 "course plan --excel ./2026-2027-1.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3",
                 "course plan --candidates-json '[[{\"name\":\"A\",\"meetings\":[{\"weekday\":1,\"periods\":[1,2],\"weeks\":[1,2]}]}]]'",
+                "course monitor config --config-json '{\"targets\":[{\"course_id\":\"04500142\",\"course_name\":\"数据结构\",\"keywords\":[\"25网工4\"]}]}'",
+                "course monitor once",
             ],
             "tips": [
                 "`course status` 只读查询 xk 状态，不执行提交。",
                 "`course plan --excel/--source` 输出 henu.smart_course_selection.v1。",
                 "`course plan --candidates-json` 使用通用 JSON 做本地轻量规划。",
+                "`course monitor` 只检查余量和提醒，不点击选课或提交。",
                 "`course submit` 当前只返回未实现提示，不执行真实选课。",
             ],
         }
@@ -332,6 +343,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
                 "course schema",
                 "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3",
                 "course plan --candidates-json '<json>'",
+                "course monitor once",
             ]
         if topic == "library":
             return ["library current", "library locations", "library seats --location <区域> --date YYYY-MM-DD"]
@@ -358,6 +370,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["course status", "course submit"]
     if resolved_tool == "course_selection_submit":
         return ["course status"]
+    if resolved_tool.startswith("course_monitor_"):
+        return ["course monitor once", "course monitor config", "course status"]
     if resolved_tool == "library_query":
         if spec.params.get("view") == "locations":
             return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
@@ -566,6 +580,68 @@ def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             action="course submit",
             should_preload_runtime_context=False,
         )
+
+    if sub == "monitor":
+        if len(argv) == 2:
+            return _error_spec(raw, "缺少 monitor 子命令：config/once/run/notify-test。", help_topic="course")
+        monitor_sub = argv[2].lower()
+        monitor_options, _, monitor_error = _parse_options(argv[3:])
+        if monitor_error:
+            return _error_spec(raw, monitor_error, help_topic="course")
+        if monitor_sub == "config":
+            return CliCommandSpec(
+                raw=raw,
+                argv=argv,
+                resolved_tool="course_monitor_config",
+                params={
+                    "config_json": _string_option(monitor_options, "config_json"),
+                    "merge": not _flag(monitor_options, "replace"),
+                },
+                action="course monitor config",
+                should_preload_runtime_context=False,
+            )
+        if monitor_sub in {"once", "check"}:
+            return CliCommandSpec(
+                raw=raw,
+                argv=argv,
+                resolved_tool="course_monitor_once",
+                params={
+                    "config_json": _string_option(monitor_options, "config_json"),
+                    "send_notifications": not _flag(monitor_options, "no_notify"),
+                },
+                action="course monitor once",
+                should_preload_runtime_context=True,
+            )
+        if monitor_sub == "run":
+            max_checks, error = _int_option(monitor_options, "max_checks", 1)
+            if error:
+                return _error_spec(raw, error, help_topic="course")
+            duration_seconds, error = _int_option(monitor_options, "duration_seconds", 0)
+            if error:
+                return _error_spec(raw, error, help_topic="course")
+            return CliCommandSpec(
+                raw=raw,
+                argv=argv,
+                resolved_tool="course_monitor_run",
+                params={
+                    "config_json": _string_option(monitor_options, "config_json"),
+                    "max_checks": max_checks,
+                    "duration_seconds": duration_seconds,
+                    "send_notifications": not _flag(monitor_options, "no_notify"),
+                },
+                action="course monitor run",
+                should_preload_runtime_context=True,
+            )
+        if monitor_sub in {"notify-test", "notify_test", "test-notify", "test"}:
+            return CliCommandSpec(
+                raw=raw,
+                argv=argv,
+                resolved_tool="course_monitor_notify_test",
+                params={"config_json": _string_option(monitor_options, "config_json")},
+                action="course monitor notify-test",
+                should_preload_runtime_context=False,
+            )
+        return _error_spec(raw, "monitor 子命令仅支持 config/once/run/notify-test。", help_topic="course")
 
     if sub in {"schema", "contract"}:
         return CliCommandSpec(
@@ -1124,6 +1200,103 @@ def _system_status_spec(raw: str, argv: tuple[str, ...], action: str) -> CliComm
         action=action,
         should_preload_runtime_context=False,
     )
+
+
+def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    """空教室 <查询|同步|校区|楼房>"""
+    if len(argv) < 2:
+        return _error_spec(raw, "空教室命令: 空教室 <查询|同步|校区|楼房> ...", help_topic="empty_classroom")
+    sub = argv[1].lower() if len(argv) > 1 else ""
+    options, _, _ = _parse_options(argv[2:])
+
+    if sub in ("查询", "query", "free"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
+            params={"view": "free",
+                "term_code": options.get("term_code", options.get("学期", "")),
+                "week": _int_opt(options, "week", "周", 0),
+                "day_of_week": _int_opt(options, "day_of_week", "星期", 0),
+                "period": _int_opt(options, "period", "大节", 0),
+                "campus_code": options.get("campus_code", options.get("校区", "")),
+                "building_code": options.get("building_code", options.get("楼房", "")),
+                "campus_text": options.get("campus_text", ""),
+                "building_text": options.get("building_text", ""),
+                "freshness": options.get("freshness", "cache_first"),
+                "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
+            }, action="查询空教室", should_preload_runtime_context=True)
+
+    if sub in ("同步", "sync"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_sync",
+            params={"term_code": options.get("term_code", options.get("学期", "")),
+                "campus_code": options.get("campus_code", options.get("校区", "")),
+                "building_code": options.get("building_code", options.get("楼房", "")),
+                "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
+            }, action="同步教室课表", should_preload_runtime_context=True)
+
+    if sub in ("校区", "campuses"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
+            params={"view": "campuses"}, action="查看校区", should_preload_runtime_context=True)
+
+    if sub in ("楼房", "buildings"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
+            params={"view": "buildings", "campus_code": options.get("campus_code", options.get("校区", ""))},
+            action="查看楼房", should_preload_runtime_context=True)
+
+    return _error_spec(raw, f"不支持: {sub}，支持 查询/同步/校区/楼房", help_topic="empty_classroom")
+
+
+def _parse_resource(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    """资源 <搜索|解析|同步|统计>"""
+    if len(argv) < 2:
+        return _error_spec(raw, "资源命令: 资源 <搜索|解析|同步|统计> ...", help_topic="resource")
+    sub = argv[1].lower() if len(argv) > 1 else ""
+    options, _, _ = _parse_options(argv[2:])
+
+    if sub in ("搜索", "search"):
+        q = " ".join(argv[2:]) if len(argv) > 2 else options.get("query", "")
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_query",
+            params={"view": "search", "query": q, "resource_type": options.get("resource_type", ""),
+                "campus_code": options.get("campus_code", ""), "limit": _int_opt(options, "limit", "", 20)},
+            action="搜索资源", should_preload_runtime_context=False)
+
+    if sub in ("解析", "resolve"):
+        q = " ".join(argv[2:]) if len(argv) > 2 else options.get("query", "")
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_query",
+            params={"view": "resolve", "query": q, "resource_type": options.get("resource_type", ""),
+                "campus_code": options.get("campus_code", "")},
+            action="解析资源", should_preload_runtime_context=False)
+
+    if sub in ("同步", "sync"):
+        scope = options.get("scope", "all")
+        scope_map = {"教室": "classrooms", "图书馆": "library", "研讨室": "seminar", "全部": "all"}
+        if len(argv) > 2:
+            scope = scope_map.get(argv[2], scope)
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_sync",
+            params={"scope": scope, "force_refresh": _bool_opt(options, "force_refresh", "强制刷新")},
+            action="同步资源", should_preload_runtime_context=True)
+
+    if sub in ("统计", "stats"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_query",
+            params={"view": "stats"}, action="查看统计", should_preload_runtime_context=False)
+
+    return _error_spec(raw, f"不支持: {sub}，支持 搜索/解析/同步/统计", help_topic="resource")
+
+
+def _int_opt(options: dict, *keys: str, default: int = 0) -> int:
+    for k in keys:
+        if k in options:
+            try:
+                return int(options[k])
+            except (ValueError, TypeError):
+                pass
+    return default
+
+
+def _bool_opt(options: dict, *keys: str) -> bool:
+    for k in keys:
+        if k in options:
+            v = str(options[k]).lower()
+            return v in {"1", "true", "yes", "on", ""}
+    return False
 
 
 def _error_spec(raw: str, message: str, *, help_topic: str) -> CliCommandSpec:

@@ -67,6 +67,7 @@ seminar signin --auto-scan
 - 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
 - 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
 - `course status` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
+- `course monitor` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
 
 MCP / OpenClaw 示例：
 
@@ -81,4 +82,6 @@ course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-day
 course filter --excel ./courses.xlsx --class 25软工1
 course schema
 course status
+course monitor config --config-json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
+course monitor once
 ```

@@ -32,6 +32,8 @@ PREFIX_SEMINAR_TASK = "user:{}:seminar_task"
 PREFIX_SCHEDULE = "user:{}:schedule"
 PREFIX_YUNFZ_TOKEN = "user:{}:yunfz_token"
 PREFIX_CAS_COOKIE = "user:{}:cas_cookie"
+PREFIX_COURSE_MONITOR_CONFIG = "user:{}:course_monitor_config"
+PREFIX_COURSE_MONITOR_STATE = "user:{}:course_monitor_state"
 PREFIX_SHARED_PERIOD_TIME = "shared:period_time"
 PREFIX_SHARED_CALIBRATION = "shared:calibration"
 PREFIX_SHARED_XIQUEER = "shared:xiqueer"
@@ -49,7 +51,10 @@ class UserStoragePaths:
     schedule_file: Path
     yunfz_token_file: Path
     cas_cookie_file: Path
+    course_monitor_config_file: Path
+    course_monitor_state_file: Path
     output_dir: Path
+    shared_data_dir: Path  # 公共共享缓存（data/shared/），不含 Cookie/账号
 
 
 class PluginStorageAdapter:
@@ -97,6 +102,8 @@ class PluginStorageAdapter:
 
         output_dir = user_root / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
+        shared_data_dir = PluginStorageAdapter._shared_temp_dir / "shared"
+        shared_data_dir.mkdir(parents=True, exist_ok=True)
 
         self._paths = UserStoragePaths(
             user_root=user_root,
@@ -107,7 +114,10 @@ class PluginStorageAdapter:
             schedule_file=user_root / "schedule_clean_latest.json",
             yunfz_token_file=user_root / "yunfz_token.json",
             cas_cookie_file=user_root / "cas_cookies.json",
+            course_monitor_config_file=output_dir / "course_monitor_config.json",
+            course_monitor_state_file=output_dir / "course_monitor_state.json",
             output_dir=output_dir,
+            shared_data_dir=shared_data_dir,
         )
 
         # Load each data type from Storage (async)
@@ -122,6 +132,12 @@ class PluginStorageAdapter:
         await self._load_json(self._key(PREFIX_SCHEDULE), self._paths.schedule_file)
         await self._load_json(self._key(PREFIX_YUNFZ_TOKEN), self._paths.yunfz_token_file)
         await self._load_json(self._key(PREFIX_CAS_COOKIE), self._paths.cas_cookie_file)
+        await self._load_json(
+            self._key(PREFIX_COURSE_MONITOR_CONFIG), self._paths.course_monitor_config_file
+        )
+        await self._load_json(
+            self._key(PREFIX_COURSE_MONITOR_STATE), self._paths.course_monitor_state_file
+        )
 
         self._dirty.clear()
         return self._paths
@@ -143,6 +159,12 @@ class PluginStorageAdapter:
         await self._save_json(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
         await self._save_json(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
         await self._save_json(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
+        await self._save_json(
+            self._paths.course_monitor_config_file, self._key(PREFIX_COURSE_MONITOR_CONFIG)
+        )
+        await self._save_json(
+            self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
+        )
 
         self._dirty.clear()
 
