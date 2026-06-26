@@ -8,5 +8,5 @@ metadata:
 spec:
 execution:
   python:
-    path: identity_capture.py
-    attr: IdentityCaptureListener
+    path: identity_capture_safe.py
+    attr: SafeIdentityCaptureListener
