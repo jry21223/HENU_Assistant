@@ -18,6 +18,20 @@ cp .env.example .env
 .venv/bin/lbp build
 ```
 
+## CI 自动发布
+
+当前仓库已配置 GitHub Actions（`release-lbp.yaml`）：
+
+- 当你推送形如 `v1.2.11` 的 tag 时，Actions 会自动执行 `lbp build`。
+- 打包后的 `dist/*.lbpkg` 会自动上传到对应 tag 的 GitHub Release。
+
+发布示例：
+
+```bash
+git tag v1.2.11
+git push origin v1.2.11
+```
+
 ## 常用命令
 
 ```text
@@ -69,7 +83,7 @@ seminar signin --auto-scan
 - `course status` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
 - `course monitor` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
 
-MCP / OpenClaw 示例：
+MCP / Agent Skill 示例：
 
 ```bash
 python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3

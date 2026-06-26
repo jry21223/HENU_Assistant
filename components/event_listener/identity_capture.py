@@ -113,6 +113,16 @@ class IdentityCaptureListener(EventListener):
         await ctx.set_query_var("henu_launcher_id", str(getattr(event, "launcher_id", "") or ""))
         await ctx.set_query_var("henu_launcher_type", launcher_type)
         await ctx.set_query_var("henu_sender_name", self._extract_sender_name(event))
+        await self._prime_runtime_context_query_var(ctx)
+
+    async def _prime_runtime_context_query_var(self, ctx: context.EventContext) -> None:
+        cached = await self._safe_get_query_var(ctx, "_henu_runtime_context")
+        if isinstance(cached, dict):
+            return
+        try:
+            await ctx.set_query_var("_henu_runtime_context", {})
+        except Exception:
+            return
 
     async def _inject_current_sender_context(self, ctx: context.EventContext) -> None:
         if not self._should_enrich_event(ctx.event):

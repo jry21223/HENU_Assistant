@@ -1,7 +1,7 @@
 """共享路径管理模块。
 
 提供 data/shared/（公共数据）和 data/users/<id>/（用户隔离）的路径函数。
-MCP / OpenClaw 默认用户为 "local"，Langbot 可按 QQ 传入 user_key。
+MCP / Agent Skill 默认用户为 "local"，Langbot 可按 QQ 传入 user_key。
 
 安全约束：共享路径下不存放 Cookie、密码、JSESSIONID、CASTGC、token。
 """
@@ -17,7 +17,7 @@ _BASE_DIR: Path | None = None
 def _get_base_dir() -> Path:
     """获取项目根目录。
 
-    默认为 campus_core/ 的父目录（即 mcp-server/ 或 openclaw-skill/ 或 langbot-plugin/）。
+    默认为 campus_core/ 的父目录（即 mcp-server/ 或 agent-skill/ 或 langbot-plugin/）。
     可通过 set_base_dir() 在运行时覆盖。
     """
     if _BASE_DIR is not None:
@@ -40,7 +40,7 @@ def get_user_data_dir(user_key: str | None = None) -> Path:
     """用户隔离数据目录：data/users/<key>/
 
     Args:
-        user_key: 用户标识。MCP/OpenClaw 默认为 "local"，Langbot 传入 QQ 号。
+        user_key: 用户标识。MCP/Agent Skill 默认为 "local"，Langbot 传入 QQ 号。
     """
     key = user_key or "local"
     return _get_base_dir() / "data" / "users" / key

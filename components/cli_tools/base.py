@@ -3,14 +3,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
-from typing import Any
+import json
+from pathlib import Path
+from typing import Any, Callable
 
 from langbot_plugin.api.definition.components.tool.tool import Tool
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
 from henu_plugin.storage_adapter import PluginStorageAdapter
-from henu_plugin.service import set_current_user_paths, SessionIdentity
+from henu_plugin.service import get_current_user_paths, set_current_user_paths, SessionIdentity
 
 
 def _resolve_storage_key(session: provider_session.Session, identity_hint: dict[str, Any]) -> str:
@@ -60,6 +62,7 @@ class BaseHenuTool(Tool):
 
         runtime_context = None
         if self.should_preload_runtime_context(params):
+            await self._prime_runtime_context_query_var(query_id)
             runtime_context = await self._ensure_runtime_context(
                 query_id,
                 session,
@@ -89,6 +92,7 @@ class BaseHenuTool(Tool):
 
         await self._refresh_after_sensitive_success(query_id, params, result)
         self._strip_internal_fields(result)
+        self._normalize_for_qq_delivery(result)
         return result
 
     def should_preload_runtime_context(self, params: dict[str, Any]) -> bool:
@@ -147,7 +151,9 @@ class BaseHenuTool(Tool):
             return None
 
         timezone = self._resolve_timezone(query_vars)
-        runtime_context = await asyncio.to_thread(
+        storage_paths = get_current_user_paths()
+        runtime_context = await self._run_with_user_storage(
+            storage_paths,
             service.get_runtime_context,
             session,
             identity_hint,
@@ -161,6 +167,36 @@ class BaseHenuTool(Tool):
             return runtime_context
 
         return None
+
+    async def _prime_runtime_context_query_var(self, query_id: int) -> None:
+        handler = getattr(self.plugin, "plugin_runtime_handler", None)
+        if handler is None:
+            return
+        try:
+            proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=handler)
+            await proxy.get_query_vars()
+            await proxy.set_query_var("_henu_runtime_context", {})
+        except Exception:
+            return
+
+    async def _run_with_user_storage(
+        self,
+        storage_paths,
+        func: Callable[..., Any],
+        *args: Any,
+    ) -> Any:
+        if storage_paths is None:
+            return await asyncio.to_thread(func, *args)
+        return await asyncio.to_thread(self._run_with_user_storage_sync, storage_paths, func, *args)
+
+    @staticmethod
+    def _run_with_user_storage_sync(
+        storage_paths,
+        func: Callable[..., Any],
+        *args: Any,
+    ) -> Any:
+        from henu_plugin import service as service_module
+        return service_module._run_in_user_storage(storage_paths, func, *args)
 
     def _resolve_timezone(self, query_vars: dict[str, Any]) -> str:
         if not isinstance(query_vars, dict):
@@ -210,6 +246,113 @@ class BaseHenuTool(Tool):
             return
         result.pop("_resolved_tool_name", None)
         result.pop("_effective_params", None)
+
+    def _normalize_for_qq_delivery(self, result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+
+        # Normalize msg to plain text first, ensure non-empty fallback.
+        msg = result.get("msg")
+        if not isinstance(msg, str) or not msg.strip():
+            if result.get("success") is False:
+                msg = "执行失败"
+            else:
+                msg = str(msg or "执行完成")
+            result["msg"] = msg
+        result["msg"] = self._trim_text(str(result.get("msg", "")), 1200)
+
+        # Keep only a small, safe summary payload to avoid QQ 官方 API 长消息 400。
+        list_fields = {
+            "rooms": 12,
+            "records": 12,
+            "tasks": 12,
+            "appointments": 12,
+            "candidates": 12,
+            "courses": 12,
+            "next_commands": 12,
+            "commands": 8,
+            "tips": 8,
+            "examples": 6,
+        }
+        for field, limit in list_fields.items():
+            value = result.get(field)
+            if isinstance(value, list) and len(value) > limit:
+                result[f"{field}_truncated"] = len(value) - limit
+                result[field] = value[:limit]
+            elif isinstance(value, tuple) and len(value) > limit:
+                result[f"{field}_truncated"] = len(value) - limit
+                result[field] = list(value[:limit])
+
+        # Drop known heavy/optional fields that can trigger oversized payload issues.
+        heavy_fields = [
+            "detail",
+            "apply_info",
+            "constraints",
+            "filters",
+            "storage",
+            "resolved_query",
+            "session_binding",
+            "time_field_semantics",
+            "server_time_snapshot",
+            "room_filters",
+            "raw_rooms",
+            "seats_cache",
+            "rooms_info",
+        ]
+        max_payload_chars = 2200
+        payload = self._make_payload_json(result)
+        if len(payload) <= max_payload_chars:
+            return
+
+        for field in heavy_fields:
+            result.pop(field, None)
+            payload = self._make_payload_json(result)
+            if len(payload) <= max_payload_chars:
+                return
+
+        # Last resort: keep only msg / success and basic follow-up fields.
+        essential = {
+            "success": bool(result.get("success")),
+            "msg": result.get("msg", ""),
+            "next_commands": result.get("next_commands", []),
+        }
+        result.clear()
+        result.update(essential)
+
+    @staticmethod
+    def _trim_text(value: str, limit: int) -> str:
+        text = str(value or "")
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3].rstrip() + "..."
+
+    @staticmethod
+    def _make_payload_json(result: dict[str, Any]) -> str:
+        safe_payload = BaseHenuTool._normalize_payload_types(result)
+        return json.dumps(safe_payload, ensure_ascii=False)
+
+    @staticmethod
+    def _normalize_payload_types(value: Any) -> Any:
+        if isinstance(value, dict):
+            normalized = {}
+            for key, item in value.items():
+                normalized[key] = BaseHenuTool._normalize_payload_types(item)
+            return normalized
+        if isinstance(value, tuple):
+            return [BaseHenuTool._normalize_payload_types(item) for item in value]
+        if isinstance(value, list):
+            return [BaseHenuTool._normalize_payload_types(item) for item in value]
+        if isinstance(value, set):
+            return [BaseHenuTool._normalize_payload_types(item) for item in sorted(value)]
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode("utf-8", errors="ignore")
+        if value is None:
+            return None
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
 
     def _as_bool(self, value: Any, default: bool) -> bool:
         if isinstance(value, bool):
