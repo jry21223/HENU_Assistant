@@ -1,7 +1,7 @@
 """Shared smart course selector for HENU Assistant.
 
 This module is designed to be reused by all HENU Assistant delivery branches:
-Langbot plugin, MCP server, and OpenClaw skill. It reads the teaching office
+Langbot plugin, MCP server, and Agent Skill. It reads the teaching office
 Excel export, filters class-related professional courses plus grade-wide public
 courses, detects time conflicts, and returns structured plans that can later be
 fed into an automatic course-selection submitter.
@@ -857,7 +857,7 @@ def build_smart_course_selection_response(
     top_k: int = 3,
     max_combinations: int = 200_000,
 ) -> dict[str, Any]:
-    """Build the public structured response used by MCP/Langbot/OpenClaw adapters."""
+    """Build the public structured response used by MCP/Langbot/Agent Skill adapters."""
     selected_mode = str(mode or "plan").strip().lower()
     if selected_mode in {"schema", "contract"}:
         return {
