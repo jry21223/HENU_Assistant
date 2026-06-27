@@ -240,6 +240,7 @@ Allowed fixes:
 - Ensure `_normalize_for_qq_delivery` handles non-JSON-serializable values through existing normalization helpers.
 - Ensure user storage cleanup remains in `finally`.
 - Ensure runtime query-var preloading is best-effort and cannot raise into the host process.
+- Ensure runtime-context preloading calls an existing service helper or otherwise executes under user storage paths without a hidden `AttributeError`.
 
 Do not change command names or add new CLI features.
 
@@ -319,6 +320,7 @@ Allowed fixes:
 - Correct a broken command mapping between README/CLI/service if the implementation clearly points to the intended tool.
 - Correct storage key/path handling if tests or code prove user/shared data can be misplaced.
 - Make storage persistence failures visible to callers if `PluginStorageAdapter` currently logs and hides failed writes.
+- Provide a service helper for tool wrappers to run synchronous context builders under active user storage paths if existing tool code calls one.
 - Keep storage-context cleanup safe if save failures are surfaced through event-listener storage paths.
 - Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten, without adding a new full-request lifecycle lock for shared storage.
 - Document the pre-existing `_RUNTIME_STATE_LOCK` as a residual serialization point if code evidence shows it is still required to protect legacy module-level user-private path globals.
