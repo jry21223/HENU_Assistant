@@ -22,14 +22,14 @@ cp .env.example .env
 
 当前仓库已配置 GitHub Actions（`release-lbp.yaml`）：
 
-- 当你推送形如 `v1.2.15` 的 tag 时，Actions 会自动执行 `lbp build`。
+- 当你推送形如 `v1.2.x` 的 tag 时，Actions 会自动执行 `lbp build`。
 - 打包后的 `dist/*.lbpkg` 会自动上传到对应 tag 的 GitHub Release。
 
 发布示例：
 
 ```bash
-git tag v1.2.15
-git push origin v1.2.15
+git tag v1.2.x
+git push origin v1.2.x
 ```
 
 ## 常用命令
