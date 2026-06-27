@@ -39,6 +39,15 @@ PREFIX_SHARED_CALIBRATION = "shared:calibration"
 PREFIX_SHARED_XIQUEER = "shared:xiqueer"
 
 
+class PluginStorageSaveError(RuntimeError):
+    """Raised when one or more LangBot Storage writes fail."""
+
+    def __init__(self, failed_keys: list[str] | tuple[str, ...]):
+        self.failed_keys = tuple(failed_keys)
+        key_list = ", ".join(self.failed_keys) or "<unknown>"
+        super().__init__(f"Failed to save LangBot plugin storage keys: {key_list}")
+
+
 @dataclass
 class UserStoragePaths:
     """Paths for local temp files during operations."""
@@ -147,24 +156,35 @@ class PluginStorageAdapter:
         if self._paths is None:
             return
 
+        failed_keys: list[str] = []
+
+        async def save(file_path: Path, storage_key: str) -> None:
+            try:
+                await self._save_json(file_path, storage_key)
+            except PluginStorageSaveError as exc:
+                failed_keys.extend(exc.failed_keys)
+
         # Save user data
-        await self._save_json(self._paths.profile_file, self._key(PREFIX_PROFILE))
-        await self._save_json(self._paths.xk_cookie_file, self._key(PREFIX_XK_COOKIE))
-        await self._save_json(
+        await save(self._paths.profile_file, self._key(PREFIX_PROFILE))
+        await save(self._paths.xk_cookie_file, self._key(PREFIX_XK_COOKIE))
+        await save(
             self._paths.library_cookie_file, self._key(PREFIX_LIBRARY_COOKIE)
         )
-        await self._save_json(
+        await save(
             self._paths.seminar_signin_task_file, self._key(PREFIX_SEMINAR_TASK)
         )
-        await self._save_json(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
-        await self._save_json(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
-        await self._save_json(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
-        await self._save_json(
+        await save(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
+        await save(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
+        await save(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
+        await save(
             self._paths.course_monitor_config_file, self._key(PREFIX_COURSE_MONITOR_CONFIG)
         )
-        await self._save_json(
+        await save(
             self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
         )
+
+        if failed_keys:
+            raise PluginStorageSaveError(failed_keys)
 
         self._dirty.clear()
 
@@ -184,7 +204,11 @@ class PluginStorageAdapter:
             file_path.write_text("{}", encoding="utf-8")
 
     async def _save_json(self, file_path: Path, storage_key: str) -> None:
-        """Save local file content to Storage."""
+        """Save local file content to Storage.
+
+        Raises:
+            PluginStorageSaveError: if LangBot Storage rejects the write.
+        """
         if not file_path.exists():
             return
         try:
@@ -193,6 +217,7 @@ class PluginStorageAdapter:
             logger.debug(f"Saved {len(data)} bytes to Storage: {storage_key}")
         except Exception as e:
             logger.warning(f"Failed to save to Storage {storage_key}: {e}")
+            raise PluginStorageSaveError([storage_key]) from e
 
     # Shared data methods (cross-user)
     async def load_shared_period_time(self, file_path: Path) -> None:
