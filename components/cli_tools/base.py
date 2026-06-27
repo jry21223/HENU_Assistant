@@ -331,6 +331,10 @@ class BaseHenuTool(Tool):
                 result[f"{field}_truncated"] = len(value) - limit
                 result[field] = list(value[:limit])
 
+        safe_result = self._normalize_payload_types(result)
+        result.clear()
+        result.update(safe_result)
+
         # Drop known heavy/optional fields that can trigger oversized payload issues.
         heavy_fields = [
             "detail",
@@ -384,8 +388,7 @@ class BaseHenuTool(Tool):
         if isinstance(value, dict):
             normalized = {}
             for key, item in value.items():
-                safe_key = key if isinstance(key, (str, int, float, bool)) or key is None else str(key)
-                normalized[safe_key] = BaseHenuTool._normalize_payload_types(item)
+                normalized[str(key)] = BaseHenuTool._normalize_payload_types(item)
             return normalized
         if isinstance(value, tuple):
             return [BaseHenuTool._normalize_payload_types(item) for item in value]
