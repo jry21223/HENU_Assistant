@@ -276,6 +276,7 @@ If no files changed, do not commit.
 - Inspect: `henu_plugin/service.py`
 - Inspect: `henu_plugin/cli.py`
 - Inspect: `henu_plugin/storage_adapter.py`
+- Inspect: `components/event_listener/identity_capture.py`
 - Inspect: `tests/test_storage_adapter.py`
 - Modify only if needed: the same files
 
@@ -318,6 +319,8 @@ Allowed fixes:
 - Correct a broken command mapping between README/CLI/service if the implementation clearly points to the intended tool.
 - Correct storage key/path handling if tests or code prove user/shared data can be misplaced.
 - Make storage persistence failures visible to callers if `PluginStorageAdapter` currently logs and hides failed writes.
+- Keep storage-context cleanup safe if save failures are surfaced through event-listener storage paths.
+- Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten.
 - Add or adjust a small storage-adapter test for a confirmed bug.
 
 Do not add new campus features or change shared business rules.
@@ -338,7 +341,7 @@ Expected: commands exit 0.
 If files changed:
 
 ```bash
-git add henu_plugin/service.py henu_plugin/cli.py henu_plugin/storage_adapter.py tests/test_storage_adapter.py
+git add henu_plugin/service.py henu_plugin/cli.py henu_plugin/storage_adapter.py components/event_listener/identity_capture.py tests/test_storage_adapter.py
 git commit -m "fix(langbot-plugin): repair service storage integration"
 ```
 
