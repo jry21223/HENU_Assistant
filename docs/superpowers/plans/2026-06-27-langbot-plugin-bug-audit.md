@@ -317,6 +317,7 @@ Allowed fixes:
 
 - Correct a broken command mapping between README/CLI/service if the implementation clearly points to the intended tool.
 - Correct storage key/path handling if tests or code prove user/shared data can be misplaced.
+- Make storage persistence failures visible to callers if `PluginStorageAdapter` currently logs and hides failed writes.
 - Add or adjust a small storage-adapter test for a confirmed bug.
 
 Do not add new campus features or change shared business rules.
