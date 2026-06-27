@@ -12,9 +12,11 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -81,6 +83,7 @@ class PluginStorageAdapter:
 
     # Shared temp directory (created once, reused for all users)
     _shared_temp_dir: Path | None = None
+    _shared_temp_file_lock = threading.Lock()
 
     def __init__(self, plugin: BasePlugin, storage_key: str):
         """Initialize the adapter.
@@ -93,6 +96,7 @@ class PluginStorageAdapter:
         self._storage_key = storage_key
         self._paths: UserStoragePaths | None = None
         self._dirty: set[str] = set()  # Track which files were modified
+        self._shared_temp_file_lock_acquired = False
 
     def _key(self, prefix_template: str) -> str:
         """Create a storage key with user prefix."""
@@ -103,74 +107,83 @@ class PluginStorageAdapter:
 
         Returns paths to local temp files for file operations.
         """
-        # Ensure shared temp directory exists
-        if PluginStorageAdapter._shared_temp_dir is None:
-            PluginStorageAdapter._shared_temp_dir = Path(
-                tempfile.mkdtemp(prefix="henu_plugin_")
+        await self._acquire_shared_temp_file_lock()
+        try:
+            # Ensure shared temp directory exists
+            if PluginStorageAdapter._shared_temp_dir is None:
+                PluginStorageAdapter._shared_temp_dir = Path(
+                    tempfile.mkdtemp(prefix="henu_plugin_")
+                )
+
+            # Create user-specific directory
+            user_root = PluginStorageAdapter._shared_temp_dir / self._storage_key
+            user_root.mkdir(parents=True, exist_ok=True)
+
+            output_dir = user_root / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            shared_data_dir = PluginStorageAdapter._shared_temp_dir / "shared"
+            shared_data_dir.mkdir(parents=True, exist_ok=True)
+
+            self._paths = UserStoragePaths(
+                user_root=user_root,
+                profile_file=user_root / "profile.json",
+                xk_cookie_file=user_root / "xk_cookies.json",
+                library_cookie_file=user_root / "library_cookies.json",
+                seminar_signin_task_file=user_root / "seminar_signin_tasks.json",
+                schedule_file=user_root / "schedule_clean_latest.json",
+                yunfz_token_file=user_root / "yunfz_token.json",
+                cas_cookie_file=user_root / "cas_cookies.json",
+                course_monitor_config_file=output_dir / "course_monitor_config.json",
+                course_monitor_state_file=output_dir / "course_monitor_state.json",
+                output_dir=output_dir,
+                shared_data_dir=shared_data_dir,
             )
 
-        # Create user-specific directory
-        user_root = PluginStorageAdapter._shared_temp_dir / self._storage_key
-        user_root.mkdir(parents=True, exist_ok=True)
+            # Load each data type from Storage (async)
+            await self._load_json(self._key(PREFIX_PROFILE), self._paths.profile_file)
+            await self._load_json(self._key(PREFIX_XK_COOKIE), self._paths.xk_cookie_file)
+            await self._load_json(
+                self._key(PREFIX_LIBRARY_COOKIE), self._paths.library_cookie_file
+            )
+            await self._load_json(
+                self._key(PREFIX_SEMINAR_TASK), self._paths.seminar_signin_task_file
+            )
+            await self._load_json(self._key(PREFIX_SCHEDULE), self._paths.schedule_file)
+            await self._load_json(self._key(PREFIX_YUNFZ_TOKEN), self._paths.yunfz_token_file)
+            await self._load_json(self._key(PREFIX_CAS_COOKIE), self._paths.cas_cookie_file)
+            await self._load_json(
+                self._key(PREFIX_COURSE_MONITOR_CONFIG), self._paths.course_monitor_config_file
+            )
+            await self._load_json(
+                self._key(PREFIX_COURSE_MONITOR_STATE), self._paths.course_monitor_state_file
+            )
+            await self._load_json(
+                PREFIX_SHARED_PERIOD_TIME,
+                self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
+            )
+            await self._load_json(
+                PREFIX_SHARED_CALIBRATION,
+                self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
+            )
+            await self._load_json(
+                PREFIX_SHARED_XIQUEER,
+                self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
+            )
 
-        output_dir = user_root / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        shared_data_dir = PluginStorageAdapter._shared_temp_dir / "shared"
-        shared_data_dir.mkdir(parents=True, exist_ok=True)
-
-        self._paths = UserStoragePaths(
-            user_root=user_root,
-            profile_file=user_root / "profile.json",
-            xk_cookie_file=user_root / "xk_cookies.json",
-            library_cookie_file=user_root / "library_cookies.json",
-            seminar_signin_task_file=user_root / "seminar_signin_tasks.json",
-            schedule_file=user_root / "schedule_clean_latest.json",
-            yunfz_token_file=user_root / "yunfz_token.json",
-            cas_cookie_file=user_root / "cas_cookies.json",
-            course_monitor_config_file=output_dir / "course_monitor_config.json",
-            course_monitor_state_file=output_dir / "course_monitor_state.json",
-            output_dir=output_dir,
-            shared_data_dir=shared_data_dir,
-        )
-
-        # Load each data type from Storage (async)
-        await self._load_json(self._key(PREFIX_PROFILE), self._paths.profile_file)
-        await self._load_json(self._key(PREFIX_XK_COOKIE), self._paths.xk_cookie_file)
-        await self._load_json(
-            self._key(PREFIX_LIBRARY_COOKIE), self._paths.library_cookie_file
-        )
-        await self._load_json(
-            self._key(PREFIX_SEMINAR_TASK), self._paths.seminar_signin_task_file
-        )
-        await self._load_json(self._key(PREFIX_SCHEDULE), self._paths.schedule_file)
-        await self._load_json(self._key(PREFIX_YUNFZ_TOKEN), self._paths.yunfz_token_file)
-        await self._load_json(self._key(PREFIX_CAS_COOKIE), self._paths.cas_cookie_file)
-        await self._load_json(
-            self._key(PREFIX_COURSE_MONITOR_CONFIG), self._paths.course_monitor_config_file
-        )
-        await self._load_json(
-            self._key(PREFIX_COURSE_MONITOR_STATE), self._paths.course_monitor_state_file
-        )
-        await self._load_json(
-            PREFIX_SHARED_PERIOD_TIME,
-            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
-        )
-        await self._load_json(
-            PREFIX_SHARED_CALIBRATION,
-            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
-        )
-        await self._load_json(
-            PREFIX_SHARED_XIQUEER,
-            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
-        )
-
-        self._dirty.clear()
-        return self._paths
+            self._dirty.clear()
+            return self._paths
+        except Exception:
+            self._release_shared_temp_file_lock()
+            raise
 
     async def save_all(self) -> None:
         """Save all local temp files back to Storage."""
         if self._paths is None:
+            self._release_shared_temp_file_lock()
             return
+
+        if not self._shared_temp_file_lock_acquired:
+            await self._acquire_shared_temp_file_lock()
 
         failed_keys: list[str] = []
 
@@ -180,41 +193,44 @@ class PluginStorageAdapter:
             except PluginStorageSaveError as exc:
                 failed_keys.extend(exc.failed_keys)
 
-        # Save user data
-        await save(self._paths.profile_file, self._key(PREFIX_PROFILE))
-        await save(self._paths.xk_cookie_file, self._key(PREFIX_XK_COOKIE))
-        await save(
-            self._paths.library_cookie_file, self._key(PREFIX_LIBRARY_COOKIE)
-        )
-        await save(
-            self._paths.seminar_signin_task_file, self._key(PREFIX_SEMINAR_TASK)
-        )
-        await save(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
-        await save(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
-        await save(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
-        await save(
-            self._paths.course_monitor_config_file, self._key(PREFIX_COURSE_MONITOR_CONFIG)
-        )
-        await save(
-            self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
-        )
-        await save(
-            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
-            PREFIX_SHARED_PERIOD_TIME,
-        )
-        await save(
-            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
-            PREFIX_SHARED_CALIBRATION,
-        )
-        await save(
-            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
-            PREFIX_SHARED_XIQUEER,
-        )
+        try:
+            # Save user data
+            await save(self._paths.profile_file, self._key(PREFIX_PROFILE))
+            await save(self._paths.xk_cookie_file, self._key(PREFIX_XK_COOKIE))
+            await save(
+                self._paths.library_cookie_file, self._key(PREFIX_LIBRARY_COOKIE)
+            )
+            await save(
+                self._paths.seminar_signin_task_file, self._key(PREFIX_SEMINAR_TASK)
+            )
+            await save(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
+            await save(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
+            await save(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
+            await save(
+                self._paths.course_monitor_config_file, self._key(PREFIX_COURSE_MONITOR_CONFIG)
+            )
+            await save(
+                self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
+            )
+            await save(
+                self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
+                PREFIX_SHARED_PERIOD_TIME,
+            )
+            await save(
+                self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
+                PREFIX_SHARED_CALIBRATION,
+            )
+            await save(
+                self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
+                PREFIX_SHARED_XIQUEER,
+            )
 
-        if failed_keys:
-            raise PluginStorageSaveError(failed_keys)
+            if failed_keys:
+                raise PluginStorageSaveError(failed_keys)
 
-        self._dirty.clear()
+            self._dirty.clear()
+        finally:
+            self._release_shared_temp_file_lock()
 
     async def _load_json(self, storage_key: str, file_path: Path) -> None:
         """Load JSON data from Storage and write to local file."""
@@ -250,27 +266,59 @@ class PluginStorageAdapter:
     # Shared data methods (cross-user)
     async def load_shared_period_time(self, file_path: Path) -> None:
         """Load shared period time config to file."""
-        await self._load_json(PREFIX_SHARED_PERIOD_TIME, file_path)
+        await self._load_shared_json(PREFIX_SHARED_PERIOD_TIME, file_path)
 
     async def save_shared_period_time(self, file_path: Path) -> None:
         """Save shared period time config to Storage."""
-        await self._save_json(file_path, PREFIX_SHARED_PERIOD_TIME)
+        await self._save_shared_json(file_path, PREFIX_SHARED_PERIOD_TIME)
 
     async def load_shared_calibration(self, file_path: Path) -> None:
         """Load shared calibration state to file."""
-        await self._load_json(PREFIX_SHARED_CALIBRATION, file_path)
+        await self._load_shared_json(PREFIX_SHARED_CALIBRATION, file_path)
 
     async def save_shared_calibration(self, file_path: Path) -> None:
         """Save shared calibration state to Storage."""
-        await self._save_json(file_path, PREFIX_SHARED_CALIBRATION)
+        await self._save_shared_json(file_path, PREFIX_SHARED_CALIBRATION)
 
     async def load_shared_xiqueer(self, file_path: Path) -> None:
         """Load shared xiqueer request to file."""
-        await self._load_json(PREFIX_SHARED_XIQUEER, file_path)
+        await self._load_shared_json(PREFIX_SHARED_XIQUEER, file_path)
 
     async def save_shared_xiqueer(self, file_path: Path) -> None:
         """Save shared xiqueer request to Storage."""
-        await self._save_json(file_path, PREFIX_SHARED_XIQUEER)
+        await self._save_shared_json(file_path, PREFIX_SHARED_XIQUEER)
+
+    async def _load_shared_json(self, storage_key: str, file_path: Path) -> None:
+        acquired_here = not self._shared_temp_file_lock_acquired
+        if acquired_here:
+            await self._acquire_shared_temp_file_lock()
+        try:
+            await self._load_json(storage_key, file_path)
+        finally:
+            if acquired_here:
+                self._release_shared_temp_file_lock()
+
+    async def _save_shared_json(self, file_path: Path, storage_key: str) -> None:
+        acquired_here = not self._shared_temp_file_lock_acquired
+        if acquired_here:
+            await self._acquire_shared_temp_file_lock()
+        try:
+            await self._save_json(file_path, storage_key)
+        finally:
+            if acquired_here:
+                self._release_shared_temp_file_lock()
+
+    async def _acquire_shared_temp_file_lock(self) -> None:
+        if self._shared_temp_file_lock_acquired:
+            return
+        await asyncio.to_thread(PluginStorageAdapter._shared_temp_file_lock.acquire)
+        self._shared_temp_file_lock_acquired = True
+
+    def _release_shared_temp_file_lock(self) -> None:
+        if not self._shared_temp_file_lock_acquired:
+            return
+        PluginStorageAdapter._shared_temp_file_lock.release()
+        self._shared_temp_file_lock_acquired = False
 
 
 # User data cache to avoid repeated loading

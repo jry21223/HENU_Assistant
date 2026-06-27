@@ -461,8 +461,10 @@ class IdentityCaptureListener(EventListener):
         try:
             return await asyncio.to_thread(func, *args)
         finally:
-            await storage_adapter.save_all()
-            set_current_user_paths(None)
+            try:
+                await storage_adapter.save_all()
+            finally:
+                set_current_user_paths(None)
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:
