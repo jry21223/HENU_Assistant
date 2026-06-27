@@ -25,6 +25,11 @@ from henu_plugin.cache import (
     invalidate_schedule_cache,
 )
 from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
+from henu_plugin.storage_adapter import (
+    SHARED_CALIBRATION_FILE,
+    SHARED_PERIOD_TIME_FILE,
+    SHARED_XIQUEER_FILE,
+)
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -356,7 +361,7 @@ class HenuPluginService:
                 "mode": "langbot_storage_api",
                 "has_schedule_cache": paths.schedule_file.exists(),
                 "has_output_dir": paths.output_dir.exists(),
-                "has_shared_period_config": (paths.shared_data_dir / "period_time_config.json").exists(),
+                "has_shared_period_config": (paths.shared_data_dir / SHARED_PERIOD_TIME_FILE).exists(),
             }
 
         if effective_tool_name == "seminar_reserve":
@@ -457,9 +462,9 @@ class HenuPluginService:
 
         shared_dir = paths.shared_data_dir
         shared_dir.mkdir(parents=True, exist_ok=True)
-        period_time_file = shared_dir / "period_time_config.json"
-        period_calibration_state_file = shared_dir / "period_time_calibration_state.json"
-        xiqueer_request_file = shared_dir / "xiqueer_period_time_request.json"
+        period_time_file = shared_dir / SHARED_PERIOD_TIME_FILE
+        period_calibration_state_file = shared_dir / SHARED_CALIBRATION_FILE
+        xiqueer_request_file = shared_dir / SHARED_XIQUEER_FILE
 
         with _RUNTIME_STATE_LOCK:
             original_state = {

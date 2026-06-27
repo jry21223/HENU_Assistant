@@ -40,18 +40,19 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="henu_storage_adapter_test_")
         PluginStorageAdapter._shared_temp_dir = Path(self._tmp.name)
-        PluginStorageAdapter._shared_temp_file_lock = threading.Lock()
+        PluginStorageAdapter._shared_storage_io_lock = threading.Lock()
 
     async def asyncTearDown(self) -> None:
         PluginStorageAdapter._shared_temp_dir = None
-        PluginStorageAdapter._shared_temp_file_lock = threading.Lock()
+        PluginStorageAdapter._shared_storage_io_lock = threading.Lock()
         self._tmp.cleanup()
 
     async def test_load_all_populates_shared_data_dir(self) -> None:
         paths = await PluginStorageAdapter(_FakePlugin(), "qq_10001").load_all()
 
-        self.assertEqual(paths.shared_data_dir, Path(self._tmp.name) / "shared")
+        self.assertEqual(paths.shared_data_dir.parent, Path(self._tmp.name))
         self.assertTrue(paths.shared_data_dir.is_dir())
+        self.assertNotEqual(paths.shared_data_dir, paths.user_root / "shared")
         self.assertTrue(paths.profile_file.exists())
 
     async def test_load_all_materializes_shared_files_outside_user_root(self) -> None:
@@ -74,7 +75,7 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(period_file.read_text(encoding="utf-8"), '{"period":true}')
         self.assertEqual(calibration_file.read_text(encoding="utf-8"), '{"calibration":true}')
         self.assertEqual(xiqueer_file.read_text(encoding="utf-8"), '{"xiqueer":true}')
-        self.assertEqual(period_file.parent, Path(self._tmp.name) / "shared")
+        self.assertEqual(period_file.parent.parent, Path(self._tmp.name))
         self.assertNotEqual(period_file.parent, paths.user_root / "shared")
 
     async def test_save_all_persists_shared_files_with_shared_storage_keys(self) -> None:
@@ -101,7 +102,7 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plugin.saved["shared:xiqueer"], b'{"xiqueer":true}')
         self.assertNotIn("user:qq_10001:period_time", plugin.saved)
 
-    async def test_shared_load_waits_until_prior_adapter_saves_shared_files(self) -> None:
+    async def test_shared_load_does_not_block_or_overwrite_request_local_shared_files(self) -> None:
         plugin = _FakePlugin({"shared:period_time": b'{"period":"old"}'})
         first_adapter = PluginStorageAdapter(plugin, "qq_10001")
         first_paths = await first_adapter.load_all()
@@ -114,16 +115,21 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
         second_load = asyncio.create_task(second_adapter.load_all())
         await asyncio.sleep(0.05)
 
-        self.assertFalse(second_load.done())
-
+        second_done_before_first_save = second_load.done()
         await first_adapter.save_all()
         second_paths = await asyncio.wait_for(second_load, timeout=1.0)
+        await second_adapter.save_all()
 
         self.assertEqual(
-            (second_paths.shared_data_dir / "period_time_config.json").read_text(encoding="utf-8"),
+            (first_paths.shared_data_dir / "period_time_config.json").read_text(encoding="utf-8"),
             '{"period":"first"}',
         )
-        await second_adapter.save_all()
+        self.assertEqual(
+            (second_paths.shared_data_dir / "period_time_config.json").read_text(encoding="utf-8"),
+            '{"period":"old"}',
+        )
+        self.assertEqual(plugin.saved["shared:period_time"], b'{"period":"first"}')
+        self.assertTrue(second_done_before_first_save)
 
     async def test_save_all_raises_with_aggregated_failed_storage_keys(self) -> None:
         failing_keys = {
