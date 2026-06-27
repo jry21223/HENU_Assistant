@@ -10,15 +10,20 @@ from henu_plugin.storage_adapter import PluginStorageAdapter
 
 
 class _FakePlugin:
+    def __init__(self, storage: dict[str, bytes] | None = None):
+        self.storage = dict(storage or {})
+        self.saved: dict[str, bytes] = {}
+
     async def get_plugin_storage(self, storage_key: str) -> bytes:
-        return b""
+        return self.storage.get(storage_key, b"")
 
     async def set_plugin_storage(self, storage_key: str, data: bytes) -> None:
-        return None
+        self.saved[storage_key] = data
 
 
 class _FailingSavePlugin(_FakePlugin):
     def __init__(self, failing_keys: set[str]):
+        super().__init__()
         self.failing_keys = failing_keys
         self.attempted_keys: list[str] = []
 
@@ -43,6 +48,53 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paths.shared_data_dir, Path(self._tmp.name) / "shared")
         self.assertTrue(paths.shared_data_dir.is_dir())
         self.assertTrue(paths.profile_file.exists())
+
+    async def test_load_all_materializes_shared_files_outside_user_root(self) -> None:
+        plugin = _FakePlugin(
+            {
+                "user:qq_10001:profile": b'{"student_id":"10001"}',
+                "shared:period_time": b'{"period":true}',
+                "shared:calibration": b'{"calibration":true}',
+                "shared:xiqueer": b'{"xiqueer":true}',
+            }
+        )
+
+        paths = await PluginStorageAdapter(plugin, "qq_10001").load_all()
+
+        period_file = paths.shared_data_dir / "period_time_config.json"
+        calibration_file = paths.shared_data_dir / "period_time_calibration_state.json"
+        xiqueer_file = paths.shared_data_dir / "xiqueer_period_time_request.json"
+
+        self.assertEqual(paths.profile_file.read_text(encoding="utf-8"), '{"student_id":"10001"}')
+        self.assertEqual(period_file.read_text(encoding="utf-8"), '{"period":true}')
+        self.assertEqual(calibration_file.read_text(encoding="utf-8"), '{"calibration":true}')
+        self.assertEqual(xiqueer_file.read_text(encoding="utf-8"), '{"xiqueer":true}')
+        self.assertEqual(period_file.parent, Path(self._tmp.name) / "shared")
+        self.assertNotEqual(period_file.parent, paths.user_root / "shared")
+
+    async def test_save_all_persists_shared_files_with_shared_storage_keys(self) -> None:
+        plugin = _FakePlugin()
+        adapter = PluginStorageAdapter(plugin, "qq_10001")
+        paths = await adapter.load_all()
+
+        paths.profile_file.write_text('{"student_id":"10001"}', encoding="utf-8")
+        (paths.shared_data_dir / "period_time_config.json").write_text('{"period":true}', encoding="utf-8")
+        (paths.shared_data_dir / "period_time_calibration_state.json").write_text(
+            '{"calibration":true}',
+            encoding="utf-8",
+        )
+        (paths.shared_data_dir / "xiqueer_period_time_request.json").write_text(
+            '{"xiqueer":true}',
+            encoding="utf-8",
+        )
+
+        await adapter.save_all()
+
+        self.assertEqual(plugin.saved["user:qq_10001:profile"], b'{"student_id":"10001"}')
+        self.assertEqual(plugin.saved["shared:period_time"], b'{"period":true}')
+        self.assertEqual(plugin.saved["shared:calibration"], b'{"calibration":true}')
+        self.assertEqual(plugin.saved["shared:xiqueer"], b'{"xiqueer":true}')
+        self.assertNotIn("user:qq_10001:period_time", plugin.saved)
 
     async def test_save_all_raises_with_aggregated_failed_storage_keys(self) -> None:
         failing_keys = {

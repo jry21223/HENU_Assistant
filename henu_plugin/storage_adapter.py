@@ -38,6 +38,10 @@ PREFIX_SHARED_PERIOD_TIME = "shared:period_time"
 PREFIX_SHARED_CALIBRATION = "shared:calibration"
 PREFIX_SHARED_XIQUEER = "shared:xiqueer"
 
+SHARED_PERIOD_TIME_FILE = "period_time_config.json"
+SHARED_CALIBRATION_FILE = "period_time_calibration_state.json"
+SHARED_XIQUEER_FILE = "xiqueer_period_time_request.json"
+
 
 class PluginStorageSaveError(RuntimeError):
     """Raised when one or more LangBot Storage writes fail."""
@@ -147,6 +151,18 @@ class PluginStorageAdapter:
         await self._load_json(
             self._key(PREFIX_COURSE_MONITOR_STATE), self._paths.course_monitor_state_file
         )
+        await self._load_json(
+            PREFIX_SHARED_PERIOD_TIME,
+            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
+        )
+        await self._load_json(
+            PREFIX_SHARED_CALIBRATION,
+            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
+        )
+        await self._load_json(
+            PREFIX_SHARED_XIQUEER,
+            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
+        )
 
         self._dirty.clear()
         return self._paths
@@ -181,6 +197,18 @@ class PluginStorageAdapter:
         )
         await save(
             self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
+        )
+        await save(
+            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
+            PREFIX_SHARED_PERIOD_TIME,
+        )
+        await save(
+            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
+            PREFIX_SHARED_CALIBRATION,
+        )
+        await save(
+            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
+            PREFIX_SHARED_XIQUEER,
         )
 
         if failed_keys:

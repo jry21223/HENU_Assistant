@@ -356,7 +356,7 @@ class HenuPluginService:
                 "mode": "langbot_storage_api",
                 "has_schedule_cache": paths.schedule_file.exists(),
                 "has_output_dir": paths.output_dir.exists(),
-                "has_shared_period_config": (paths.user_root / "shared" / "period_time_config.json").exists(),
+                "has_shared_period_config": (paths.shared_data_dir / "period_time_config.json").exists(),
             }
 
         if effective_tool_name == "seminar_reserve":
@@ -455,7 +455,7 @@ class HenuPluginService:
         import campus_core.storage_paths as _sp
         _sp.set_base_dir(self.base_dir)
 
-        shared_dir = paths.user_root / "shared"
+        shared_dir = paths.shared_data_dir
         shared_dir.mkdir(parents=True, exist_ok=True)
         period_time_file = shared_dir / "period_time_config.json"
         period_calibration_state_file = shared_dir / "period_time_calibration_state.json"
