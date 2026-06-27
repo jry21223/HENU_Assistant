@@ -8,6 +8,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import mcp_server
+from henu_plugin.service import UserStoragePaths, _run_in_user_storage
 from henu_plugin.storage_adapter import PluginStorageAdapter
 
 
@@ -169,6 +171,54 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
             tuple(getattr(raised.exception, "failed_keys", ())),
             ("shared:period_time",),
         )
+
+    def test_run_in_user_storage_syncs_user_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="henu_user_storage_helper_") as raw_tmp:
+            tmp_dir = Path(raw_tmp)
+            user_root = tmp_dir / "user"
+            output_dir = user_root / "output"
+            shared_data_dir = tmp_dir / "shared"
+
+            paths = UserStoragePaths(
+                user_root=user_root,
+                profile_file=user_root / "profile.json",
+                xk_cookie_file=user_root / "xk_cookies.json",
+                library_cookie_file=user_root / "library_cookies.json",
+                seminar_signin_task_file=user_root / "seminar_signin_tasks.json",
+                schedule_file=user_root / "schedule_clean_latest.json",
+                yunfz_token_file=user_root / "yunfz_token.json",
+                cas_cookie_file=user_root / "cas_cookies.json",
+                output_dir=output_dir,
+                shared_data_dir=shared_data_dir,
+            )
+
+            original_cookie = mcp_server.COOKIE_FILE
+            original_profile = mcp_server.PROFILE_FILE
+            original_output_dir = mcp_server.OUTPUT_DIR
+            original_shared_period = mcp_server.PERIOD_TIME_FILE
+
+            def _callback() -> dict[str, str]:
+                return {
+                    "cookie_file": str(mcp_server.COOKIE_FILE),
+                    "profile_file": str(mcp_server.PROFILE_FILE),
+                    "output_dir": str(mcp_server.OUTPUT_DIR),
+                    "period_file": str(mcp_server.PERIOD_TIME_FILE),
+                }
+
+            result = _run_in_user_storage(paths, _callback)
+
+            self.assertEqual(result["cookie_file"], str(paths.xk_cookie_file))
+            self.assertEqual(result["profile_file"], str(paths.profile_file))
+            self.assertEqual(result["output_dir"], str(output_dir))
+            self.assertEqual(
+                result["period_file"],
+                str(shared_data_dir / "period_time_config.json"),
+            )
+
+            self.assertEqual(mcp_server.COOKIE_FILE, original_cookie)
+            self.assertEqual(mcp_server.PROFILE_FILE, original_profile)
+            self.assertEqual(mcp_server.OUTPUT_DIR, original_output_dir)
+            self.assertEqual(mcp_server.PERIOD_TIME_FILE, original_shared_period)
 
 
 if __name__ == "__main__":

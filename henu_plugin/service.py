@@ -53,6 +53,24 @@ _CURRENT_USER_PATHS: contextvars.ContextVar["UserStoragePaths | None"] = context
 )
 
 
+def _run_in_user_storage(
+    paths: "UserStoragePaths | None",
+    func: Callable[..., Any],
+    *args: Any,
+) -> Any:
+    """Execute a sync function under user storage paths.
+
+    This reuses HenuPluginService._activate_user_storage for the actual
+    global-path activation, including the shared _RUNTIME_STATE_LOCK logic.
+    """
+    if paths is None:
+        return func(*args)
+
+    service = HenuPluginService(Path(__file__).resolve().parent)
+    with service._activate_user_storage(paths):
+        return func(*args)
+
+
 def set_current_user_paths(paths: "UserStoragePaths | None") -> None:
     """Set the current user's storage paths for the active execution context."""
     _CURRENT_USER_PATHS.set(paths)
