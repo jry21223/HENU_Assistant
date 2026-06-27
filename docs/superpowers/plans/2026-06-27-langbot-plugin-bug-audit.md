@@ -28,7 +28,7 @@
 
 ## Shared Rules For Every Task
 
-- Work in `/Users/jerry/Desktop/Study/HENU_Assistant/langbot-plugin`.
+- Work in `/Users/jerry/Desktop/Study/HENU_Assistant/langbot-plugin/.worktrees/langbot-plugin-bug-audit`.
 - Check `git status --short --branch` before editing.
 - Do not edit `mcp-server`, `agent-skill`, Docker files, or LangBot core adapter code.
 - Do not perform real campus booking, sign-in, account-login, course submission, or destructive external actions.
