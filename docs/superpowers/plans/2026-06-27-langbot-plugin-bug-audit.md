@@ -320,7 +320,7 @@ Allowed fixes:
 - Correct storage key/path handling if tests or code prove user/shared data can be misplaced.
 - Make storage persistence failures visible to callers if `PluginStorageAdapter` currently logs and hides failed writes.
 - Keep storage-context cleanup safe if save failures are surfaced through event-listener storage paths.
-- Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten.
+- Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten, without holding one global lock across unrelated user-private work for the full request lifecycle.
 - Add or adjust a small storage-adapter test for a confirmed bug.
 
 Do not add new campus features or change shared business rules.
