@@ -39,13 +39,15 @@ help
 account status
 account set --student-id 20230001 --password 'secret'
 schedule now
-schedule day --date 2026-03-30
+schedule day --date YYYY-MM-DD
 course status
 course plan --excel ./courses.xlsx --class 25软工1
 library current
-library seats --location "<区域>" --date 2026-03-30 --time 08:00
+library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
 library reserve --location "<区域>" --seat-no "<座位号>"
-seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4
+empty_classroom query
+空教室 查询 --周 1 --星期 1 --大节 3
+seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 ```
 
