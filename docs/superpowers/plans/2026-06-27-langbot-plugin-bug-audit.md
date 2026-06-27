@@ -47,6 +47,7 @@
 - Inspect: `main.py`
 - Inspect: `.github/workflows/release-lbp.yaml`
 - Inspect: `README.md`
+- Inspect: `.gitignore`
 - Modify only if needed: the same files
 
 - [ ] **Step 1: Inspect current repository state**
@@ -68,6 +69,7 @@ sed -n '1,180p' manifest.yaml
 sed -n '1,180p' main.py
 sed -n '1,180p' .github/workflows/release-lbp.yaml
 sed -n '1,140p' README.md
+sed -n '1,220p' .gitignore
 ```
 
 Confirm:
@@ -86,6 +88,7 @@ Allowed fixes:
 
 - Correct a wrong manifest path, attr name, component directory, icon path, or workflow build command.
 - Correct README release instructions if they describe a stale tag/version pattern that would mislead operators.
+- Add missing ignore rules when `lbp build` proves local generated files can be packaged.
 
 Do not bump plugin version in this task unless the actual code or release metadata changes.
 
@@ -108,7 +111,7 @@ Expected:
 If files changed:
 
 ```bash
-git add manifest.yaml main.py .github/workflows/release-lbp.yaml README.md
+git add manifest.yaml main.py .github/workflows/release-lbp.yaml README.md .gitignore
 git commit -m "fix(langbot-plugin): repair package entry metadata"
 ```
 
