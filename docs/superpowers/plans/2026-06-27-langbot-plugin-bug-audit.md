@@ -320,10 +320,13 @@ Allowed fixes:
 - Correct storage key/path handling if tests or code prove user/shared data can be misplaced.
 - Make storage persistence failures visible to callers if `PluginStorageAdapter` currently logs and hides failed writes.
 - Keep storage-context cleanup safe if save failures are surfaced through event-listener storage paths.
-- Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten, without holding one global lock across unrelated user-private work for the full request lifecycle.
+- Protect shared temp-file load/save from overlapping request races so shared period/calibration/xiqueer updates are not overwritten, without adding a new full-request lifecycle lock for shared storage.
+- Document the pre-existing `_RUNTIME_STATE_LOCK` as a residual serialization point if code evidence shows it is still required to protect legacy module-level user-private path globals.
 - Add or adjust a small storage-adapter test for a confirmed bug.
 
 Do not add new campus features or change shared business rules.
+
+Residual risk: `HenuPluginService._activate_user_storage` still holds `_RUNTIME_STATE_LOCK` for the full tool execution because `course_schedule.py` and `mcp_server.py` use mutable module-level storage path globals for user-private files. Removing that lock is out of scope for this audit; it requires a separate architecture task to replace those globals with context-local path resolution or explicit path parameters.
 
 - [ ] **Step 4: Validate service/storage layer**
 
