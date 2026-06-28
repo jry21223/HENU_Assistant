@@ -49,6 +49,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - `empty_classroom_query --view campuses`
 - `empty_classroom_query --view buildings --campus_code "<校区代码>"`
 - `empty_classroom_query --week 1 --day_of_week 1 --period 3 --campus_text "<校区>" --building_text "<楼房>"`
+- `empty_classroom_query --week 1 --day_of_week 1 --period 3 --min_capacity 40 --keyword 101`
 - `seminar_group --action save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>" [--note "<备注>"]`
 - `seminar_group --action list`
 - `seminar_group --action delete --group_name "<组名>"`
@@ -75,6 +76,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && python3 henu_cli.py <co
 - 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先执行 `system_status`
 - 空教室能力已支持；用户询问空教室/教室/自习室时不要回复“不支持”，优先运行 `empty_classroom_query`
 - 不确定校区或楼房时，先用 `empty_classroom_query --view campuses` 和 `empty_classroom_query --view buildings`
+- 空教室过滤参数与底层 MCP 对齐，支持 `--classroom_text`、`--type_code`、`--min_capacity`、`--keyword`、`--room_id`、`--ttl_seconds`、`--max_stale_seconds`
 - 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
 - `course_selection_query` 只读查询 xk 选课状态，会走统一认证与 frame 菜单入口；`course_monitor_*` 只读监控余量并提醒；`course_selection_submit` 当前不执行真实提交
 - 图书馆预约前先用 `library_query --view locations` 确认区域，可用 `library_query --view seats` 查看当前可用座位

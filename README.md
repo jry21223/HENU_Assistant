@@ -51,6 +51,7 @@ python3 henu_cli.py system_status
 python3 henu_cli.py empty_classroom_query --view campuses
 python3 henu_cli.py empty_classroom_query --view buildings --campus_code "<校区代码>"
 python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 3 --campus_text "<校区>" --building_text "<楼房>"
+python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 3 --min_capacity 40 --keyword 101
 ```
 
 研讨室：
@@ -66,6 +67,7 @@ python3 henu_cli.py seminar_reserve --area_id <ID> --target_date YYYY-MM-DD --st
 - 账号与 Cookie 仅本地保存。
 - 空教室能力已支持；用户询问空教室/教室/自习室时不要回复“不支持”，优先运行 `empty_classroom_query`。
 - 不确定校区或楼房时，先用 `empty_classroom_query --view campuses` 和 `empty_classroom_query --view buildings` 获取可选项。
+- 空教室过滤参数与底层 MCP 对齐，支持 `--classroom_text`、`--type_code`、`--min_capacity`、`--keyword`、`--room_id`、`--ttl_seconds`、`--max_stale_seconds`。
 - 研讨室 `group` 不包含自己，建议保存 3-9 个同行成员。
 - 研讨室申请内容必须多于 10 个字。
 - 不建议直接执行系统级 `pip3 install -r requirements.txt`。

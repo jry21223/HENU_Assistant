@@ -239,13 +239,21 @@ def build_parser() -> argparse.ArgumentParser:
     empty_classroom_parser.add_argument("--building_code", default="", help="楼房代码")
     empty_classroom_parser.add_argument("--campus_text", default="", help="校区自然语言（如 明伦）")
     empty_classroom_parser.add_argument("--building_text", default="", help="楼房自然语言（如 十号楼）")
+    empty_classroom_parser.add_argument("--classroom_text", default="", help="教室自然语言（如 101）")
+    empty_classroom_parser.add_argument("--type_code", default="", help="教室类型代码")
+    empty_classroom_parser.add_argument("--min_capacity", type=int, default=0, help="最小容量/人数")
+    empty_classroom_parser.add_argument("--keyword", default="", help="教室关键词")
+    empty_classroom_parser.add_argument("--room_id", default="", help="教室 ID，用于 occupancy")
     empty_classroom_parser.add_argument("--freshness", default="cache_first", help="缓存策略")
     empty_classroom_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
+    empty_classroom_parser.add_argument("--ttl_seconds", type=int, default=300, help="查询缓存 TTL 秒数")
+    empty_classroom_parser.add_argument("--max_stale_seconds", type=int, default=86400, help="最大可接受旧缓存秒数")
 
     empty_classroom_sync_parser = subparsers.add_parser("empty_classroom_sync", help="同步教室课表缓存")
     empty_classroom_sync_parser.add_argument("--term_code", required=True, help="学期代码")
     empty_classroom_sync_parser.add_argument("--campus_code", required=True, help="校区代码")
     empty_classroom_sync_parser.add_argument("--building_code", required=True, help="楼房代码")
+    empty_classroom_sync_parser.add_argument("--type_code", default="", help="教室类型代码")
     empty_classroom_sync_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
 
     # 资源编号映射
@@ -478,14 +486,22 @@ def main() -> None:
                 building_code=args.building_code,
                 campus_text=args.campus_text,
                 building_text=args.building_text,
+                classroom_text=args.classroom_text,
+                type_code=args.type_code,
+                min_capacity=args.min_capacity,
+                keyword=args.keyword,
+                room_id=args.room_id,
                 freshness=args.freshness,
                 force_refresh=args.force_refresh,
+                ttl_seconds=args.ttl_seconds,
+                max_stale_seconds=args.max_stale_seconds,
             )
         elif args.command == "empty_classroom_sync":
             result = empty_classroom_sync(
                 term_code=args.term_code,
                 campus_code=args.campus_code,
                 building_code=args.building_code,
+                type_code=args.type_code,
                 force_refresh=args.force_refresh,
             )
         elif args.command == "resource_registry_query":
