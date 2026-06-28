@@ -51,6 +51,7 @@ Cherry Studio 示例：
 | 课表 | `sync_schedule`, `schedule_query` |
 | 选课 | `smart_course_selection`, `smart_course_select`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
 | 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
+| 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 节次校准 | `set_calibration_source` |
@@ -60,7 +61,14 @@ Cherry Studio 示例：
 1. `setup_account` 绑定学号、密码，可保存默认图书馆区域和座位。
 2. 查询前先用 `system_status` 确认服务器时间。
 3. 图书馆预约前先查 `library_query(view="locations")`，可用 `library_query(view="seats")` 查看当前可用座位，预约后用 `library_query(view="current")` 核对。
-4. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
+4. 空教室能力已支持；查询教室/自习室时用 `empty_classroom_query(view="free")`，不确定校区楼房时先查 `view="campuses"` / `view="buildings"`。
+5. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
+
+## 给 MCP 客户端 / LLM 的提示
+
+- 用户询问空教室、空闲教室、教室、自习室时，不要回复“系统不支持”，优先调用 `empty_classroom_query`。
+- 涉及“今天/现在/当前”等相对时间时，先调用 `system_status` 确认服务器时间，再把日期/周次/星期/大节传给查询工具。
+- 工具返回较大 JSON 时，最终回复用户应概括 `msg`、`rooms` 或 `data`，不要直接粘贴完整 JSON。
 
 账号、Cookie 和抓取结果都保存在本地。
 
