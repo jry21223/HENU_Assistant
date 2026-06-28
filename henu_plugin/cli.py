@@ -327,18 +327,24 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "topic": "empty_classroom",
             "summary": "空教室查询与教室课表同步。直接说“查看空教室”时，优先使用 `empty_classroom query`。",
             "commands": [
-                "empty_classroom query [--term-code <学期>] [--week <周次>] [--day-of-week <1-7>] [--period <大节>] [--campus-code <校区代码>] [--building-code <楼房代码>]",
-                "empty_classroom sync [--term-code <学期>] [--campus-code <校区代码>] [--building-code <楼房代码>] [--force-refresh]",
+                "empty_classroom query [--term-code <学期>] [--week <周次>] [--day-of-week <1-7>] [--period <大节>] [--campus-code <校区代码>|--campus-text <校区>] [--building-code <楼房代码>|--building-text <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity <人数>] [--keyword <关键词>]",
+                "empty_classroom day_matrix --term-code <学期> --week <周次> --day-of-week <1-7>",
+                "empty_classroom occupancy --term-code <学期> --week <周次> --day-of-week <1-7> --room-id <教室ID>",
+                "empty_classroom sync [--term-code <学期>] [--campus-code <校区代码>] [--building-code <楼房代码>] [--type-code <类型>] [--force-refresh]",
                 "empty_classroom campuses",
                 "empty_classroom buildings [--campus-code <校区代码>]",
+                "empty_classroom classrooms [--campus-code <校区代码>] [--building-code <楼房代码>] [--type-code <类型>] [--keyword <关键词>]",
+                "empty_classroom types",
                 "空教室 查询 [--周 <周次>] [--星期 <1-7>] [--大节 <大节>] [--校区 <校区名>] [--楼房 <楼房名>]",
             ],
             "examples": [
                 "empty_classroom query",
-                "empty_classroom query --week 1 --day-of-week 1 --period 3",
-                "空教室 查询 --周 1 --星期 1 --大节 3",
+                "empty_classroom query --week 1 --day-of-week 1 --period 3 --campus-text 明伦 --building-text 十号楼",
+                "empty_classroom query --week 1 --day-of-week 1 --period 3 --min-capacity 40 --keyword 101",
+                "空教室 查询 --周 1 --星期 1 --大节 3 --校区 明伦 --楼房 十号楼",
                 "empty_classroom campuses",
                 "empty_classroom buildings --campus-code <校区代码>",
+                "empty_classroom classrooms --campus-code <校区代码> --building-code <楼房代码>",
             ],
             "tips": [
                 "不确定参数时先执行 `empty_classroom query`，工具会尽量使用当前运行时上下文。",
@@ -1248,19 +1254,54 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     sub = argv[1].lower() if len(argv) > 1 else ""
     options, _, _ = _parse_options(argv[2:])
 
-    if sub in ("查询", "查看", "查", "query", "free"):
+    query_views = {
+        "query": "free",
+        "free": "free",
+        "查询": "free",
+        "查看": "free",
+        "查": "free",
+        "day_matrix": "day_matrix",
+        "matrix": "day_matrix",
+        "全天": "day_matrix",
+        "occupancy": "occupancy",
+        "占用": "occupancy",
+        "terms": "terms",
+        "学期": "terms",
+        "campuses": "campuses",
+        "campus": "campuses",
+        "校区": "campuses",
+        "buildings": "buildings",
+        "building": "buildings",
+        "楼房": "buildings",
+        "楼栋": "buildings",
+        "classrooms": "classrooms",
+        "classroom": "classrooms",
+        "教室": "classrooms",
+        "types": "types",
+        "type": "types",
+        "类型": "types",
+    }
+
+    if sub in query_views:
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": "free",
+            params={"view": query_views[sub],
                 "term_code": options.get("term_code", options.get("学期", "")),
                 "week": _int_opt(options, "week", "周", 0),
                 "day_of_week": _int_opt(options, "day_of_week", "星期", 0),
                 "period": _int_opt(options, "period", "大节", 0),
-                "campus_code": options.get("campus_code", options.get("校区", "")),
-                "building_code": options.get("building_code", options.get("楼房", "")),
-                "campus_text": options.get("campus_text", ""),
-                "building_text": options.get("building_text", ""),
+                "campus_code": options.get("campus_code", ""),
+                "building_code": options.get("building_code", ""),
+                "campus_text": options.get("campus_text", options.get("校区", options.get("校区名", ""))),
+                "building_text": options.get("building_text", options.get("楼房", options.get("楼房名", options.get("楼栋名", "")))),
+                "classroom_text": options.get("classroom_text", options.get("教室", options.get("教室名", ""))),
+                "type_code": options.get("type_code", options.get("类型", "")),
+                "min_capacity": _int_opt(options, "min_capacity", "capacity", "人数", "容量", 0),
+                "keyword": options.get("keyword", options.get("关键词", "")),
+                "room_id": options.get("room_id", options.get("教室ID", "")),
                 "freshness": options.get("freshness", "cache_first"),
                 "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
+                "ttl_seconds": _int_opt(options, "ttl_seconds", "ttl", default=300),
+                "max_stale_seconds": _int_opt(options, "max_stale_seconds", "max_stale", default=86400),
             }, action="查询空教室", should_preload_runtime_context=True)
 
     if sub in ("同步", "sync"):
@@ -1268,17 +1309,9 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             params={"term_code": options.get("term_code", options.get("学期", "")),
                 "campus_code": options.get("campus_code", options.get("校区", "")),
                 "building_code": options.get("building_code", options.get("楼房", "")),
+                "type_code": options.get("type_code", options.get("类型", "")),
                 "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
             }, action="同步教室课表", should_preload_runtime_context=True)
-
-    if sub in ("校区", "campus", "campuses"):
-        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": "campuses"}, action="查看校区", should_preload_runtime_context=True)
-
-    if sub in ("楼房", "楼栋", "building", "buildings"):
-        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": "buildings", "campus_code": options.get("campus_code", options.get("校区", ""))},
-            action="查看楼房", should_preload_runtime_context=True)
 
     return _error_spec(raw, f"不支持: {sub}，支持 查询/同步/校区/楼房", help_topic="empty_classroom")
 
