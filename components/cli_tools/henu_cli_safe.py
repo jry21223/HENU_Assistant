@@ -30,6 +30,7 @@ class HenuCliSafe(HenuCli):
         if isinstance(result, dict):
             self._attach_reply_text(result)
             self._compact_large_payloads(result)
+            self._attach_llm_hint(result)
         return result
 
     def _attach_reply_text(self, result: dict[str, Any]) -> None:
@@ -44,6 +45,8 @@ class HenuCliSafe(HenuCli):
         )
 
     def _build_reply_text(self, result: dict[str, Any]) -> str:
+        if self._is_empty_classroom_result(result):
+            return self._format_empty_classroom_reply(result)
         if isinstance(result.get("rooms"), list):
             return self._format_rooms_reply(result)
         if isinstance(result.get("records"), list):
@@ -60,6 +63,79 @@ class HenuCliSafe(HenuCli):
         if result.get("success") is False:
             return "操作失败，但工具没有返回具体错误信息。"
         return "操作完成。"
+
+    def _attach_llm_hint(self, result: dict[str, Any]) -> None:
+        hint = self._build_llm_hint(result)
+        result["llm_hint"] = hint
+        result["cli_hint"] = hint
+        print(f"[henu_cli.llm_hint] {hint}", flush=True)
+
+    def _build_llm_hint(self, result: dict[str, Any]) -> str:
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        command = str(cli.get("command") or "").strip()
+        mode = str(cli.get("mode") or "").strip()
+        resolved_tool = str(cli.get("resolved_tool") or "").strip()
+        status = "成功" if result.get("success") else "失败"
+        next_commands = result.get("next_commands") if isinstance(result.get("next_commands"), list) else []
+        next_text = "、".join(str(item) for item in next_commands[:3]) if next_commands else "等待用户补充需求"
+
+        parts = [
+            f"henu_cli 本次执行{status}",
+            f"mode={mode or 'unknown'}",
+        ]
+        if command:
+            parts.append(f"command={command}")
+        if resolved_tool:
+            parts.append(f"tool={resolved_tool}")
+        parts.append("最终回复用户时优先复述 reply_text，不要发送完整 JSON")
+        parts.append(f"如需继续，只能根据用户明确要求或 next_commands 选择：{next_text}")
+
+        if self._is_empty_classroom_result(result) or self._text_mentions_empty_classroom(command, resolved_tool):
+            parts.append(
+                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
+            )
+        return "；".join(parts) + "。"
+
+    def _is_empty_classroom_result(self, result: dict[str, Any]) -> bool:
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        return self._text_mentions_empty_classroom(
+            str(cli.get("command") or ""),
+            str(cli.get("resolved_tool") or ""),
+            str(cli.get("topic") or ""),
+            str(result.get("msg") or ""),
+        )
+
+    @staticmethod
+    def _text_mentions_empty_classroom(*values: str) -> bool:
+        text = " ".join(str(value or "") for value in values).lower()
+        return any(marker in text for marker in ("empty_classroom", "空教室", "空闲教室"))
+
+    def _format_empty_classroom_reply(self, result: dict[str, Any]) -> str:
+        rooms = [item for item in (result.get("rooms") or []) if isinstance(item, dict)]
+        data = [item for item in (result.get("data") or []) if isinstance(item, dict)]
+        total = result.get("total")
+        if not isinstance(total, int):
+            total = len(rooms) if rooms else len(data)
+
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        command = str(cli.get("command") or "").strip()
+        lines = [str(result.get("msg") or f"空教室查询完成，共 {total} 个结果。").strip()]
+        if command:
+            lines.append(f"命令: {command}")
+
+        sample = rooms or data
+        for room in sample[:6]:
+            name = self._first_text(room, "roomName", "room_name", "name", "classroomName", "buildingName") or "未命名教室"
+            building = self._first_text(room, "buildingName", "building_name")
+            campus = self._first_text(room, "campusName", "campus_name")
+            capacity = self._first_text(room, "capacity")
+            meta = " ".join(part for part in (campus, building, f"{capacity}座" if capacity else "") if part)
+            lines.append(f"- {name}{'：' + meta if meta else ''}")
+
+        if total and len(sample) > 6:
+            lines.append(f"……还有 {len(sample) - 6} 个结果未展示。")
+        lines.append("如果需要更精确，请补充校区、楼房、周次、星期和大节。")
+        return "\n".join(lines)
 
     def _format_rooms_reply(self, result: dict[str, Any]) -> str:
         rooms = [item for item in (result.get("rooms") or []) if isinstance(item, dict)]
@@ -137,7 +213,7 @@ class HenuCliSafe(HenuCli):
         return "\n".join(lines)
 
     def _compact_large_payloads(self, result: dict[str, Any]) -> None:
-        for key in ("rooms", "records", "tasks", "seats", "items", "plans", "day_schedule", "current_courses"):
+        for key in ("rooms", "data", "records", "tasks", "seats", "items", "plans", "day_schedule", "current_courses"):
             value = result.get(key)
             if not isinstance(value, list) or len(value) <= self._MAX_LIST_ITEMS:
                 continue
