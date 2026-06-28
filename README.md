@@ -1,11 +1,11 @@
-# 河大校园助手 OpenClaw Skill
+# 河大校园助手 Agent Skill
 
-OpenClaw 版校园助手，能力与 MCP 服务器版保持一致：课表、选课状态/规划、图书馆、研讨室、河宝社区、节次校准和系统状态。
+Agent Skill 版校园助手，能力与 MCP 服务器版保持一致：课表、选课状态/规划、图书馆、空教室、研讨室、河宝社区、节次校准和系统状态。
 
 ## 安装
 
 ```bash
-git clone -b openclaw-skill https://github.com/jry21223/HENU_Assistant.git henu_campus_assistant
+git clone -b agent-skill https://github.com/jry21223/HENU_Assistant.git henu_campus_assistant
 cp -r henu_campus_assistant ~/.openclaw/workspace/skills/
 cd ~/.openclaw/workspace/skills/henu_campus_assistant
 
@@ -28,6 +28,7 @@ sudo apt install -y python3-venv
 | 课表 | `sync_schedule`, `schedule_query --view current|day|week|full` |
 | 选课 | `smart_course_selection`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
 | 图书馆 | `library_query --view locations|seats|current|records`, `library_reserve`, `library_auto_signin`, `library_cancel` |
+| 空教室 | `empty_classroom_query --view free|campuses|buildings|classrooms`, `empty_classroom_sync` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 校准 | `set_calibration_source` |
@@ -43,6 +44,15 @@ python3 henu_cli.py library_query --view seats --location "<区域>"
 python3 henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>"
 ```
 
+空教室：
+
+```bash
+python3 henu_cli.py system_status
+python3 henu_cli.py empty_classroom_query --view campuses
+python3 henu_cli.py empty_classroom_query --view buildings --campus_code "<校区代码>"
+python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 3 --campus_text "<校区>" --building_text "<楼房>"
+```
+
 研讨室：
 
 ```bash
@@ -54,6 +64,8 @@ python3 henu_cli.py seminar_reserve --area_id <ID> --target_date YYYY-MM-DD --st
 ## 说明
 
 - 账号与 Cookie 仅本地保存。
+- 空教室能力已支持；用户询问空教室/教室/自习室时不要回复“不支持”，优先运行 `empty_classroom_query`。
+- 不确定校区或楼房时，先用 `empty_classroom_query --view campuses` 和 `empty_classroom_query --view buildings` 获取可选项。
 - 研讨室 `group` 不包含自己，建议保存 3-9 个同行成员。
 - 研讨室申请内容必须多于 10 个字。
 - 不建议直接执行系统级 `pip3 install -r requirements.txt`。
@@ -69,7 +81,7 @@ python3 henu_cli.py seminar_reserve --area_id <ID> --target_date YYYY-MM-DD --st
 - `course_selection_query` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
 - `course_monitor_*` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
 
-MCP / OpenClaw 示例：
+MCP / Agent Skill 示例：
 
 ```bash
 python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3

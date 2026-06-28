@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HENU Campus Assistant CLI for OpenClaw.
+HENU Campus Assistant CLI for Agent Skill.
 河南大学校园助手命令行接口。
 """
 
@@ -46,7 +46,14 @@ from henu_campus_mcp import (  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="河南大学校园助手")
+    parser = argparse.ArgumentParser(
+        description="河南大学校园助手",
+        epilog=(
+            "LLM提示：空教室能力已支持，使用 empty_classroom_query；"
+            "涉及今天/现在/当前等相对时间时，先运行 system_status；"
+            "最终回复用户时概括 JSON 中的 msg/rooms/data，不要直接粘贴完整 JSON。"
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
     setup_parser = subparsers.add_parser("setup_account", help="设置账号")
@@ -219,7 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
     system_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
 
     # 空教室查询
-    empty_classroom_parser = subparsers.add_parser("empty_classroom_query", help="查询空教室/教室信息")
+    empty_classroom_parser = subparsers.add_parser(
+        "empty_classroom_query",
+        help="查询空教室/教室信息；不要回答不支持，缺参数时先查 campuses/buildings",
+    )
     empty_classroom_parser.add_argument("--view", default="free", help="free/day_matrix/occupancy/terms/campuses/buildings/classrooms/types")
     empty_classroom_parser.add_argument("--term_code", default="", help="学期代码")
     empty_classroom_parser.add_argument("--week", type=int, default=0, help="教学周")
@@ -277,6 +287,19 @@ def build_parser() -> argparse.ArgumentParser:
     yunfz_collection_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
 
     return parser
+
+
+def build_cli_hint(command: str, result: dict | None) -> str:
+    success = bool(result.get("success")) if isinstance(result, dict) else False
+    status = "成功" if success else "失败"
+    parts = [
+        f"henu_cli 本次执行{status}",
+        f"command={command}",
+        "最终回复用户时优先概括 msg/rooms/data，不要直接粘贴完整 JSON",
+    ]
+    if command.startswith("empty_classroom_"):
+        parts.append("空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom_query --view campuses 或 --view buildings")
+    return "；".join(parts) + "。"
 
 
 def main() -> None:
@@ -513,11 +536,18 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
+        if isinstance(result, dict):
+            hint = build_cli_hint(str(args.command or ""), result)
+            result.setdefault("llm_hint", hint)
+            result.setdefault("cli_hint", hint)
+            print(f"[henu_cli.llm_hint] {hint}", file=sys.stderr, flush=True)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as exc:
+        hint = build_cli_hint(str(getattr(args, "command", "") or ""), {"success": False})
+        print(f"[henu_cli.llm_hint] {hint}", file=sys.stderr, flush=True)
         print(
             json.dumps(
-                {"success": False, "msg": f"执行失败: {exc}"},
+                {"success": False, "msg": f"执行失败: {exc}", "llm_hint": hint, "cli_hint": hint},
                 ensure_ascii=False,
                 indent=2,
             )
