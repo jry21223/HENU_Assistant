@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import course_schedule
+from henu_mcp.core import course_schedule
 
 
 CONFIG_FILE = course_schedule.OUTPUT_DIR / "course_monitor_config.json"

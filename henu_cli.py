@@ -46,14 +46,7 @@ from henu_campus_mcp import (  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="河南大学校园助手",
-        epilog=(
-            "LLM提示：空教室能力已支持，使用 empty_classroom_query；"
-            "涉及今天/现在/当前等相对时间时，先运行 system_status；"
-            "最终回复用户时概括 JSON 中的 msg/rooms/data，不要直接粘贴完整 JSON。"
-        ),
-    )
+    parser = argparse.ArgumentParser(description="河南大学校园助手")
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
     setup_parser = subparsers.add_parser("setup_account", help="设置账号")
@@ -142,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     library_reserve_parser = subparsers.add_parser("library_reserve", help="预约图书馆座位")
     library_reserve_parser.add_argument("--location", default="", help="区域名")
     library_reserve_parser.add_argument("--seat_no", default="", help="座位号")
+    library_reserve_parser.add_argument("--resource_id", default="", help="资源 ID，优先级高于 location/seat_no")
     library_reserve_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD")
     library_reserve_parser.add_argument("--preferred_time", default="08:00", help="首选时间 HH:MM")
     library_reserve_parser.add_argument("--preferred_end_time", default="", help="最晚结束时间 HH:MM，用于限制预约时间窗口")
@@ -226,10 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     system_parser.add_argument("--timezone", default="Asia/Shanghai", help="时区")
 
     # 空教室查询
-    empty_classroom_parser = subparsers.add_parser(
-        "empty_classroom_query",
-        help="查询空教室/教室信息；不要回答不支持，缺参数时先查 campuses/buildings",
-    )
+    empty_classroom_parser = subparsers.add_parser("empty_classroom_query", help="查询空教室/教室信息")
     empty_classroom_parser.add_argument("--view", default="free", help="free/day_matrix/occupancy/terms/campuses/buildings/classrooms/types")
     empty_classroom_parser.add_argument("--term_code", default="", help="学期代码")
     empty_classroom_parser.add_argument("--week", type=int, default=0, help="教学周")
@@ -239,15 +230,15 @@ def build_parser() -> argparse.ArgumentParser:
     empty_classroom_parser.add_argument("--building_code", default="", help="楼房代码")
     empty_classroom_parser.add_argument("--campus_text", default="", help="校区自然语言（如 明伦）")
     empty_classroom_parser.add_argument("--building_text", default="", help="楼房自然语言（如 十号楼）")
-    empty_classroom_parser.add_argument("--classroom_text", default="", help="教室自然语言（如 101）")
+    empty_classroom_parser.add_argument("--classroom_text", default="", help="教室自然语言（如 十号楼101）")
     empty_classroom_parser.add_argument("--type_code", default="", help="教室类型代码")
-    empty_classroom_parser.add_argument("--min_capacity", type=int, default=0, help="最小容量/人数")
-    empty_classroom_parser.add_argument("--keyword", default="", help="教室关键词")
-    empty_classroom_parser.add_argument("--room_id", default="", help="教室 ID，用于 occupancy")
+    empty_classroom_parser.add_argument("--min_capacity", type=int, default=0, help="最小容量")
+    empty_classroom_parser.add_argument("--keyword", default="", help="关键词")
+    empty_classroom_parser.add_argument("--room_id", default="", help="教室 room_id")
     empty_classroom_parser.add_argument("--freshness", default="cache_first", help="缓存策略")
     empty_classroom_parser.add_argument("--force_refresh", action="store_true", help="强制刷新")
-    empty_classroom_parser.add_argument("--ttl_seconds", type=int, default=300, help="查询缓存 TTL 秒数")
-    empty_classroom_parser.add_argument("--max_stale_seconds", type=int, default=86400, help="最大可接受旧缓存秒数")
+    empty_classroom_parser.add_argument("--ttl_seconds", type=int, default=300, help="缓存 TTL 秒数")
+    empty_classroom_parser.add_argument("--max_stale_seconds", type=int, default=86400, help="允许最大陈旧秒数")
 
     empty_classroom_sync_parser = subparsers.add_parser("empty_classroom_sync", help="同步教室课表缓存")
     empty_classroom_sync_parser.add_argument("--term_code", required=True, help="学期代码")
@@ -262,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     resource_query_parser.add_argument("--query", default="", help="搜索关键词")
     resource_query_parser.add_argument("--resource_type", default="", help="资源类型")
     resource_query_parser.add_argument("--campus_code", default="", help="校区代码")
+    resource_query_parser.add_argument("--building_code", default="", help="楼房代码")
     resource_query_parser.add_argument("--limit", type=int, default=20, help="返回数量")
 
     resource_sync_parser = subparsers.add_parser("resource_registry_sync", help="同步资源到全局编号映射")
@@ -295,19 +287,6 @@ def build_parser() -> argparse.ArgumentParser:
     yunfz_collection_parser.add_argument("--page_size", type=int, default=20, help="每页数量")
 
     return parser
-
-
-def build_cli_hint(command: str, result: dict | None) -> str:
-    success = bool(result.get("success")) if isinstance(result, dict) else False
-    status = "成功" if success else "失败"
-    parts = [
-        f"henu_cli 本次执行{status}",
-        f"command={command}",
-        "最终回复用户时优先概括 msg/rooms/data，不要直接粘贴完整 JSON",
-    ]
-    if command.startswith("empty_classroom_"):
-        parts.append("空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom_query --view campuses 或 --view buildings")
-    return "；".join(parts) + "。"
 
 
 def main() -> None:
@@ -407,6 +386,7 @@ def main() -> None:
                 target_date=args.target_date,
                 preferred_time=args.preferred_time,
                 preferred_end_time=args.preferred_end_time,
+                resource_id=args.resource_id,
                 retry_until=args.retry_until,
                 retry_interval_seconds=args.retry_interval_seconds,
                 max_attempts=args.max_attempts,
@@ -510,6 +490,7 @@ def main() -> None:
                 query=args.query,
                 resource_type=args.resource_type,
                 campus_code=args.campus_code,
+                building_code=args.building_code,
                 limit=args.limit,
             )
         elif args.command == "resource_registry_sync":
@@ -552,18 +533,11 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
-        if isinstance(result, dict):
-            hint = build_cli_hint(str(args.command or ""), result)
-            result.setdefault("llm_hint", hint)
-            result.setdefault("cli_hint", hint)
-            print(f"[henu_cli.llm_hint] {hint}", file=sys.stderr, flush=True)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as exc:
-        hint = build_cli_hint(str(getattr(args, "command", "") or ""), {"success": False})
-        print(f"[henu_cli.llm_hint] {hint}", file=sys.stderr, flush=True)
         print(
             json.dumps(
-                {"success": False, "msg": f"执行失败: {exc}", "llm_hint": hint, "cli_hint": hint},
+                {"success": False, "msg": f"执行失败: {exc}"},
                 ensure_ascii=False,
                 indent=2,
             )

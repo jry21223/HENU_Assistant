@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
-from course_schedule import HenuXkClient, OUTPUT_DIR, load_json
+from henu_mcp.core import course_schedule
 
 
 NOT_OPEN_MARKERS = ("未到", "不在选课时间", "未开始", "已结束")
@@ -58,7 +58,7 @@ def parse_selection_response(text: str) -> dict[str, Any]:
     return parsed
 
 
-class HenuCourseSelectionClient(HenuXkClient):
+class HenuCourseSelectionClient(course_schedule.HenuXkClient):
     @property
     def selection_menu_url(self) -> str:
         return f"{self.base_url}/frame/jw/teacherstudentmenu.jsp?menucode=S20202"
@@ -228,17 +228,17 @@ class HenuCourseSelectionClient(HenuXkClient):
 
 
 def _save_status_snapshot(result: dict[str, Any]) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    course_schedule.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"course_selection_status_{stamp}.json"
+    path = course_schedule.OUTPUT_DIR / f"course_selection_status_{stamp}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def build_course_selection_client(profile_path: Path, cookie_path: Path) -> HenuCourseSelectionClient | None:
-    profile = load_json(profile_path)
+    profile = course_schedule.load_json(profile_path)
     sid = str(profile.get("student_id", ""))
     pwd = str(profile.get("password", ""))
     if not sid:
         return None
-    client = HenuCourseSelectionClient(sid, pwd, saved_cookies=load_json(cookie_path) or None)
+    client = HenuCourseSelectionClient(sid, pwd, saved_cookies=course_schedule.load_json(cookie_path) or None)
     return client

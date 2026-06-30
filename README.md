@@ -1,6 +1,6 @@
 # 河大校园助手 Agent Skill
 
-Agent Skill 版校园助手，能力与 MCP 服务器版保持一致：课表、选课状态/规划、图书馆、空教室、研讨室、河宝社区、节次校准和系统状态。
+Agent Skill 版校园助手，能力与 MCP 服务器版保持一致：课表、选课状态/规划、空教室、资源映射、图书馆、研讨室、河宝社区、节次校准和系统状态。
 
 ## 安装
 
@@ -27,11 +27,19 @@ sudo apt install -y python3-venv
 | 账号 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query --view current|day|week|full` |
 | 选课 | `smart_course_selection`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
+| 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
+| 资源映射 | `resource_registry_query`, `resource_registry_sync` |
 | 图书馆 | `library_query --view locations|seats|current|records`, `library_reserve`, `library_auto_signin`, `library_cancel` |
-| 空教室 | `empty_classroom_query --view free|campuses|buildings|classrooms`, `empty_classroom_sync` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 校准 | `set_calibration_source` |
+
+## 目录结构
+
+- `henu_cli.py`：Agent Skill 的命令行入口。
+- `mcp_server.py`：兼容 MCP/Agent 公共工具函数的薄门面。
+- `henu_mcp/`：复用的校园业务逻辑和运行时路径切换。
+- `campus_core/`：底层校园集成模块。
 
 ## 最短流程
 
@@ -44,14 +52,10 @@ python3 henu_cli.py library_query --view seats --location "<区域>"
 python3 henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>"
 ```
 
-空教室：
+实际运行建议使用虚拟环境解释器：
 
 ```bash
-python3 henu_cli.py system_status
-python3 henu_cli.py empty_classroom_query --view campuses
-python3 henu_cli.py empty_classroom_query --view buildings --campus_code "<校区代码>"
-python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 3 --campus_text "<校区>" --building_text "<楼房>"
-python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 3 --min_capacity 40 --keyword 101
+.venv/bin/python henu_cli.py system_status
 ```
 
 研讨室：
@@ -62,12 +66,17 @@ python3 henu_cli.py seminar_query --view rooms --target_date YYYY-MM-DD --start_
 python3 henu_cli.py seminar_reserve --area_id <ID> --target_date YYYY-MM-DD --start_time HH:MM --end_time HH:MM --content "<用途说明>"
 ```
 
+空教室与资源映射：
+
+```bash
+python3 henu_cli.py empty_classroom_query --week 1 --day_of_week 1 --period 1 --building_text "十号楼"
+python3 henu_cli.py empty_classroom_query --view occupancy --classroom_text "十号楼101"
+python3 henu_cli.py resource_registry_query --query "十号楼101" --building_code "<楼房代码>"
+```
+
 ## 说明
 
-- 账号与 Cookie 仅本地保存。
-- 空教室能力已支持；用户询问空教室/教室/自习室时不要回复“不支持”，优先运行 `empty_classroom_query`。
-- 不确定校区或楼房时，先用 `empty_classroom_query --view campuses` 和 `empty_classroom_query --view buildings` 获取可选项。
-- 空教室过滤参数与底层 MCP 对齐，支持 `--classroom_text`、`--type_code`、`--min_capacity`、`--keyword`、`--room_id`、`--ttl_seconds`、`--max_stale_seconds`。
+- 账号与 Cookie 仅本地保存；同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），失败后再回退密码登录。
 - 研讨室 `group` 不包含自己，建议保存 3-9 个同行成员。
 - 研讨室申请内容必须多于 10 个字。
 - 不建议直接执行系统级 `pip3 install -r requirements.txt`。

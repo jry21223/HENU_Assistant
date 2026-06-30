@@ -2,11 +2,25 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from lxml import html
+
+# Windows 时区支持
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+def _now_dt() -> datetime:
+    """获取当前北京时间（带时区信息）"""
+    try:
+        return datetime.now(ZoneInfo("Asia/Shanghai"))
+    except Exception:
+        # 如果时区信息不可用，使用 UTC+8 手动计算
+        return datetime.utcnow() + timedelta(hours=8)
 
 
 WEEKDAY_ORDER = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -153,7 +167,7 @@ def _parse_schedule_grid_doc(doc: html.HtmlElement) -> dict[str, Any]:
         items.sort(key=lambda row: SLOT_ORDER.get(row.get("period_key", ""), 99))
 
     return {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": _now_dt().isoformat(timespec="seconds"),
         "meta": _extract_meta(doc),
         "schedule": schedule,
     }
@@ -255,7 +269,7 @@ def _parse_schedule_list_doc(doc: html.HtmlElement) -> dict[str, Any]:
         schedule[day].sort(key=_period_sort_key)
 
     return {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": _now_dt().isoformat(timespec="seconds"),
         "meta": _extract_meta(doc),
         "schedule": schedule,
     }
@@ -272,7 +286,7 @@ def render_schedule_markdown(schedule_data: dict[str, Any]) -> str:
     meta = schedule_data.get("meta") or {}
     schedule = schedule_data.get("schedule") or {}
 
-    lines: list[str] = [f"# 课表整理（{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}）"]
+    lines: list[str] = [f"# 课表整理（{_now_dt().strftime('%Y-%m-%d %H:%M:%S')}）"]
     if meta:
         lines.append("")
         lines.append(f"- 学号：{meta.get('student_id', '')}")
@@ -310,7 +324,7 @@ def save_clean_files(
     timestamp: str | None = None,
 ) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or _now_dt().strftime("%Y%m%d_%H%M%S")
     schedule_data = dict(schedule_data)
     schedule_data["source_file"] = source_file
 
