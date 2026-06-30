@@ -14,8 +14,8 @@ from urllib.parse import urljoin
 import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
-from schedule_cleaner import clean_schedule_grid_file
-from secure_storage import (
+from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
+from henu_mcp.core.secure_storage import (
     load_encrypted_profile,
     save_encrypted_profile,
     decrypt_value,
@@ -36,7 +36,7 @@ def _now_dt() -> dt.datetime:
         return dt.datetime.utcnow() + dt.timedelta(hours=8)
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 COOKIE_FILE = BASE_DIR / "henu_cookies.json"
 PROFILE_FILE = BASE_DIR / "henu_profile.json"
 DEFAULT_HOME_URL = "https://xk.henu.edu.cn/frame/homes.action?v=07364432695342088912561"

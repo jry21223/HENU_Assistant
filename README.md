@@ -43,6 +43,14 @@ Cherry Studio 示例：
 }
 ```
 
+## 目录结构
+
+- `mcp_server.py`：MCP 启动入口和公开工具门面。
+- `henu_mcp/core/`：课表抓取、清洗、加密存储、选课状态和监控等共享核心。
+- `henu_mcp/tools/`：MCP 工具实现。
+- `henu_mcp/runtime.py`：本地文件路径和 Langbot per-user 路径切换。
+- `campus_core/`：图书馆、研讨室、河宝、空教室、资源映射等底层校园集成。
+
 ## 工具
 
 | 类别 | 工具 |
@@ -50,6 +58,8 @@ Cherry Studio 示例：
 | 账号/系统 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query` |
 | 选课 | `smart_course_selection`, `smart_course_select`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
+| 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
+| 资源映射 | `resource_registry_query`, `resource_registry_sync` |
 | 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
 | 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
@@ -70,7 +80,7 @@ Cherry Studio 示例：
 - 涉及“今天/现在/当前”等相对时间时，先调用 `system_status` 确认服务器时间，再把日期/周次/星期/大节传给查询工具。
 - 工具返回较大 JSON 时，最终回复用户应概括 `msg`、`rooms` 或 `data`，不要直接粘贴完整 JSON。
 
-账号、Cookie 和抓取结果都保存在本地。
+账号、Cookie 和抓取结果都保存在本地。同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），课表、选课、空教室、图书馆、研讨室、河宝优先免密换取各自业务登录态，失败后再回退密码登录。
 
 ## 智能选课
 
@@ -83,7 +93,7 @@ Cherry Studio 示例：
 - `course_selection_query` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
 - `course_monitor_*` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
 
-MCP / OpenClaw 示例：
+MCP / Agent Skill 示例：
 
 ```bash
 python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
