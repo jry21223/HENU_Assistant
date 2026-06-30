@@ -476,9 +476,12 @@ class IdentityCaptureListener(EventListener):
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:
-            return await ctx.get_query_var(key)
+            query_vars = await ctx.get_query_vars()
+            if isinstance(query_vars, dict):
+                return query_vars.get(key)
         except Exception:
             return None
+        return None
 
     async def _safe_get_query_vars(self, ctx: context.EventContext) -> dict[str, object]:
         try:

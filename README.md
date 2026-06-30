@@ -22,14 +22,14 @@ cp .env.example .env
 
 当前仓库已配置 GitHub Actions（`release-lbp.yaml`）：
 
-- 当你推送形如 `v1.2.x` 的 tag 时，Actions 会自动执行 `lbp build`。
+- 当你推送形如 `v<version>` 的 tag 时，Actions 会自动执行 `lbp build`。
 - 打包后的 `dist/*.lbpkg` 会自动上传到对应 tag 的 GitHub Release。
 
 发布示例：
 
 ```bash
-git tag v1.2.x
-git push origin v1.2.x
+git tag v1.2.15
+git push origin v1.2.15
 ```
 
 ## 常用命令
@@ -39,15 +39,16 @@ help
 account status
 account set --student-id 20230001 --password 'secret'
 schedule now
-schedule day --date YYYY-MM-DD
+schedule day --date 2026-03-30
 course status
 course plan --excel ./courses.xlsx --class 25软工1
+empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼
+empty_classroom query --view occupancy --classroom-text 十号楼101
+resource search 十号楼101
 library current
-library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
+library seats --location "<区域>" --date 2026-03-30 --time 08:00
 library reserve --location "<区域>" --seat-no "<座位号>"
-empty_classroom query
-空教室 查询 --周 1 --星期 1 --大节 3
-seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
+seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 ```
 
@@ -60,17 +61,20 @@ seminar signin --auto-scan
 - 用户数据位于 `data/users/<qq>/`
 - 共享节次校准文件位于 `data/shared/`
 
-用户目录会保存账号配置、教务 Cookie、图书馆 Cookie、研讨室签到任务和课表抓取结果。
+用户目录会保存账号配置、该 QQ 用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等）、业务 Cookie/Token、研讨室签到任务、选课监控配置和课表抓取结果。同一用户的课表、选课、空教室、图书馆、研讨室、河宝会优先复用该用户的 IDS CAS 登录态，失败后才回退密码登录。
+
+共享目录只保存公共校园配置和缓存，例如节次时间、节次校准状态和空教室公共请求参数；`shared:*` Storage key 不保存密码、`CASTGC`、业务 Token 或个人 Cookie。
 
 ## 目录
 
 - `manifest.yaml`：插件清单
 - `main.py`：插件入口
 - `components/cli_tools/`：对 LLM 暴露的统一 CLI Tool
-- `components/tools/`：内部复用的旧 Tool 包装层
 - `henu_plugin/service.py`：工具分发和存储上下文
 - `henu_plugin/cli.py`：CLI 命令解析和帮助
-- `mcp_server.py` / `course_schedule.py` / `campus_core/`：复用的业务逻辑
+- `mcp_server.py`：兼容 MCP/Agent 公共工具函数的薄门面
+- `henu_mcp/`：复用的校园业务逻辑和运行时路径切换
+- `campus_core/`：底层校园集成模块
 
 账号与 Cookie 只保存在本地。插件版不会启动后台研讨室自动签到线程，需要时调用 `seminar signin --auto-scan` 或指定 `record_id`。
 

@@ -61,15 +61,18 @@ class BaseHenuTool(Tool):
         set_current_user_paths(user_paths)
 
         runtime_context = None
-        storage_error: Exception | None = None
-        try:
-            runtime_context = await self._load_runtime_context_safely(
+        if self.should_preload_runtime_context(params):
+            await self._prime_runtime_context_query_var(query_id)
+            runtime_context = await self._ensure_runtime_context(
                 query_id,
-                params,
                 session,
                 identity_hint,
                 service,
             )
+
+        result: dict[str, Any] | None = None
+        storage_error: Exception | None = None
+        try:
             result = await asyncio.to_thread(
                 service.run_tool,
                 self.tool_name,
@@ -78,22 +81,23 @@ class BaseHenuTool(Tool):
                 query_id,
                 identity_hint,
             )
-        except Exception as exc:
-            result = self._make_error_result(exc)
         finally:
+            # Save user data back to Storage after operation
             try:
-                # Save user data back to Storage after operation
                 await storage_adapter.save_all()
             except Exception as exc:
                 storage_error = exc
-            finally:
-                # Clear thread-local paths even if persistence fails.
-                set_current_user_paths(None)
+            # Clear thread-local paths
+            set_current_user_paths(None)
 
         if storage_error is not None:
-            result = self._make_error_result(storage_error, "工具执行后保存用户数据失败")
-
-        result = self._ensure_result_dict(result)
+            failure: dict[str, Any] = {
+                "success": False,
+                "msg": f"LangBot Storage 保存失败: {storage_error}",
+            }
+            if isinstance(result, dict):
+                failure["tool_result"] = result
+            return failure
 
         if isinstance(result, dict) and isinstance(runtime_context, dict):
             server_time = runtime_context.get("server_time")
@@ -107,27 +111,6 @@ class BaseHenuTool(Tool):
 
     def should_preload_runtime_context(self, params: dict[str, Any]) -> bool:
         return self.tool_name not in self._TIME_PREFLIGHT_EXEMPT_TOOLS
-
-    async def _load_runtime_context_safely(
-        self,
-        query_id: int,
-        params: dict[str, Any],
-        session: provider_session.Session,
-        identity_hint: dict[str, Any],
-        service: Any,
-    ) -> dict[str, Any] | None:
-        try:
-            if not self.should_preload_runtime_context(params):
-                return None
-            await self._prime_runtime_context_query_var(query_id)
-            return await self._ensure_runtime_context(
-                query_id,
-                session,
-                identity_hint,
-                service,
-            )
-        except Exception:
-            return None
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
@@ -278,23 +261,6 @@ class BaseHenuTool(Tool):
         result.pop("_resolved_tool_name", None)
         result.pop("_effective_params", None)
 
-    def _ensure_result_dict(self, result: Any) -> dict[str, Any]:
-        if isinstance(result, dict):
-            return result
-
-        preview = self._trim_text(str(self._normalize_payload_types(result) or ""), 180)
-        msg = "工具返回了无法发送的结果。"
-        if preview:
-            msg = f"{msg} 已拦截非标准输出：{preview}"
-        return {"success": False, "msg": msg}
-
-    def _make_error_result(self, exc: Exception, prefix: str = "工具执行失败") -> dict[str, Any]:
-        message = str(exc).strip() or exc.__class__.__name__
-        return {
-            "success": False,
-            "msg": self._trim_text(f"{prefix}：{message}", 1200),
-        }
-
     def _normalize_for_qq_delivery(self, result: Any) -> None:
         if not isinstance(result, dict):
             return
@@ -330,10 +296,6 @@ class BaseHenuTool(Tool):
             elif isinstance(value, tuple) and len(value) > limit:
                 result[f"{field}_truncated"] = len(value) - limit
                 result[field] = list(value[:limit])
-
-        safe_result = self._normalize_payload_types(result)
-        result.clear()
-        result.update(safe_result)
 
         # Drop known heavy/optional fields that can trigger oversized payload issues.
         heavy_fields = [
@@ -388,17 +350,14 @@ class BaseHenuTool(Tool):
         if isinstance(value, dict):
             normalized = {}
             for key, item in value.items():
-                normalized[str(key)] = BaseHenuTool._normalize_payload_types(item)
+                normalized[key] = BaseHenuTool._normalize_payload_types(item)
             return normalized
         if isinstance(value, tuple):
             return [BaseHenuTool._normalize_payload_types(item) for item in value]
         if isinstance(value, list):
             return [BaseHenuTool._normalize_payload_types(item) for item in value]
         if isinstance(value, set):
-            return [
-                BaseHenuTool._normalize_payload_types(item)
-                for item in sorted(value, key=lambda item: str(item))
-            ]
+            return [BaseHenuTool._normalize_payload_types(item) for item in sorted(value)]
         if isinstance(value, Path):
             return str(value)
         if isinstance(value, (bytes, bytearray)):

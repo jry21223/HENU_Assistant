@@ -11,8 +11,9 @@ from typing import Any, Callable
 
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
-import course_schedule
 import mcp_server
+from henu_mcp import runtime as henu_runtime
+from henu_mcp.tools import server_impl
 from henu_plugin.cache import (
     ACCOUNT_CONTEXT_CACHE,
     LIBRARY_QUERY_CACHE,
@@ -485,60 +486,27 @@ class HenuPluginService:
         xiqueer_request_file = shared_dir / SHARED_XIQUEER_FILE
 
         with _RUNTIME_STATE_LOCK:
-            original_state = {
-                "course_schedule": {
-                    "COOKIE_FILE": course_schedule.COOKIE_FILE,
-                    "PROFILE_FILE": course_schedule.PROFILE_FILE,
-                    "OUTPUT_DIR": course_schedule.OUTPUT_DIR,
-                },
-                "mcp_server": {
-                    "COOKIE_FILE": mcp_server.COOKIE_FILE,
-                    "PROFILE_FILE": mcp_server.PROFILE_FILE,
-                    "OUTPUT_DIR": mcp_server.OUTPUT_DIR,
-                    "LIBRARY_COOKIE_FILE": mcp_server.LIBRARY_COOKIE_FILE,
-                    "SEMINAR_SIGNIN_TASK_FILE": mcp_server.SEMINAR_SIGNIN_TASK_FILE,
-                    "HEBAO_TOKEN_FILE": mcp_server.HEBAO_TOKEN_FILE,
-                    "CAS_COOKIE_FILE": mcp_server.CAS_COOKIE_FILE,
-                    "PERIOD_TIME_FILE": mcp_server.PERIOD_TIME_FILE,
-                    "PERIOD_CALIBRATION_STATE_FILE": mcp_server.PERIOD_CALIBRATION_STATE_FILE,
-                    "XIQUEER_REQUEST_FILE": mcp_server.XIQUEER_REQUEST_FILE,
-                    "_ensure_seminar_auto_signin_worker": mcp_server._ensure_seminar_auto_signin_worker,
-                },
-            }
+            original_state = henu_runtime.snapshot_runtime_paths()
+            original_worker = server_impl._ensure_seminar_auto_signin_worker
 
             try:
-                course_schedule.COOKIE_FILE = paths.xk_cookie_file
-                course_schedule.PROFILE_FILE = paths.profile_file
-                course_schedule.OUTPUT_DIR = paths.output_dir
-
-                mcp_server.COOKIE_FILE = paths.xk_cookie_file
-                mcp_server.PROFILE_FILE = paths.profile_file
-                mcp_server.OUTPUT_DIR = paths.output_dir
-                mcp_server.LIBRARY_COOKIE_FILE = paths.library_cookie_file
-                mcp_server.SEMINAR_SIGNIN_TASK_FILE = paths.seminar_signin_task_file
-                mcp_server.HEBAO_TOKEN_FILE = paths.yunfz_token_file
-                mcp_server.CAS_COOKIE_FILE = paths.cas_cookie_file
-                mcp_server.PERIOD_TIME_FILE = period_time_file
-                mcp_server.PERIOD_CALIBRATION_STATE_FILE = period_calibration_state_file
-                mcp_server.XIQUEER_REQUEST_FILE = xiqueer_request_file
-                mcp_server._ensure_seminar_auto_signin_worker = self._noop_auto_signin_worker
+                henu_runtime.set_runtime_paths(
+                    xk_cookie_file=paths.xk_cookie_file,
+                    profile_file=paths.profile_file,
+                    output_dir=paths.output_dir,
+                    library_cookie_file=paths.library_cookie_file,
+                    seminar_signin_task_file=paths.seminar_signin_task_file,
+                    hebao_token_file=paths.yunfz_token_file,
+                    cas_cookie_file=paths.cas_cookie_file,
+                    period_time_file=period_time_file,
+                    period_calibration_state_file=period_calibration_state_file,
+                    xiqueer_request_file=xiqueer_request_file,
+                )
+                server_impl._ensure_seminar_auto_signin_worker = self._noop_auto_signin_worker
                 yield
             finally:
-                course_schedule.COOKIE_FILE = original_state["course_schedule"]["COOKIE_FILE"]
-                course_schedule.PROFILE_FILE = original_state["course_schedule"]["PROFILE_FILE"]
-                course_schedule.OUTPUT_DIR = original_state["course_schedule"]["OUTPUT_DIR"]
-
-                mcp_server.COOKIE_FILE = original_state["mcp_server"]["COOKIE_FILE"]
-                mcp_server.PROFILE_FILE = original_state["mcp_server"]["PROFILE_FILE"]
-                mcp_server.OUTPUT_DIR = original_state["mcp_server"]["OUTPUT_DIR"]
-                mcp_server.LIBRARY_COOKIE_FILE = original_state["mcp_server"]["LIBRARY_COOKIE_FILE"]
-                mcp_server.SEMINAR_SIGNIN_TASK_FILE = original_state["mcp_server"]["SEMINAR_SIGNIN_TASK_FILE"]
-                mcp_server.HEBAO_TOKEN_FILE = original_state["mcp_server"]["HEBAO_TOKEN_FILE"]
-                mcp_server.CAS_COOKIE_FILE = original_state["mcp_server"]["CAS_COOKIE_FILE"]
-                mcp_server.PERIOD_TIME_FILE = original_state["mcp_server"]["PERIOD_TIME_FILE"]
-                mcp_server.PERIOD_CALIBRATION_STATE_FILE = original_state["mcp_server"]["PERIOD_CALIBRATION_STATE_FILE"]
-                mcp_server.XIQUEER_REQUEST_FILE = original_state["mcp_server"]["XIQUEER_REQUEST_FILE"]
-                mcp_server._ensure_seminar_auto_signin_worker = original_state["mcp_server"]["_ensure_seminar_auto_signin_worker"]
+                henu_runtime.restore_runtime_paths(original_state)
+                server_impl._ensure_seminar_auto_signin_worker = original_worker
 
     @staticmethod
     def _noop_auto_signin_worker() -> None:
@@ -932,3 +900,10 @@ class HenuPluginService:
             scope=_text(params.get("scope")) or "all",
             force_refresh=_bool(params.get("force_refresh"), False),
         )
+
+
+def _run_in_user_storage(storage_paths: UserStoragePaths, func: Callable[..., Any], *args: Any) -> Any:
+    base_dir = Path(__file__).resolve().parents[1]
+    service = HenuPluginService(base_dir)
+    with service._activate_user_storage(storage_paths):
+        return func(*args)

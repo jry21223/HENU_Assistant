@@ -6,6 +6,7 @@ import json
 import math
 import random
 import re
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -13,15 +14,29 @@ from urllib.parse import urljoin
 import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
-from schedule_cleaner import clean_schedule_grid_file
-from secure_storage import (
+from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
+from henu_mcp.core.secure_storage import (
     load_encrypted_profile,
     save_encrypted_profile,
     decrypt_value,
 )
 
+# Windows 时区支持
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
-BASE_DIR = Path(__file__).resolve().parent
+def _now_dt() -> dt.datetime:
+    """获取当前北京时间（带时区信息）"""
+    try:
+        return dt.datetime.now(ZoneInfo("Asia/Shanghai"))
+    except Exception:
+        # 如果时区信息不可用，使用 UTC+8 手动计算
+        return dt.datetime.utcnow() + dt.timedelta(hours=8)
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 COOKIE_FILE = BASE_DIR / "henu_cookies.json"
 PROFILE_FILE = BASE_DIR / "henu_profile.json"
 DEFAULT_HOME_URL = "https://xk.henu.edu.cn/frame/homes.action?v=07364432695342088912561"
@@ -167,7 +182,7 @@ class HenuXkClient:
         return m.group(1).strip() if m else ""
 
     def fetch_user_context(self) -> dict[str, Any]:
-        url = f"{self.base_url}/frame/home/js/SetMainInfo.jsp?v={int(dt.datetime.now().timestamp())}"
+        url = f"{self.base_url}/frame/home/js/SetMainInfo.jsp?v={int(_now_dt().timestamp())}"
         result = self.fetch_page(url)
         text = result["text"]
 
@@ -493,7 +508,7 @@ def run_fetch(
     if home_result["invalid_auth"]:
         return {"success": False, "msg": "登录后访问首页仍提示未登录，可能会话失效"}
 
-    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = _now_dt().strftime("%Y%m%d_%H%M%S")
     home_file = _save_output_file("home", timestamp, home_result["text"], "html")
     main_info_file = _save_output_file("set_main_info", timestamp, context["source_file_content"], "js")
 

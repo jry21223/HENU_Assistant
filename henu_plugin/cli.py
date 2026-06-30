@@ -93,12 +93,12 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "schedule now",
                 "course status",
                 "course plan --candidates-json '<json>'",
-                "schedule day --date YYYY-MM-DD",
+                "schedule day --date 2026-03-30",
                 "course plan --excel ./courses.xlsx --class 25软工1",
                 "library current",
-                "empty_classroom query [--week 1] [--day-of-week 1] [--period 1]",
-                "空教室 查询 --校区 <校区名> --楼房 <楼房名>",
-                "seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4",
+                "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
+                "empty_classroom query --week 1 --day-of-week 1 --period 1",
+                "resource search 十号楼101",
                 "yunfz leave list",
                 "yunfz signin list",
                 "status",
@@ -109,8 +109,9 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "help schedule",
                 "help course",
                 "help library",
-                "help empty_classroom",
                 "help seminar",
+                "help empty_classroom",
+                "help resource",
                 "help yunfz",
             ],
             "tips": [
@@ -168,7 +169,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
             "examples": [
                 "schedule now",
-                "schedule day --date YYYY-MM-DD",
+                "schedule day --date 2026-03-30",
                 "schedule sync",
             ],
             "tips": [
@@ -227,8 +228,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
             "examples": [
                 "library current",
-                "library seats --location 金明馆北区 --date YYYY-MM-DD --time 08:00",
-                "library reserve --location 金明馆北区 --seat-no 201 --date YYYY-MM-DD",
+                "library seats --location 金明馆北区 --date 2026-03-30 --time 08:00",
+                "library reserve --location 金明馆北区 --seat-no 201 --date 2026-03-30",
             ],
             "tips": [
                 "先用 `library current` 或 `library records` 看现状。",
@@ -253,8 +254,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "seminar cancel --record-id <ID>",
             ],
             "examples": [
-                "seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4",
-                "seminar reserve --area-id 12345 --date YYYY-MM-DD --start 14:00 --end 16:00 --title '组会' --content '课程讨论使用，已征得成员同意' --mobile 13800138000 --group-name 项目组",
+                "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
+                "seminar reserve --area-id 12345 --date 2026-03-30 --start 14:00 --end 16:00 --title '组会' --content '课程讨论使用，已征得成员同意' --mobile 13800138000 --group-name 项目组",
             ],
             "tips": [
                 "先查 filters/rooms/detail，再做 reserve。",
@@ -270,7 +271,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "seminar reserve --area-id <ID> --date YYYY-MM-DD --start HH:MM --end HH:MM [--end-date YYYY-MM-DD] [--title <标题>] [--title-id <主题ID>] --content <用途说明> [--mobile <手机号>] [--group-name <分组>] [--member-ids <成员学号列表>] [--is-open 0] [--cate-id <分类ID>] [--time-ranges-json <JSON>]",
             ],
             "examples": [
-                "seminar reserve --area-id 12345 --date YYYY-MM-DD --start 14:00 --end 16:00 --title '课程讨论' --content '课程讨论使用，已征得成员同意' --mobile 13800138000 --group-name 项目组",
+                "seminar reserve --area-id 12345 --date 2026-03-30 --start 14:00 --end 16:00 --title '课程讨论' --content '课程讨论使用，已征得成员同意' --mobile 13800138000 --group-name 项目组",
             ],
             "tips": [
                 "`--content` 需要足够具体，避免过短。",
@@ -322,42 +323,52 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
-    if normalized in {"empty_classroom", "empty classroom", "空教室", "教室"}:
+    if normalized == "empty_classroom":
         return {
-            "topic": "empty_classroom",
-            "summary": "空教室查询与教室课表同步。直接说“查看空教室”时，优先使用 `empty_classroom query`。",
+            "topic": normalized,
+            "summary": "空教室、教室占用、校区楼房与教室类型查询。",
             "commands": [
-                "empty_classroom query [--term-code <学期>] [--week <周次>] [--day-of-week <1-7>] [--period <大节>] [--campus-code <校区代码>|--campus-text <校区>] [--building-code <楼房代码>|--building-text <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity <人数>] [--keyword <关键词>]",
-                "empty_classroom day_matrix --term-code <学期> --week <周次> --day-of-week <1-7>",
-                "empty_classroom occupancy --term-code <学期> --week <周次> --day-of-week <1-7> --room-id <教室ID>",
-                "empty_classroom sync [--term-code <学期>] [--campus-code <校区代码>] [--building-code <楼房代码>] [--type-code <类型>] [--force-refresh]",
+                "empty_classroom query [--view free|day_matrix|occupancy|classrooms|types] [--term-code <学期>] [--week 1] [--day-of-week 1] [--period 1] [--campus-code <校区>] [--building-code <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity 80] [--keyword <关键词>] [--room-id <ID>] [--ttl-seconds 300] [--max-stale-seconds 86400]",
+                "empty_classroom sync --term-code <学期> --campus-code <校区> --building-code <楼房> [--type-code <类型>] [--force-refresh]",
                 "empty_classroom campuses",
-                "empty_classroom buildings [--campus-code <校区代码>]",
-                "empty_classroom classrooms [--campus-code <校区代码>] [--building-code <楼房代码>] [--type-code <类型>] [--keyword <关键词>]",
-                "empty_classroom types",
-                "空教室 查询 [--周 <周次>] [--星期 <1-7>] [--大节 <大节>] [--校区 <校区名>] [--楼房 <楼房名>]",
+                "empty_classroom buildings --campus-code <校区>",
             ],
             "examples": [
-                "empty_classroom query",
-                "empty_classroom query --week 1 --day-of-week 1 --period 3 --campus-text 明伦 --building-text 十号楼",
-                "empty_classroom query --week 1 --day-of-week 1 --period 3 --min-capacity 40 --keyword 101",
-                "空教室 查询 --周 1 --星期 1 --大节 3 --校区 明伦 --楼房 十号楼",
-                "empty_classroom campuses",
-                "empty_classroom buildings --campus-code <校区代码>",
-                "empty_classroom classrooms --campus-code <校区代码> --building-code <楼房代码>",
+                "empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼",
+                "empty_classroom query --view occupancy --classroom-text 十号楼101",
+                "empty_classroom sync --term-code 2025,1 --campus-code 01 --building-code 0013",
             ],
             "tips": [
-                "不确定参数时先执行 `empty_classroom query`，工具会尽量使用当前运行时上下文。",
-                "需要限定范围时先看 `empty_classroom campuses` 和 `empty_classroom buildings`。",
-                "`empty_classroom sync` 会刷新教室课表缓存；普通查询默认 cache_first。",
+                "空教室数据来自教务系统缓存，真实使用前建议先 sync。",
+                "公共教室缓存可共享，不会保存账号或 Cookie。",
+            ],
+        }
+
+    if normalized == "resource":
+        return {
+            "topic": normalized,
+            "summary": "查询统一资源编号映射，用于教室、图书馆座位、研讨室等资源解析。",
+            "commands": [
+                "resource search <关键词> [--resource-type <类型>] [--campus-code <校区>] [--building-code <楼房>] [--limit 20]",
+                "resource resolve <自然语言> [--resource-type <类型>] [--campus-code <校区>] [--building-code <楼房>]",
+                "resource sync [--scope classrooms|library|seminar|all] [--force-refresh]",
+                "resource stats",
+            ],
+            "examples": [
+                "resource search 十号楼101",
+                "resource resolve 金明馆北区201 --resource-type library_seat",
+                "resource sync --scope classrooms",
+            ],
+            "tips": [
+                "资源编号可用于后续精确查询或预约。",
             ],
         }
 
     return {
         "topic": normalized,
         "summary": f"未找到 `help {normalized}` 的专用说明，可先退回上一级主题。",
-        "commands": ["help", "help account", "help schedule", "help library", "help empty_classroom", "help seminar"],
-        "examples": ["help empty_classroom", "help seminar", "help account set"],
+        "commands": ["help", "help account", "help schedule", "help library", "help seminar"],
+        "examples": ["help seminar", "help account set"],
         "tips": ["按“一级主题 -> 二级主题 -> 精确命令”的顺序查看帮助。"],
     }
 
@@ -366,7 +377,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help course", "help library", "help empty_classroom", "help seminar", "help yunfz"]
+            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
         if topic == "schedule":
@@ -381,10 +392,12 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
             ]
         if topic == "library":
             return ["library current", "library locations", "library seats --location <区域> --date YYYY-MM-DD"]
-        if topic in {"empty_classroom", "empty classroom", "空教室", "教室"}:
-            return ["empty_classroom query", "empty_classroom campuses", "empty_classroom buildings --campus-code <校区代码>"]
         if topic == "seminar":
-            return ["seminar filters", "seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4"]
+            return ["seminar filters", "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4"]
+        if topic == "empty_classroom":
+            return ["empty_classroom query --week 1 --day-of-week 1 --period 1", "empty_classroom campuses"]
+        if topic == "resource":
+            return ["resource search 十号楼101", "resource stats"]
         if topic == "yunfz":
             return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list"]
         return ["help"]
@@ -399,7 +412,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if resolved_tool == "sync_schedule":
         return ["schedule now", "schedule week"]
     if resolved_tool == "schedule_query":
-        return ["schedule day --date YYYY-MM-DD", "schedule week"]
+        return ["schedule day --date 2026-03-30", "schedule week"]
     if resolved_tool == "course_selection_query":
         return ["course plan --candidates-json '<json>'", "course submit"]
     if resolved_tool == "course_selection_plan":
@@ -421,7 +434,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if resolved_tool == "library_cancel":
         return ["library current", "library records"]
     if resolved_tool == "seminar_group":
-        return ["seminar groups list", "seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4"]
+        return ["seminar groups list", "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4"]
     if resolved_tool == "seminar_query":
         view = str(spec.params.get("view") or "")
         if view in {"filters", "rooms"}:
@@ -437,15 +450,6 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["seminar signin-tasks", "seminar records"]
     if resolved_tool == "seminar_cancel":
         return ["seminar records", "seminar signin-tasks"]
-    if resolved_tool == "empty_classroom_query":
-        view = str(spec.params.get("view") or "")
-        if view == "campuses":
-            return ["empty_classroom buildings --campus-code <校区代码>", "empty_classroom query"]
-        if view == "buildings":
-            return ["empty_classroom query --campus-code <校区代码> --building-code <楼房代码>", "empty_classroom sync"]
-        return ["empty_classroom campuses", "empty_classroom buildings --campus-code <校区代码>", "empty_classroom sync --force-refresh"]
-    if resolved_tool == "empty_classroom_sync":
-        return ["empty_classroom query", "empty_classroom campuses"]
     if resolved_tool == "system_status":
         return ["account status", "schedule now", "library current"]
     if resolved_tool == "set_calibration_source":
@@ -1250,58 +1254,30 @@ def _system_status_spec(raw: str, argv: tuple[str, ...], action: str) -> CliComm
 def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     """空教室 <查询|同步|校区|楼房>"""
     if len(argv) < 2:
-        argv = (argv[0], "query")
+        return _error_spec(raw, "空教室命令: 空教室 <查询|同步|校区|楼房> ...", help_topic="empty_classroom")
     sub = argv[1].lower() if len(argv) > 1 else ""
     options, _, _ = _parse_options(argv[2:])
 
-    query_views = {
-        "query": "free",
-        "free": "free",
-        "查询": "free",
-        "查看": "free",
-        "查": "free",
-        "day_matrix": "day_matrix",
-        "matrix": "day_matrix",
-        "全天": "day_matrix",
-        "occupancy": "occupancy",
-        "占用": "occupancy",
-        "terms": "terms",
-        "学期": "terms",
-        "campuses": "campuses",
-        "campus": "campuses",
-        "校区": "campuses",
-        "buildings": "buildings",
-        "building": "buildings",
-        "楼房": "buildings",
-        "楼栋": "buildings",
-        "classrooms": "classrooms",
-        "classroom": "classrooms",
-        "教室": "classrooms",
-        "types": "types",
-        "type": "types",
-        "类型": "types",
-    }
-
-    if sub in query_views:
+    if sub in ("查询", "query", "free"):
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": query_views[sub],
+            params={"view": options.get("view", "free"),
                 "term_code": options.get("term_code", options.get("学期", "")),
                 "week": _int_opt(options, "week", "周", 0),
                 "day_of_week": _int_opt(options, "day_of_week", "星期", 0),
                 "period": _int_opt(options, "period", "大节", 0),
-                "campus_code": options.get("campus_code", ""),
-                "building_code": options.get("building_code", ""),
-                "campus_text": options.get("campus_text", options.get("校区", options.get("校区名", ""))),
-                "building_text": options.get("building_text", options.get("楼房", options.get("楼房名", options.get("楼栋名", "")))),
-                "classroom_text": options.get("classroom_text", options.get("教室", options.get("教室名", ""))),
-                "type_code": options.get("type_code", options.get("类型", "")),
-                "min_capacity": _int_opt(options, "min_capacity", "capacity", "人数", "容量", 0),
-                "keyword": options.get("keyword", options.get("关键词", "")),
-                "room_id": options.get("room_id", options.get("教室ID", "")),
+                "campus_code": options.get("campus_code", options.get("校区", "")),
+                "building_code": options.get("building_code", options.get("楼房", "")),
+                "campus_text": options.get("campus_text", ""),
+                "building_text": options.get("building_text", ""),
+                "classroom_text": options.get("classroom_text", ""),
+                "type_code": options.get("type_code", ""),
+                "min_capacity": _int_opt(options, "min_capacity", default=0),
+                "keyword": options.get("keyword", ""),
+                "room_id": options.get("room_id", ""),
                 "freshness": options.get("freshness", "cache_first"),
                 "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
-                "ttl_seconds": _int_opt(options, "ttl_seconds", "ttl", default=300),
-                "max_stale_seconds": _int_opt(options, "max_stale_seconds", "max_stale", default=86400),
+                "ttl_seconds": _int_opt(options, "ttl_seconds", default=300),
+                "max_stale_seconds": _int_opt(options, "max_stale_seconds", default=86400),
             }, action="查询空教室", should_preload_runtime_context=True)
 
     if sub in ("同步", "sync"):
@@ -1309,9 +1285,18 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             params={"term_code": options.get("term_code", options.get("学期", "")),
                 "campus_code": options.get("campus_code", options.get("校区", "")),
                 "building_code": options.get("building_code", options.get("楼房", "")),
-                "type_code": options.get("type_code", options.get("类型", "")),
+                "type_code": options.get("type_code", ""),
                 "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
             }, action="同步教室课表", should_preload_runtime_context=True)
+
+    if sub in ("校区", "campuses"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
+            params={"view": "campuses"}, action="查看校区", should_preload_runtime_context=True)
+
+    if sub in ("楼房", "buildings"):
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
+            params={"view": "buildings", "campus_code": options.get("campus_code", options.get("校区", ""))},
+            action="查看楼房", should_preload_runtime_context=True)
 
     return _error_spec(raw, f"不支持: {sub}，支持 查询/同步/校区/楼房", help_topic="empty_classroom")
 
@@ -1327,14 +1312,15 @@ def _parse_resource(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         q = " ".join(argv[2:]) if len(argv) > 2 else options.get("query", "")
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_query",
             params={"view": "search", "query": q, "resource_type": options.get("resource_type", ""),
-                "campus_code": options.get("campus_code", ""), "limit": _int_opt(options, "limit", "", 20)},
+                "campus_code": options.get("campus_code", ""), "building_code": options.get("building_code", ""),
+                "limit": _int_opt(options, "limit", "", 20)},
             action="搜索资源", should_preload_runtime_context=False)
 
     if sub in ("解析", "resolve"):
         q = " ".join(argv[2:]) if len(argv) > 2 else options.get("query", "")
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="resource_registry_query",
             params={"view": "resolve", "query": q, "resource_type": options.get("resource_type", ""),
-                "campus_code": options.get("campus_code", "")},
+                "campus_code": options.get("campus_code", ""), "building_code": options.get("building_code", "")},
             action="解析资源", should_preload_runtime_context=False)
 
     if sub in ("同步", "sync"):
