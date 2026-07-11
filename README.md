@@ -76,7 +76,8 @@ python3 henu_cli.py resource_registry_query --query "十号楼101" --building_co
 
 ## 说明
 
-- 账号与 Cookie 仅本地保存；同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），失败后再回退密码登录。
+- 账号与 Cookie 仅本地保存。教务登录优先复用或登录 IDS（`CASTGC`/`TGC`）；IDS、Service 跳转、网络或验证码风控失败后，仅自动尝试一次 xk Kingo 独立登录，不识别验证码或循环重试。
+- IDS 模式支持跨服务 SSO；Kingo 降级模式只保证课表、选课状态、空教室等 xk 能力，不生成或覆盖 CAS Jar。账号初始化、登录检查、课表同步和系统状态通过 `auth` 返回 `mode`、`degraded`、`error_code` 和 `warning`。
 - 研讨室 `group` 不包含自己，建议保存 3-9 个同行成员。
 - 研讨室申请内容必须多于 10 个字。
 - 不建议直接执行系统级 `pip3 install -r requirements.txt`。

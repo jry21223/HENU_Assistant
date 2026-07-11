@@ -88,4 +88,6 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 - 研讨室可先用 `seminar_query --view records` 查记录，再用 `seminar_cancel` 取消
 - 河宝社区相关查询前先执行 `system_status`
 - 请假详情使用 `yunfz_leave_query --view detail --leave_id "..."`
-- 账号与 Cookie 仅本地保存；同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），失败后再回退密码登录
+- 账号与 Cookie 仅本地保存；教务登录优先复用或登录 IDS（`CASTGC`/`TGC`），失败后仅自动尝试一次 xk Kingo 独立登录
+- IDS 模式可跨服务复用；Kingo 降级模式只保证课表、选课状态、空教室等 xk 能力，不生成或覆盖 CAS Jar
+- 遇到 Kingo 验证码立即返回 `captcha_required`，禁止识别、绕过或循环重试；根据返回的 `auth.mode`、`degraded`、`error_code`、`warning` 向用户说明能力边界
