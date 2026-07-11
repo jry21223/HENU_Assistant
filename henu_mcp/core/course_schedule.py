@@ -12,6 +12,12 @@ from typing import Any
 from urllib.parse import urljoin
 
 import requests
+
+from henu_mcp.core.cas_session import (
+    CAS_COOKIE_NAMES,
+    apply_cas_cookies,
+    extract_cas_cookies,
+)
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
@@ -61,7 +67,7 @@ def save_json(path: Path, data: dict[str, Any]) -> None:
 
 class HenuXkClient:
     AES_CHARS = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
-    PERSIST_COOKIE_NAMES = {"CASTGC", "happyVoyage", "platformMultilingual"}
+    PERSIST_COOKIE_NAMES = CAS_COOKIE_NAMES
 
     def __init__(self, username: str, password: str, saved_cookies: dict[str, Any] | None = None):
         self.username = str(username).strip()
@@ -88,14 +94,17 @@ class HenuXkClient:
         )
 
         if saved_cookies:
-            self.session.cookies.update(saved_cookies)
+            service_cookies = {
+                name: value
+                for name, value in saved_cookies.items()
+                if name not in CAS_COOKIE_NAMES
+            }
+            if service_cookies:
+                self.session.cookies.update(service_cookies)
+            apply_cas_cookies(self.session, saved_cookies)
 
     def get_cookies(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for cookie in self.session.cookies:
-            if cookie.name in self.PERSIST_COOKIE_NAMES:
-                result[cookie.name] = cookie.value
-        return result
+        return extract_cas_cookies(self.session.cookies)
 
     @staticmethod
     def _decode_text(resp: requests.Response) -> str:

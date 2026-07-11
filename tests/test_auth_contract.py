@@ -57,6 +57,27 @@ def test_ids_cas_cookie_reuse_contract_is_present() -> None:
 
     assert "_load_cas_cookies()" in library_source
     assert "_load_cas_cookies()" in hebao_source
-    assert 'cas_cookies.get("CASTGC"' in library_source
+    assert "HenuCampusBot(student_id, password, stored or None, cas_cookies or None)" in library_source
+    assert "HenuCampusBot(student_id, password, None, cas_cookies or None" in hebao_source
     assert "_save_cas_cookies(bot.get_cas_cookies())" in library_source
     assert "_save_cas_cookies(bot.get_hebao_cas_cookies())" in hebao_source
+
+
+def test_all_cas_clients_use_the_shared_cookie_policy() -> None:
+    sources = {
+        "academic": (ROOT / "henu_mcp" / "core" / "course_schedule.py").read_text(
+            encoding="utf-8"
+        ),
+        "library": (ROOT / "campus_core" / "bot.py").read_text(encoding="utf-8"),
+        "library_auth": (ROOT / "campus_core" / "auth.py").read_text(
+            encoding="utf-8"
+        ),
+        "hebao": (ROOT / "campus_core" / "hebao.py").read_text(encoding="utf-8"),
+    }
+
+    assert "apply_cas_cookies" in sources["academic"]
+    assert "extract_cas_cookies" in sources["academic"]
+    assert "apply_cas_cookies" in sources["library"]
+    assert "extract_cas_cookies" in sources["library_auth"]
+    assert "apply_cas_cookies" in sources["hebao"]
+    assert "extract_cas_cookies" in sources["hebao"]
