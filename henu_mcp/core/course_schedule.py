@@ -18,6 +18,7 @@ from henu_mcp.core.cas_session import (
     apply_cas_cookies,
     extract_cas_cookies,
 )
+from henu_mcp.core.kingo_auth import AuthResult, KINGO_WARNING, login_via_kingo
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
@@ -67,13 +68,15 @@ def save_json(path: Path, data: dict[str, Any]) -> None:
 
 class HenuXkClient:
     AES_CHARS = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
-    PERSIST_COOKIE_NAMES = CAS_COOKIE_NAMES
+    XK_COOKIE_NAMES = {"JSESSIONID", "route"}
 
     def __init__(self, username: str, password: str, saved_cookies: dict[str, Any] | None = None):
         self.username = str(username).strip()
         self.password = password or ""
         self.base_url = "https://xk.henu.edu.cn"
         self.cas_login_url = "https://ids.henu.edu.cn/authserver/login"
+        self.auth_result = AuthResult(False, error_code="not_attempted", message="尚未尝试登录")
+        self._saved_auth_mode = ""
 
         self.session = requests.Session()
         # 避免本地代理影响 http 跳转链路
@@ -94,17 +97,28 @@ class HenuXkClient:
         )
 
         if saved_cookies:
+            self._saved_auth_mode = str(saved_cookies.get("_auth_mode") or "")
             service_cookies = {
                 name: value
                 for name, value in saved_cookies.items()
-                if name not in CAS_COOKIE_NAMES
+                if name not in CAS_COOKIE_NAMES and not str(name).startswith("_")
             }
             if service_cookies:
                 self.session.cookies.update(service_cookies)
             apply_cas_cookies(self.session, saved_cookies)
 
     def get_cookies(self) -> dict[str, Any]:
-        return extract_cas_cookies(self.session.cookies)
+        result = extract_cas_cookies(self.session.cookies)
+        for cookie in self.session.cookies:
+            domain = str(cookie.domain or "").lstrip(".")
+            if cookie.name in self.XK_COOKIE_NAMES and domain in {"", "xk.henu.edu.cn"}:
+                result[cookie.name] = cookie.value
+        if self.auth_result.mode:
+            result["_auth_mode"] = self.auth_result.mode
+        return result
+
+    def get_auth_info(self) -> dict[str, Any]:
+        return self.auth_result.to_dict()
 
     @staticmethod
     def _decode_text(resp: requests.Response) -> str:
@@ -224,24 +238,31 @@ class HenuXkClient:
     def _clear_runtime_cookies(self) -> None:
         self.session.cookies.clear()
 
-    def login(self) -> bool:
-        if self._check_logged_in():
-            return True
+    @staticmethod
+    def _ids_error(text: str, status_code: int = 0) -> tuple[str, str]:
+        plain = re.sub(r"(?is)<[^>]+>", " ", str(text or ""))
+        plain = re.sub(r"\s+", " ", plain).strip()
+        compact = plain.lower()
+        if any(marker in compact for marker in ("验证码", "captcha", "校验码")):
+            return "captcha_required", "IDS 统一认证需要验证码或额外校验"
+        if any(marker in compact for marker in ("账号或密码", "用户名或密码", "密码错误", "密码不正确")):
+            return "invalid_credentials", "IDS 统一认证拒绝了账号或密码"
+        if status_code in {401, 403, 429}:
+            return "service_error", f"IDS 统一认证返回 HTTP {status_code}"
+        return "service_error", "IDS 统一认证未建立 xk 登录态"
 
+    def _login_via_ids(self) -> AuthResult:
         cas_auth_url = self._cas_auth_url()
-
-        # 1) 先试已有 TGT 自动跳转
         try:
-            self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
+            response = self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
             if self._check_logged_in():
-                return True
-        except Exception:
-            pass
+                return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
+        except Exception as exc:
+            return AuthResult(False, error_code="network_error", message=f"IDS 登录入口访问失败: {exc}")
 
         if not self.password:
-            return False
+            return AuthResult(False, error_code="missing_password", message="IDS 登录缺少密码")
 
-        # 2) 密码登录 CAS（同图书馆流程）
         try:
             self._clear_runtime_cookies()
             login_page = self.session.get(cas_auth_url, timeout=30)
@@ -249,7 +270,11 @@ class HenuXkClient:
             execution_match = re.search(r'name="execution" value="(.*?)"', login_text)
             salt_match = re.search(r'id="pwdEncryptSalt" value="(.*?)"', login_text)
             if not execution_match or not salt_match:
-                return False
+                error_code, message = self._ids_error(login_text, login_page.status_code)
+                if error_code == "service_error":
+                    error_code = "protocol_error"
+                    message = "IDS 登录页缺少 execution 或 pwdEncryptSalt"
+                return AuthResult(False, error_code=error_code, message=message)
 
             form_data = {
                 "username": self.username,
@@ -261,10 +286,74 @@ class HenuXkClient:
                 "lt": "",
                 "execution": execution_match.group(1),
             }
-            self.session.post(login_page.url, data=form_data, allow_redirects=True, timeout=35)
-            return self._check_logged_in()
-        except Exception:
-            return False
+            login_response = self.session.post(
+                login_page.url,
+                data=form_data,
+                allow_redirects=True,
+                timeout=35,
+            )
+            if self._check_logged_in():
+                return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
+            error_code, message = self._ids_error(
+                self._decode_text(login_response),
+                login_response.status_code,
+            )
+            return AuthResult(False, error_code=error_code, message=message)
+        except Exception as exc:
+            return AuthResult(False, error_code="network_error", message=f"IDS 登录请求失败: {exc}")
+
+    def login(self) -> bool:
+        if self._check_logged_in():
+            mode = self._saved_auth_mode if self._saved_auth_mode in {"ids_cas", "xk_kingo"} else (
+                "ids_cas" if extract_cas_cookies(self.session.cookies) else "xk_kingo"
+            )
+            self.auth_result = AuthResult(
+                True,
+                mode=mode,
+                degraded=mode == "xk_kingo",
+                message="已复用现有登录态",
+                warning=KINGO_WARNING if mode == "xk_kingo" else "",
+            )
+            return True
+
+        ids_result = self._login_via_ids()
+        if ids_result.success:
+            self.auth_result = ids_result
+            return True
+
+        kingo_result = login_via_kingo(
+            session=self.session,
+            base_url=self.base_url,
+            username=self.username,
+            password=self.password,
+            decode_text=self._decode_text,
+            check_logged_in=self._check_logged_in,
+        )
+        if kingo_result.success:
+            self.auth_result = AuthResult(
+                True,
+                mode="xk_kingo",
+                degraded=True,
+                message=kingo_result.message,
+                warning=KINGO_WARNING,
+                ids_error_code=ids_result.error_code,
+                ids_message=ids_result.message,
+            )
+            return True
+
+        error_code = (
+            "captcha_required"
+            if "captcha_required" in {ids_result.error_code, kingo_result.error_code}
+            else kingo_result.error_code or ids_result.error_code
+        )
+        self.auth_result = AuthResult(
+            False,
+            error_code=error_code,
+            message=f"IDS: {ids_result.message}；xk: {kingo_result.message}",
+            ids_error_code=ids_result.error_code,
+            ids_message=ids_result.message,
+        )
+        return False
 
     def discover_schedule_urls(self, home_html: str, user_type: str = "") -> list[str]:
         found: list[str] = []
@@ -500,7 +589,11 @@ def run_fetch(
     client = HenuXkClient(student_id, password, cookies or None)
 
     if not client.login():
-        return {"success": False, "msg": "登录失败，请检查账号密码或 CAS 状态"}
+        return {
+            "success": False,
+            "msg": client.auth_result.message,
+            "auth": client.get_auth_info(),
+        }
 
     context = client.fetch_user_context()
     if not context.get("authenticated"):
@@ -509,13 +602,18 @@ def run_fetch(
             "msg": "已进入系统但仍为游客态(kingo.guest)，无法查看个人课表",
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
+            "auth": client.get_auth_info(),
         }
 
     save_json(COOKIE_FILE, client.get_cookies())
 
     home_result = client.fetch_page(home_url)
     if home_result["invalid_auth"]:
-        return {"success": False, "msg": "登录后访问首页仍提示未登录，可能会话失效"}
+        return {
+            "success": False,
+            "msg": "登录后访问首页仍提示未登录，可能会话失效",
+            "auth": client.get_auth_info(),
+        }
 
     timestamp = _now_dt().strftime("%Y%m%d_%H%M%S")
     home_file = _save_output_file("home", timestamp, home_result["text"], "html")
@@ -671,6 +769,7 @@ def run_fetch(
     return {
         "success": bool(chosen),
         "msg": "已抓取课表页面" if chosen else "已登录，但未自动识别到课表页面，请手动指定 --schedule-url",
+        "auth": client.get_auth_info(),
         "login_id": context.get("login_id", ""),
         "user_type": context.get("user_type", ""),
         "target_term": {

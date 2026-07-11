@@ -61,7 +61,9 @@ seminar signin --auto-scan
 - 用户数据位于 `data/users/<qq>/`
 - 共享节次校准文件位于 `data/shared/`
 
-用户目录会保存账号配置、该 QQ 用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等）、业务 Cookie/Token、研讨室签到任务、选课监控配置和课表抓取结果。同一用户的课表、选课、空教室、图书馆、研讨室、河宝会优先复用该用户的 IDS CAS 登录态，失败后才回退密码登录。
+用户目录会保存账号配置、该 QQ 用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等）、业务 Cookie/Token、研讨室签到任务、选课监控配置和课表抓取结果。教务登录优先复用或登录 IDS；IDS、Service 跳转、网络或验证码风控失败后，仅自动尝试一次 xk Kingo 独立登录，不识别验证码或循环重试。
+
+IDS 模式可供课表、选课、空教室、图书馆、研讨室和河宝复用。Kingo 降级模式只保证课表、选课状态和空教室等 xk 能力，不生成或覆盖 CAS Jar；其他服务仍需完成 IDS 登录。账号初始化、登录检查、课表同步和系统状态通过 `auth` 返回认证模式、降级状态、错误码和能力警告。
 
 共享目录只保存公共校园配置和缓存，例如节次时间、节次校准状态和空教室公共请求参数；`shared:*` Storage key 不保存密码、`CASTGC`、业务 Token 或个人 Cookie。
 

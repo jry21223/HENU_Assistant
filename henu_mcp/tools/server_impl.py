@@ -28,6 +28,7 @@ from henu_mcp.core.course_schedule import (
     run_fetch,
     save_json,
 )
+from henu_mcp.core.kingo_auth import KINGO_WARNING
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
     DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
@@ -1464,8 +1465,30 @@ def _load_xk_cookies() -> dict[str, Any]:
 
 
 def _save_xk_cookies(cookies: dict[str, Any]) -> None:
-    save_json(COOKIE_FILE, cookies)
-    _save_cas_cookies(cookies)
+    mode = str(cookies.get("_auth_mode") or "")
+    persisted = cookies
+    if mode == "xk_kingo":
+        persisted = {
+            key: value
+            for key, value in cookies.items()
+            if key not in _extract_ids_cas_cookies(cookies)
+        }
+    save_json(COOKIE_FILE, persisted)
+    if mode == "ids_cas":
+        _save_cas_cookies(cookies)
+
+
+def _saved_xk_auth_info() -> dict[str, Any]:
+    mode = str(load_json(COOKIE_FILE).get("_auth_mode") or "")
+    return {
+        "mode": mode,
+        "degraded": mode == "xk_kingo",
+        "error_code": "",
+        "message": "已保存登录态" if mode else "尚无已保存的认证模式",
+        "warning": KINGO_WARNING if mode == "xk_kingo" else "",
+        "ids_error_code": "",
+        "ids_message": "",
+    }
 
 
 def _set_library_login_error(message: str) -> None:
@@ -1736,12 +1759,18 @@ def save_account(
         return {"success": False, "msg": "student_id/password 不能为空"}
 
     context: dict[str, Any] = {}
+    auth: dict[str, Any] = _saved_xk_auth_info()
     if verify_login:
         client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
         if not client.login():
-            return {"success": False, "msg": "登录失败，账号或密码可能错误"}
+            return {
+                "success": False,
+                "msg": client.auth_result.message,
+                "auth": client.get_auth_info(),
+            }
         _save_xk_cookies(client.get_cookies())
         context = client.fetch_user_context()
+        auth = client.get_auth_info()
 
     fields: dict[str, Any] = {"student_id": sid, "password": pwd}
     if str(library_location or "").strip():
@@ -1753,6 +1782,7 @@ def save_account(
         "success": True,
         "msg": "账号已保存",
         "account": _mask_profile(_effective_profile()),
+        "auth": auth,
         "context": {
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
@@ -1784,7 +1814,8 @@ def check_login(
 
     return {
         "success": ok,
-        "msg": "登录成功" if ok else "登录失败",
+        "msg": "登录成功" if ok else client.auth_result.message,
+        "auth": client.get_auth_info(),
         "login_id": context.get("login_id", ""),
         "user_type": context.get("user_type", ""),
         "current_xn": context.get("current_xn", ""),
@@ -3028,6 +3059,7 @@ def setup_account(
         "success": True,
         "msg": "账号初始化完成",
         "account": result.get("account", {}),
+        "auth": result.get("auth", {}),
         "login_context": result.get("context", {}),
         "period_time_calibration": calibration,
     }
@@ -3742,6 +3774,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
         "success": True,
         "server_time": get_server_time(timezone=timezone),
         "account": show_account(),
+        "auth": _saved_xk_auth_info(),
         "period_time_config": get_period_time_config(),
         "library_defaults": {
             "location": _resolve_library_defaults()[0],
