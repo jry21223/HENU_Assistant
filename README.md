@@ -28,8 +28,8 @@ cp .env.example .env
 发布示例：
 
 ```bash
-git tag v1.2.15
-git push origin v1.2.15
+git tag v2.0.1
+git push origin v2.0.1
 ```
 
 ## 常用命令
