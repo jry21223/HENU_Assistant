@@ -13,6 +13,8 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
+from henu_mcp.core.cas_session import apply_cas_cookies, extract_cas_cookies
+
 from .auth import AuthMixin
 
 
@@ -69,21 +71,14 @@ class _HebaoClient:
         if self.token:
             self.session.headers["Authorization"] = self.token
 
-        # Load shared CAS cookies (CASTGC) for login reuse
-        if cas_cookies:
-            for name, value in cas_cookies.items():
-                self.session.cookies.set(name, value, domain="ids.henu.edu.cn", path="/")
+        apply_cas_cookies(self.session, cas_cookies)
 
     def get_token(self) -> str:
         return self.token
 
     def get_cas_cookies(self) -> dict[str, Any]:
         """Get CAS cookies (CASTGC) for sharing with other systems."""
-        cas_cookies = {}
-        for cookie in self.session.cookies:
-            if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
-                cas_cookies[cookie.name] = cookie.value
-        return cas_cookies
+        return extract_cas_cookies(self.session.cookies)
 
     def _random_string(self, length: int) -> str:
         chars = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
