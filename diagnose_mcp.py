@@ -56,8 +56,9 @@ def check_files():
     
     required_files = [
         "mcp_server.py",
-        "course_schedule.py",
-        "schedule_cleaner.py",
+        "henu_mcp/core/course_schedule.py",
+        "henu_mcp/core/schedule_cleaner.py",
+        "henu_mcp/core/kingo_auth.py",
         "campus_core/__init__.py",
         "campus_core/bot.py",
         "campus_core/config/library_locations.json",
