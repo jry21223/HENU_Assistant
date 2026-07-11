@@ -14,6 +14,10 @@ from zoneinfo import ZoneInfo
 import requests
 from mcp.server.fastmcp import FastMCP
 
+from henu_mcp.core.cas_session import (
+    extract_cas_cookies as _extract_ids_cas_cookies,
+    merge_cas_cookies as _merge_cas_cookies,
+)
 from henu_mcp.core.course_schedule import (
     COOKIE_FILE,
     DEFAULT_HOME_URL,
@@ -41,6 +45,14 @@ from henu_mcp.core.course_monitor import (
     test_notification,
 )
 from henu_mcp.core.course_selection import HenuCourseSelectionClient
+from henu_mcp.core.period_times import (
+    extract_period_times_from_text as _extract_period_times_from_text,
+    extract_period_times_from_xiqueer_json as _extract_period_times_from_xiqueer_json,
+    is_hhmm as _is_hhmm,
+    minutes_to_hhmm as _minutes_to_hhmm,
+    normalize_teaching_period_times as _normalize_teaching_period_times,
+    to_minutes as _to_minutes,
+)
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from henu_mcp.core.secure_storage import (
     encrypt_value,
@@ -130,75 +142,6 @@ def _now_dt(timezone: str = "Asia/Shanghai") -> datetime:
         return datetime.now(ZoneInfo("Asia/Shanghai"))
 
 
-def _is_hhmm(text: str) -> bool:
-    return bool(re.fullmatch(r"[0-2]\d:[0-5]\d", text or ""))
-
-
-def _to_minutes(hhmm: str) -> int:
-    hour, minute = hhmm.split(":")
-    return int(hour) * 60 + int(minute)
-
-
-def _normalize_teaching_period_times(
-    period_times: dict[str, dict[str, str]],
-) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
-    """
-    规范化节次配置：
-    1) 按开始时间排序
-    2) 强制剔除中午短节次(12:00-14:10 且时长 20-35 分钟，常见为原 6/7 节)
-    3) 重编号为连续 1..N（去掉中午短节后得到 13 节体系）
-    """
-    items: list[tuple[int, str, str]] = []
-    for key, cfg in (period_times or {}).items():
-        if not isinstance(cfg, dict):
-            continue
-        start = str(cfg.get("start", "")).strip()
-        end = str(cfg.get("end", "")).strip()
-        if not (_is_hhmm(start) and _is_hhmm(end)):
-            continue
-        if _to_minutes(start) >= _to_minutes(end):
-            continue
-        try:
-            period_no = int(str(key))
-        except Exception:
-            period_no = 999
-        items.append((period_no, start, end))
-
-    if not items:
-        return {}, {"applied": False, "removed_midday_count": 0}
-
-    items.sort(key=lambda x: (_to_minutes(x[1]), x[0]))
-
-    removed_midday: list[tuple[int, str, str]] = []
-    kept_items: list[tuple[int, str, str]] = []
-    for period_no, start, end in items:
-        start_min = _to_minutes(start)
-        duration = _to_minutes(end) - start_min
-        is_midday_short = 12 * 60 <= start_min <= (14 * 60 + 10) and 20 <= duration <= 35
-        if is_midday_short:
-            removed_midday.append((period_no, start, end))
-            continue
-        kept_items.append((period_no, start, end))
-
-    # 至少保留 10 节时才执行过滤，避免异常数据误删。
-    if removed_midday and len(kept_items) >= 10:
-        items = kept_items
-    else:
-        removed_midday = []
-
-    normalized: dict[str, dict[str, str]] = {}
-    for idx, (_, start, end) in enumerate(items, start=1):
-        normalized[str(idx)] = {"start": start, "end": end}
-
-    return normalized, {
-        "applied": True,
-        "removed_midday_count": len(removed_midday),
-        "removed_midday_periods": [
-            {"period": p, "start": s, "end": e} for p, s, e in removed_midday
-        ],
-    }
-
-
 def _load_period_times() -> dict[str, dict[str, str]]:
     if PERIOD_TIME_FILE.exists():
         try:
@@ -261,12 +204,6 @@ def _decode_resp_text(resp: requests.Response) -> str:
     return content.decode("utf-8", errors="ignore")
 
 
-def _minutes_to_hhmm(value: int) -> str:
-    hour = max(0, value) // 60
-    minute = max(0, value) % 60
-    return f"{hour:02d}:{minute:02d}"
-
-
 def _load_xiqueer_request_config() -> dict[str, Any]:
     if not XIQUEER_REQUEST_FILE.exists():
         return {}
@@ -295,50 +232,6 @@ def _xiqueer_config_summary(config: dict[str, Any]) -> dict[str, Any]:
         "has_cookie": "Cookie" in headers or "cookie" in headers,
         "data_length": len(data_text),
     }
-
-
-def _extract_period_times_from_xiqueer_json(text: str) -> dict[str, dict[str, str]]:
-    try:
-        payload = json.loads(text)
-    except Exception:
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-
-    rows = payload.get("sksj")
-    if not isinstance(rows, list):
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        jieci = str(row.get("jieci", "") or "")
-        start_raw = str(row.get("time", "") or "").strip()
-        duration_raw = str(row.get("shichang", "") or "").strip()
-
-        m = re.search(r"第\s*(\d+)\s*节", jieci)
-        if not m:
-            continue
-        period = str(int(m.group(1)))
-
-        if not _is_hhmm(start_raw.zfill(5)):
-            continue
-        start_hhmm = start_raw.zfill(5)
-
-        try:
-            duration = int(duration_raw)
-        except Exception:
-            continue
-        if duration <= 0 or duration > 180:
-            continue
-
-        end_hhmm = _minutes_to_hhmm(_to_minutes(start_hhmm) + duration)
-        if not _is_hhmm(end_hhmm):
-            continue
-
-        result[period] = {"start": start_hhmm, "end": end_hhmm}
-    return result
 
 
 def _fetch_xiqueer_period_times() -> dict[str, Any]:
@@ -376,37 +269,6 @@ def _fetch_xiqueer_period_times() -> dict[str, Any]:
         }
     except Exception as exc:
         return {"success": False, "msg": f"xiqueer 请求失败: {exc}"}
-
-
-def _extract_period_times_from_text(text: str) -> dict[str, dict[str, str]]:
-    clean = text or ""
-    candidates: dict[str, dict[str, str]] = {}
-
-    # 形如：第3节 10:00-10:45
-    p1 = re.compile(
-        r"第?\s*(\d{1,2})\s*节[^0-9]{0,30}([0-2]?\d:[0-5]\d)\s*(?:-|~|—|–|至)\s*([0-2]?\d:[0-5]\d)",
-        re.I,
-    )
-    for m in p1.finditer(clean):
-        period = str(int(m.group(1)))
-        start = m.group(2).zfill(5)
-        end = m.group(3).zfill(5)
-        if _is_hhmm(start) and _is_hhmm(end) and _to_minutes(start) < _to_minutes(end):
-            candidates[period] = {"start": start, "end": end}
-
-    # 形如：10:00-10:45 第3节
-    p2 = re.compile(
-        r"([0-2]?\d:[0-5]\d)\s*(?:-|~|—|–|至)\s*([0-2]?\d:[0-5]\d)[^第]{0,30}第?\s*(\d{1,2})\s*节",
-        re.I,
-    )
-    for m in p2.finditer(clean):
-        period = str(int(m.group(3)))
-        start = m.group(1).zfill(5)
-        end = m.group(2).zfill(5)
-        if _is_hhmm(start) and _is_hhmm(end) and _to_minutes(start) < _to_minutes(end):
-            candidates[period] = {"start": start, "end": end}
-
-    return candidates
 
 
 def _fetch_timetable_text_candidates(sid: str, pwd: str) -> list[tuple[str, str]]:
@@ -1581,9 +1443,10 @@ def _save_library_cookies(cookies: dict[str, Any]) -> None:
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load this user's IDS CAS cookie jar for cross-service login reuse."""
-    cookies = load_json(CAS_COOKIE_FILE)
-    cookies.update(_extract_ids_cas_cookies(load_json(COOKIE_FILE)))
-    return cookies
+    return _merge_cas_cookies(
+        load_json(CAS_COOKIE_FILE),
+        load_json(COOKIE_FILE),
+    )
 
 
 def _save_cas_cookies(cookies: dict[str, Any]) -> None:
@@ -1593,20 +1456,11 @@ def _save_cas_cookies(cookies: dict[str, Any]) -> None:
         save_json(CAS_COOKIE_FILE, clean)
 
 
-def _extract_ids_cas_cookies(cookies: dict[str, Any] | None) -> dict[str, Any]:
-    ids_cookie_names = {"CASTGC", "TGC", "happyVoyage", "platformMultilingual"}
-    source = cookies or {}
-    return {
-        str(name): value
-        for name, value in source.items()
-        if str(name) in ids_cookie_names and value not in (None, "")
-    }
-
-
 def _load_xk_cookies() -> dict[str, Any]:
-    cookies = load_json(COOKIE_FILE)
-    cookies.update(_load_cas_cookies())
-    return cookies
+    return {
+        **load_json(COOKIE_FILE),
+        **_load_cas_cookies(),
+    }
 
 
 def _save_xk_cookies(cookies: dict[str, Any]) -> None:
@@ -1640,11 +1494,6 @@ def _build_library_bot(student_id: str, password: str):
     cas_cookies = _load_cas_cookies()
     bot = HenuCampusBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
 
-    # 自动从该用户的 IDS CAS cookie jar 注入 CASTGC，实现免密复用。
-    castgc = str(cas_cookies.get("CASTGC", "") or "")
-    if castgc:
-        bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
-
     if bot.login():
         _save_library_cookies(bot.get_cookies())
         _save_cas_cookies(bot.get_cas_cookies())
@@ -1654,8 +1503,6 @@ def _build_library_bot(student_id: str, password: str):
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
         fresh_bot = HenuCampusBot(student_id, password, None, cas_cookies or None)  # type: ignore
-        if castgc:
-            fresh_bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
             _save_cas_cookies(fresh_bot.get_cas_cookies())

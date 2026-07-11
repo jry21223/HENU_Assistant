@@ -9,6 +9,8 @@ import re
 import time
 from html import unescape
 from typing import Any
+
+from henu_mcp.core.cas_session import extract_cas_cookies
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
@@ -26,11 +28,7 @@ class AuthMixin:
         return cookies
 
     def get_cas_cookies(self) -> dict[str, Any]:
-        cas_cookies = {}
-        for cookie in self.session.cookies:
-            if cookie.domain == "ids.henu.edu.cn" or cookie.name in {"CASTGC", "TGC"}:
-                cas_cookies[cookie.name] = cookie.value
-        return cas_cookies
+        return extract_cas_cookies(self.session.cookies)
 
     def _random_string(self, length: int) -> str:
         return "".join(
