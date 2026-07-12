@@ -47,6 +47,10 @@ class HenuCliSafe(HenuCli):
     def _build_reply_text(self, result: dict[str, Any]) -> str:
         if self._is_empty_classroom_result(result):
             return self._format_empty_classroom_reply(result)
+        if isinstance(result.get("locations"), list):
+            return self._format_locations_reply(result)
+        if isinstance(result.get("seats"), list):
+            return self._format_seats_reply(result)
         if isinstance(result.get("rooms"), list):
             return self._format_rooms_reply(result)
         if isinstance(result.get("records"), list):
@@ -63,6 +67,50 @@ class HenuCliSafe(HenuCli):
         if result.get("success") is False:
             return "操作失败，但工具没有返回具体错误信息。"
         return "操作完成。"
+
+    def _format_locations_reply(self, result: dict[str, Any]) -> str:
+        locations = [item for item in (result.get("locations") or []) if isinstance(item, dict)]
+        total = result.get("total")
+        if not isinstance(total, int):
+            total = len(locations)
+        date_text = str(result.get("date") or "").strip()
+        source = str(result.get("source") or "").strip()
+        source_text = "实时" if source == "live" else "内置兜底"
+        header = f"图书馆区域列表（{date_text}）" if date_text else "图书馆区域列表"
+        lines = [f"{header}，共 {total} 个（{source_text}）。"]
+        for location in locations[:12]:
+            name = self._first_text(location, "location", "name", "areaName", "title") or "未命名区域"
+            area_id = self._first_text(location, "area_id", "areaId", "id")
+            suffix = f"（area_id: {area_id}）" if area_id else ""
+            lines.append(f"- {name}{suffix}")
+        if total > len(locations):
+            lines.append(f"……还有 {total - len(locations)} 个区域未展示。")
+        lines.append(
+            "下一步请从上面选择准确的区域名或 area_id，调用 "
+            "library seats --location <区域> --date <日期> --time <开始时间>；不要凭记忆猜区域名。"
+        )
+        return "\n".join(lines)
+
+    def _format_seats_reply(self, result: dict[str, Any]) -> str:
+        seats = [item for item in (result.get("seats") or []) if isinstance(item, dict)]
+        total = result.get("total")
+        if not isinstance(total, int):
+            total = len(seats)
+        lines = [f"图书馆座位查询完成，共返回 {total} 个座位。"]
+        for seat in seats[:10]:
+            seat_no = self._first_text(seat, "seat_no", "seatNo", "seat_number", "seatNumber", "name", "id")
+            status = self._first_text(seat, "status", "status_text", "state", "state_text")
+            location = self._first_text(seat, "location", "area_name", "areaName")
+            label = seat_no or "未命名座位"
+            details = "，".join(part for part in (location, status) if part)
+            lines.append(f"- {label}{'：' + details if details else ''}")
+        if total > len(seats):
+            lines.append(f"……还有 {total - len(seats)} 个座位未展示。")
+        lines.append(
+            "需要预约时，请使用返回的准确座位号调用 "
+            "library reserve --location <区域> --seat-no <座位号>，并补充日期和时间。"
+        )
+        return "\n".join(lines)
 
     def _attach_llm_hint(self, result: dict[str, Any]) -> None:
         hint = self._build_llm_hint(result)
@@ -93,6 +141,14 @@ class HenuCliSafe(HenuCli):
         if self._is_empty_classroom_result(result) or self._text_mentions_empty_classroom(command, resolved_tool):
             parts.append(
                 "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
+            )
+        if isinstance(result.get("locations"), list):
+            parts.append(
+                "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
+            )
+        if isinstance(result.get("seats"), list):
+            parts.append(
+                "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"
             )
         return "；".join(parts) + "。"
 

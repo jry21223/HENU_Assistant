@@ -277,12 +277,18 @@ class BaseHenuTool(Tool):
 
         # Keep only a small, safe summary payload to avoid QQ 官方 API 长消息 400。
         list_fields = {
+            "locations": 12,
+            "seats": 12,
+            "data": 12,
+            "items": 12,
             "rooms": 12,
             "records": 12,
             "tasks": 12,
             "appointments": 12,
             "candidates": 12,
             "courses": 12,
+            "day_schedule": 12,
+            "current_courses": 12,
             "next_commands": 12,
             "commands": 8,
             "tips": 8,

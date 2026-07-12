@@ -9,6 +9,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from henu_plugin.cli import build_help_payload, inspect_cli_command  # noqa: E402
+from components.cli_tools.henu_cli_safe import HenuCliSafe  # noqa: E402
+from components.cli_tools.base import BaseHenuTool  # noqa: E402
 
 
 def test_root_help_exposes_empty_classroom_and_resource_topics() -> None:
@@ -45,3 +47,56 @@ def test_empty_classroom_help_topic_documents_rich_views() -> None:
     assert "day_matrix" in commands
     assert "occupancy" in commands
     assert "--classroom-text" in commands
+
+
+def test_library_locations_reply_exposes_names_ids_and_next_command() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    result = {
+        "success": True,
+        "msg": "操作成功",
+        "date": "2026-07-13",
+        "source": "live",
+        "locations": [
+            {"location": "明伦校区图书馆", "area_id": "101"},
+            {"location": "金明校区图书馆北区", "area_id": "202"},
+        ],
+        "total": 2,
+        "cli": {"command": "library locations", "mode": "exec"},
+    }
+
+    reply = tool._build_reply_text(result)
+    hint = tool._build_llm_hint(result)
+
+    assert "明伦校区图书馆" in reply
+    assert "area_id: 101" in reply
+    assert "library seats --location" in reply
+    assert "唯一有效参数来源" in hint
+
+
+def test_library_seats_reply_exposes_seat_numbers_and_reserve_command() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    reply = tool._build_reply_text(
+        {
+            "success": True,
+            "seats": [{"seat_no": "A-101", "status": "可预约", "location": "明伦校区图书馆"}],
+            "total": 1,
+        }
+    )
+
+    assert "A-101" in reply
+    assert "library reserve --location" in reply
+
+
+def test_base_payload_keeps_library_locations_when_compacting() -> None:
+    tool = BaseHenuTool.__new__(BaseHenuTool)
+    result = {
+        "success": True,
+        "msg": "操作成功",
+        "locations": [{"location": f"区域-{index}", "area_id": str(index)} for index in range(20)],
+        "next_commands": ["library seats --location <区域>"],
+    }
+
+    tool._normalize_for_qq_delivery(result)
+
+    assert result["locations"]
+    assert result["locations_truncated"] == 8
