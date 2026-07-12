@@ -9,6 +9,7 @@ import json
 import sys
 from pathlib import Path
 
+from henu_mcp.core.response_contract import sanitize_public_result
 
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 from henu_campus_mcp import (  # noqa: E402
@@ -533,11 +534,11 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(sanitize_public_result(result), ensure_ascii=False, indent=2))
     except Exception as exc:
         print(
             json.dumps(
-                {"success": False, "msg": f"执行失败: {exc}"},
+                sanitize_public_result({"success": False, "msg": f"执行失败: {exc}"}),
                 ensure_ascii=False,
                 indent=2,
             )

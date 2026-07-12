@@ -80,6 +80,10 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 - 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
 - `course_selection_query` 只读查询 xk 选课状态，会走统一认证与 frame 菜单入口；`course_monitor_*` 只读监控余量并提醒；`course_selection_submit` 当前不执行真实提交
 - 图书馆预约前先用 `library_query --view locations` 确认区域，可用 `library_query --view seats` 查看当前可用座位
+- 图书馆区域结果中的 `source`、`is_live`、`total`、`returned_count`、`truncated` 必须原样保留；后续只使用返回的 `locations[].location` 或 `locations[].area_id`
+- 座位结果中的 `area`、`target_date`、`time_window`、`total_count`、`available_count`、`status_counts` 必须原样保留，预约只使用返回的 `seats[].seat_no`
+- `source=live_empty` 且 `success=false` 时，只如实说明实时接口为空，不推测开放时间、区域或推荐替代方案；`fallback_locations` 只能作为静态参考
+- 账号、密码、Cookie、Ticket、Token 和校准 `--data` 参数不得写入日志或回复；真实写操作只以 `success=true` 为准
 - 图书馆查看当前预约或历史记录时，用 `library_query --view current` / `library_query --view records`
 - 研讨室通常先按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 逐步查询
 - 研讨室 `group` 保存的是同行成员学号，不含自己；建议保存 3-9 个学号，预约时会自动去重并排除当前账号

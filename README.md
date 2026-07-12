@@ -58,6 +58,8 @@ python3 henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>
 .venv/bin/python henu_cli.py system_status
 ```
 
+图书馆结果契约：先执行 `library_query --view locations`，后续只使用返回的 `locations[].location` 或 `locations[].area_id`；座位预约只使用返回的 `seats[].seat_no`。区域结果包含 `source`、`is_live`、`total`、`returned_count`、`truncated`，座位结果包含 `area`、`target_date`、`time_window`、`total_count`、`available_count`、`status_counts`。当 `source=live_empty` 时，结果是明确的实时空数据（`success=false`），不得猜测区域、开放时间或替代方案；静态映射只会作为带来源标记的参考。账号、Cookie、Ticket、Token 和 `--data` 等敏感值不会作为公开结果回显；写操作只以 `success=true` 为准。
+
 研讨室：
 
 ```bash
