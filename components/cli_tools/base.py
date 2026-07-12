@@ -104,6 +104,7 @@ class BaseHenuTool(Tool):
             if isinstance(server_time, dict) and server_time:
                 result.setdefault("server_time_snapshot", server_time)
 
+        self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)
         self._strip_internal_fields(result)
         self._normalize_for_qq_delivery(result)
@@ -111,6 +112,10 @@ class BaseHenuTool(Tool):
 
     def should_preload_runtime_context(self, params: dict[str, Any]) -> bool:
         return self.tool_name not in self._TIME_PREFLIGHT_EXEMPT_TOOLS
+
+    def _prepare_delivery_result(self, result: Any) -> None:
+        """Hook for tool-specific summaries before the generic size budget applies."""
+        return
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
@@ -275,10 +280,14 @@ class BaseHenuTool(Tool):
             result["msg"] = msg
         result["msg"] = self._trim_text(str(result.get("msg", "")), 1200)
 
+        self._attach_generic_list_summary(result)
+
         # Keep only a small, safe summary payload to avoid QQ 官方 API 长消息 400。
         list_fields = {
             "locations": 12,
+            "location_options": 1000,
             "seats": 12,
+            "seat_options": 12,
             "data": 12,
             "items": 12,
             "rooms": 12,
@@ -330,14 +339,105 @@ class BaseHenuTool(Tool):
             if len(payload) <= max_payload_chars:
                 return
 
-        # Last resort: keep only msg / success and basic follow-up fields.
+        # Last resort: keep the semantic delivery contract, never only msg/success.
+        essential_keys = (
+            "success", "msg", "cli", "next_commands", "reply_text", "qq_reply_hint",
+            "llm_hint", "cli_hint", "result_summary", "error_code", "warning",
+            "source", "is_live", "date", "target_date", "area", "time_window",
+            "total", "returned_count", "truncated", "total_count", "available_count",
+            "status_counts", "location_options", "seat_options", "locations_total",
+            "locations_returned", "locations_truncated", "seats_total", "seats_returned",
+            "seats_truncated", "fallback_locations", "fallback_locations_truncated",
+        )
         essential = {
-            "success": bool(result.get("success")),
-            "msg": result.get("msg", ""),
-            "next_commands": result.get("next_commands", []),
+            key: result[key]
+            for key in essential_keys
+            if key in result
         }
+        essential.setdefault("success", bool(result.get("success")))
+        essential.setdefault("msg", result.get("msg", ""))
+        essential.setdefault("next_commands", result.get("next_commands", []))
         result.clear()
         result.update(essential)
+        self._fit_semantic_payload(result, max_payload_chars)
+
+    def _attach_generic_list_summary(self, result: dict[str, Any]) -> None:
+        """Keep counts and stable identifiers when a direct tool has a long list."""
+        summary: dict[str, Any] = {}
+        fields = ("rooms", "data", "records", "tasks", "items", "plans", "courses", "candidates", "day_schedule", "current_courses", "appointments")
+        for field in fields:
+            value = result.get(field)
+            if not isinstance(value, list) or len(value) <= 6:
+                continue
+            samples: list[Any] = []
+            for item in value[:6]:
+                if isinstance(item, dict):
+                    sample = {
+                        key: item[key]
+                        for key in ("id", "name", "title", "course_name", "room_name", "seat_no", "area_id", "status", "state")
+                        if key in item and item[key] not in (None, "", [], {})
+                    }
+                    samples.append(sample or {"value": "<object>"})
+                else:
+                    samples.append({"value": "<item>"})
+            summary[field] = {
+                "total": len(value),
+                "returned_count": len(samples),
+                "truncated": len(value) > len(samples),
+                "items": samples,
+            }
+        if summary:
+            result.setdefault("result_summary", {}).update(summary)
+
+    def _fit_semantic_payload(self, result: dict[str, Any], max_payload_chars: int) -> None:
+        """Keep the machine-readable summary inside the QQ delivery budget."""
+        if len(self._make_payload_json(result)) <= max_payload_chars:
+            return
+
+        # These are duplicate delivery hints; llm_hint is the canonical one.
+        result.pop("qq_reply_hint", None)
+        result.pop("cli_hint", None)
+        cli = result.get("cli")
+        if isinstance(cli, dict):
+            result["cli"] = {
+                key: cli[key]
+                for key in ("mode", "command", "resolved_tool")
+                if key in cli
+            }
+        next_commands = result.get("next_commands")
+        if isinstance(next_commands, list) and len(next_commands) > 2:
+            result["next_commands"] = next_commands[:2]
+
+        fallback_locations = result.get("fallback_locations")
+        if isinstance(fallback_locations, list) and len(fallback_locations) > 12:
+            result["fallback_locations_truncated"] = True
+            result["fallback_locations"] = fallback_locations[:12]
+
+        for key, limit in (("reply_text", 420), ("llm_hint", 420), ("msg", 600)):
+            value = result.get(key)
+            if isinstance(value, str) and len(value) > limit:
+                result[key] = self._trim_text(value, limit)
+
+        if len(self._make_payload_json(result)) <= max_payload_chars:
+            return
+
+        # Preserve full location_options/seat_options, shortening only prose.
+        next_commands = result.get("next_commands")
+        if isinstance(next_commands, list) and len(next_commands) > 1:
+            result["next_commands"] = next_commands[:1]
+        for key, limit in (("reply_text", 100), ("llm_hint", 100), ("msg", 240)):
+            value = result.get(key)
+            if isinstance(value, str) and len(value) > limit:
+                result[key] = self._trim_text(value, limit)
+
+        if len(self._make_payload_json(result)) > max_payload_chars:
+            cli = result.get("cli")
+            if isinstance(cli, dict) and cli.get("command"):
+                result["cli"] = {"command": cli["command"]}
+            result["llm_hint"] = "复述 reply_text。"
+            value = result.get("reply_text")
+            if isinstance(value, str):
+                result["reply_text"] = self._trim_text(value, 70)
 
     @staticmethod
     def _trim_text(value: str, limit: int) -> str:

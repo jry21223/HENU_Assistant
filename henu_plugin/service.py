@@ -25,7 +25,13 @@ from henu_plugin.cache import (
     invalidate_account_cache,
     invalidate_schedule_cache,
 )
-from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
+from henu_plugin.cli import (
+    build_help_payload,
+    build_next_commands,
+    inspect_cli_command,
+    redact_cli_command,
+    redact_cli_params,
+)
 from henu_plugin.storage_adapter import (
     SHARED_CALIBRATION_FILE,
     SHARED_PERIOD_TIME_FILE,
@@ -392,6 +398,7 @@ class HenuPluginService:
     def _henu_cli(self, params: dict[str, Any]) -> dict[str, Any]:
         raw_command = _text(params.get("command"), strip=False)
         spec = inspect_cli_command(raw_command)
+        safe_command = redact_cli_command(raw_command)
 
         if spec.is_help:
             help_payload = build_help_payload(spec.help_topic)
@@ -400,7 +407,7 @@ class HenuPluginService:
                 "msg": help_payload["summary"],
                 "cli": {
                     "mode": "help",
-                    "command": raw_command,
+                    "command": safe_command,
                     "topic": help_payload["topic"],
                 },
                 "commands": help_payload["commands"],
@@ -416,7 +423,7 @@ class HenuPluginService:
                 "msg": spec.error,
                 "cli": {
                     "mode": "error",
-                    "command": raw_command,
+                    "command": safe_command,
                     "topic": help_payload["topic"],
                 },
                 "commands": help_payload["commands"],
@@ -429,7 +436,7 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": "命令未解析到具体动作，请先执行 `help`。",
-                "cli": {"mode": "error", "command": raw_command},
+                "cli": {"mode": "error", "command": safe_command},
                 "next_commands": ["help"],
             }
 
@@ -438,7 +445,7 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": f"CLI 路由失败：未找到 `{spec.resolved_tool}`。",
-                "cli": {"mode": "error", "command": raw_command, "resolved_tool": spec.resolved_tool},
+                "cli": {"mode": "error", "command": safe_command, "resolved_tool": spec.resolved_tool},
                 "next_commands": ["help"],
             }
 
@@ -454,13 +461,13 @@ class HenuPluginService:
             result["cli"].update(
                 {
                     "mode": "exec",
-                    "command": raw_command,
+                    "command": safe_command,
                     "action": spec.action,
                     "resolved_tool": spec.resolved_tool,
                 }
             )
         result["_resolved_tool_name"] = spec.resolved_tool
-        result["_effective_params"] = spec.params
+        result["_effective_params"] = redact_cli_params(spec.params)
         result["next_commands"] = build_next_commands(spec, result)
         return result
 

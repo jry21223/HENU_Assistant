@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -16,6 +17,62 @@ class CliCommandSpec:
     is_help: bool = False
     help_topic: str = ""
     error: str = ""
+
+
+_SENSITIVE_OPTION_PATTERN = re.compile(
+    r"(?i)(--(?:password|passwd|cookie|data|token|authorization|api[-_]?key)(?:=|\s+))"
+    r"(\"[^\"]*\"|'[^']*'|[^\s]+)"
+)
+
+_SENSITIVE_OPTION_NAMES = frozenset(
+    {
+        "--password",
+        "--passwd",
+        "--cookie",
+        "--data",
+        "--token",
+        "--authorization",
+        "--api-key",
+        "--api_key",
+    }
+)
+
+
+def redact_cli_command(command: Any) -> str:
+    """Mask sensitive option values before a command reaches results or logs."""
+    raw = str(command or "")
+    try:
+        argv = shlex.split(raw)
+    except ValueError:
+        return _SENSITIVE_OPTION_PATTERN.sub(r"\1<redacted>", raw)
+
+    masked: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        option, separator, value = token.partition("=")
+        if option.lower() in _SENSITIVE_OPTION_NAMES:
+            masked.append(f"{option}{separator}<redacted>" if separator else option)
+            if not separator and index + 1 < len(argv):
+                masked.append("<redacted>")
+                index += 1
+        else:
+            masked.append(token)
+        index += 1
+    return " ".join(shlex.quote(item) if any(char.isspace() for char in item) else item for item in masked)
+
+
+def redact_cli_params(params: dict[str, Any]) -> dict[str, Any]:
+    result = dict(params or {})
+    for key in tuple(result):
+        normalized = str(key).strip().lower()
+        if normalized in {
+            "password", "passwd", "cookie", "data", "token",
+            "authorization", "api_key", "api-key", "secret", "access_token",
+            "refresh_token", "ticket", "castgc", "tgc", "ssessionid", "deskey",
+        }:
+            result[key] = "<redacted>"
+    return result
 
 
 def inspect_cli_command(command: Any) -> CliCommandSpec:
@@ -423,8 +480,12 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["course monitor once", "course monitor config", "course status"]
     if resolved_tool == "library_query":
         if spec.params.get("view") == "locations":
+            if not success:
+                return ["library locations --date YYYY-MM-DD"]
             return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
         if spec.params.get("view") == "seats":
+            if not success:
+                return ["library locations --date YYYY-MM-DD"]
             return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD", "library current"]
         return ["library current", "library records"]
     if resolved_tool == "library_reserve":

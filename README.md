@@ -28,8 +28,8 @@ cp .env.example .env
 发布示例：
 
 ```bash
-git tag v2.0.2
-git push origin v2.0.2
+git tag v2.0.3
+git push origin v2.0.3
 ```
 
 ## 常用命令
@@ -66,6 +66,12 @@ seminar signin --auto-scan
 IDS 模式可供课表、选课、空教室、图书馆、研讨室和河宝复用。Kingo 降级模式只保证课表、选课状态和空教室等 xk 能力，不生成或覆盖 CAS Jar；其他服务仍需完成 IDS 登录。账号初始化、登录检查、课表同步和系统状态通过 `auth` 返回认证模式、降级状态、错误码和能力警告。
 
 共享目录只保存公共校园配置和缓存，例如节次时间、节次校准状态和空教室公共请求参数；`shared:*` Storage key 不保存密码、`CASTGC`、业务 Token 或个人 Cookie。
+
+## CLI 结果与安全回显
+
+图书馆先调用 `library locations`，后续只使用返回的 `location` 或 `area_id`；座位预约只使用返回的座位号。实时区域结果保留 `source`、`is_live`、`total`、`returned_count`、`truncated` 和完整的紧凑 `location_options`；座位结果保留 `area`、`target_date`、`time_window`、`total_count`、`available_count`、`status_counts` 和有限的 `seat_options`。QQ 载荷仍保持约 2200 字符安全上限，但 `reply_text`、`llm_hint`、计数和关键 ID 优先保留。
+
+当区域接口返回 `source=live_empty` 时，工具会返回 `success=false` 的明确实时空数据；不得据此猜测图书馆开放时间、区域或推荐空教室/现场方案。静态映射若返回，只标记为非实时参考。`account set`、校准等命令的密码、Cookie、Ticket、Token 和 `--data` 值会统一显示为 `<redacted>`；公开结果不会包含 `_effective_params`。真实写操作仍只以 `success=true` 为准。
 
 ## 目录
 
