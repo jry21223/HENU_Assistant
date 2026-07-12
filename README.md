@@ -74,6 +74,8 @@ Cherry Studio 示例：
 4. 空教室能力已支持；查询教室/自习室时用 `empty_classroom_query(view="free")`，不确定校区楼房时先查 `view="campuses"` / `view="buildings"`。
 5. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
 
+图书馆结果契约：先使用 `library_query(view="locations")`，后续只使用返回的 `locations[].location` 或 `locations[].area_id`；座位预约只使用 `seats[].seat_no`。区域结果同时提供 `source`、`is_live`、`total`、`returned_count`、`truncated`，座位结果提供 `area`、`target_date`、`time_window`、`total_count`、`available_count`、`status_counts`。`source="live_empty"` 表示实时接口明确返回空列表，此时 `success=false`，不能推测开放时间、区域或替代方案；`fallback_locations` 若存在，仅是标明来源的静态参考。所有写操作只以 `success=true` 为准。
+
 ## 给 MCP 客户端 / LLM 的提示
 
 - 用户询问空教室、空闲教室、教室、自习室时，不要回复“系统不支持”，优先调用 `empty_classroom_query`。

@@ -265,7 +265,7 @@ def _fetch_xiqueer_period_times() -> dict[str, Any]:
             "url": str(resp.url),
             "matched_period_count": len(period_times),
             "period_times": period_times,
-            "raw_text": text,
+            "raw_text_length": len(text),
             "msg": "xiqueer 节次时间获取成功" if len(period_times) >= 4 else "xiqueer 返回中未解析到足够节次时间",
         }
     except Exception as exc:
@@ -1502,7 +1502,12 @@ def _library_login_error_message(default: str = "图书馆登录失败") -> str:
 
 
 def _library_login_failed(extra: dict[str, Any] | None = None, default: str = "图书馆登录失败") -> dict[str, Any]:
-    result = {"success": False, "msg": _library_login_error_message(default)}
+    result = {
+        "success": False,
+        "error_code": "auth_failed",
+        "source": "library_auth",
+        "msg": _library_login_error_message(default),
+    }
     if extra:
         result.update(extra)
     return result
@@ -2006,7 +2011,16 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     重要：不要编造区域信息，必须调用此工具获取准确的区域列表。
     """
     if HenuCampusBot is None:
-        return {"success": False, "msg": f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}", "locations": []}
+        return {
+            "success": False,
+            "error_code": "module_unavailable",
+            "source": "library_core",
+            "msg": f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}",
+            "locations": [],
+            "total": 0,
+            "returned_count": 0,
+            "truncated": False,
+        }
 
     target_day = str(target_date or "").strip()
     if not target_day:
@@ -2017,12 +2031,17 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     if sid and pwd:
         bot = _build_library_bot(sid, pwd)
         if not bot:
+            fallback_locations = HenuCampusBot.static_locations()
             result = _library_login_failed(
                 {
                     "date": target_day,
-                    "locations": HenuCampusBot.static_locations(),
+                    "locations": fallback_locations,
                     "source": "static_fallback",
                     "is_live": False,
+                    "fallback_locations": fallback_locations,
+                    "total": len(fallback_locations),
+                    "returned_count": len(fallback_locations),
+                    "truncated": False,
                 }
             )
             return result
@@ -2037,10 +2056,15 @@ def _library_locations_impl(target_date: str = "") -> dict[str, Any]:
     locations = HenuCampusBot.static_locations()
     _enrich_library_locations(locations)
     return {
-        "success": True,
-        "msg": "未绑定账号，返回内置兜底区域；绑定后可获取实时可预约区域",
+        "success": False,
+        "error_code": "auth_required",
+        "msg": "未绑定账号，无法获取实时可预约区域；以下仅为非实时静态参考",
         "date": target_day,
         "locations": locations,
+        "fallback_locations": locations,
+        "total": len(locations),
+        "returned_count": len(locations),
+        "truncated": False,
         "source": "static_fallback",
         "is_live": False,
     }
@@ -2057,17 +2081,17 @@ def _library_seats_impl(
     查询指定图书馆区域在指定日期/时间段的当前可用座位。
     """
     if HenuCampusBot is None:
-        return {"success": False, "msg": "图书馆模块不可用", "seats": []}
+        return {"success": False, "error_code": "module_unavailable", "source": "library_core", "msg": "图书馆模块不可用", "seats": [], "total_count": 0, "available_count": 0, "returned_count": 0, "truncated": False}
 
     profile = _effective_profile()
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
     if not sid or not pwd:
-        return {"success": False, "msg": "缺少账号", "seats": []}
+        return {"success": False, "error_code": "auth_required", "source": "library_auth", "msg": "缺少账号", "seats": [], "total_count": 0, "available_count": 0, "returned_count": 0, "truncated": False}
 
     target_location = str(location or profile.get("library_location", "")).strip()
     target_area_id = str(area_id or "").strip()
     if not target_area_id and not target_location:
-        return {"success": False, "msg": "请提供 location 或 area_id，或在 setup_account 中设置默认图书馆区域", "seats": []}
+        return {"success": False, "error_code": "missing_location", "source": "validation", "msg": "请提供 location 或 area_id，或在 setup_account 中设置默认图书馆区域", "seats": [], "total_count": 0, "available_count": 0, "returned_count": 0, "truncated": False}
 
     bot = _build_library_bot(sid, pwd)
     if not bot:
