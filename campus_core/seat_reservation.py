@@ -15,7 +15,7 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
-from .time_utils import _now_dt, TimeUtilsMixin
+from .time_utils import _now_dt
 
 
 class SeatReservationMixin:
@@ -334,9 +334,17 @@ class SeatReservationMixin:
 
     @classmethod
     def _seat_summary(cls, seat: dict[str, Any]) -> dict[str, Any]:
+        seat_no = str(
+            seat.get("seatNo")
+            or seat.get("seat_no")
+            or seat.get("no")
+            or seat.get("name")
+            or ""
+        )
         return {
             "id": str(seat.get("id") or ""),
-            "no": str(seat.get("no") or seat.get("name") or ""),
+            "seat_no": seat_no,
+            "no": seat_no,
             "name": str(seat.get("name") or ""),
             "status": cls._seat_status(seat),
         }
@@ -751,21 +759,21 @@ class SeatReservationMixin:
             return None
 
         now = _now_dt()
-        hhmm = self._to_hhmm(text)
-        if re.fullmatch(r"\d{2}:\d{2}", hhmm):
-            hour, minute = [int(part) for part in hhmm.split(":")]
-            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        time_match = re.fullmatch(r"(\d{1,2})[:：](\d{1,2})", text)
+        if time_match:
+            hour, minute = (int(part) for part in time_match.groups())
+            try:
+                return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except ValueError:
+                return None
 
         normalized = text.replace("Z", "+00:00")
         try:
             parsed = dt.datetime.fromisoformat(normalized)
         except ValueError:
             return None
-        if parsed.tzinfo is None:
-            try:
-                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-            except Exception:
-                pass
+        if parsed.tzinfo is None and now.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=now.tzinfo)
         return parsed
 
     @staticmethod

@@ -586,6 +586,7 @@ class HenuPluginService:
         view = _text(params.get("view")) or "current"
         timezone = _text(params.get("timezone")) or "Asia/Shanghai"
         target_date = _text(params.get("target_date")) or ""
+        auto_calibrate = _bool(params.get("auto_calibrate"), True)
 
         # Try to restore schedule from Storage if not in output_dir
         paths = get_current_user_paths()
@@ -604,9 +605,14 @@ class HenuPluginService:
                 except Exception:
                     pass
 
-        # Try cache for read-only views
+        cache_key: str | None = None
+        # Try cache for read-only views. Current/now results are time-sensitive,
+        # while week/full only change when the stored schedule is invalidated.
         if identity and view in {"current", "now", "week", "full"}:
-            cache_key = f"user:{identity.storage_key}:schedule:{view}:{target_date}"
+            cache_key = (
+                f"user:{identity.storage_key}:schedule:{view}:{timezone}:"
+                f"{target_date}:{int(auto_calibrate)}"
+            )
             cached = SCHEDULE_CACHE.get(cache_key)
             if cached is not None:
                 return cached
@@ -615,12 +621,12 @@ class HenuPluginService:
             view=view,
             timezone=timezone,
             target_date=target_date,
-            auto_calibrate=_bool(params.get("auto_calibrate"), True),
+            auto_calibrate=auto_calibrate,
         )
 
-        # Cache successful read-only queries (permanent TTL)
-        if result.get("success") and identity and view in {"current", "now", "week", "full"}:
-            SCHEDULE_CACHE.set(cache_key, result, ttl_seconds=315360000.0)  # 10 years
+        if result.get("success") and cache_key is not None:
+            ttl_seconds = 30.0 if view in {"current", "now"} else 315360000.0
+            SCHEDULE_CACHE.set(cache_key, result, ttl_seconds=ttl_seconds)
 
         return result
 
@@ -744,11 +750,52 @@ class HenuPluginService:
         identity = getattr(_CURRENT_IDENTITY, "value", None)
         view = _text(params.get("view")) or "rooms"
         target_date = _text(params.get("target_date")) or ""
+        members = _int(params.get("members"), 0)
+        name = _text(params.get("name"))
+        room = _text(params.get("room"))
+        start_time = _text(params.get("start_time"))
+        end_time = _text(params.get("end_time"))
+        library_ids = _text(params.get("library_ids"))
+        library_names = _text(params.get("library_names"))
+        floor_ids = _text(params.get("floor_ids"))
+        floor_names = _text(params.get("floor_names"))
+        category_ids = _text(params.get("category_ids"))
+        category_names = _text(params.get("category_names"))
+        boutique_ids = _text(params.get("boutique_ids"))
+        boutique_names = _text(params.get("boutique_names"))
         page = _int(params.get("page"), 1)
+        area_id = _text(params.get("area_id"))
+        record_type = _text(params.get("record_type")) or "1"
+        limit = _int(params.get("limit"), 20)
+        mode = _text(params.get("mode")) or "books"
+        status = _text(params.get("status"))
 
-        # Try cache for read operations
+        cache_key: str | None = None
         if identity and view in {"rooms", "filters", "detail"}:
-            cache_key = f"user:{identity.storage_key}:seminar:{view}:{target_date}:{page}"
+            signature = (
+                view,
+                target_date,
+                members,
+                name,
+                room,
+                start_time,
+                end_time,
+                library_ids,
+                library_names,
+                floor_ids,
+                floor_names,
+                category_ids,
+                category_names,
+                boutique_ids,
+                boutique_names,
+                page,
+                area_id,
+                record_type,
+                limit,
+                mode,
+                status,
+            )
+            cache_key = f"user:{identity.storage_key}:seminar:{signature!r}"
             cached = SEMINAR_QUERY_CACHE.get(cache_key)
             if cached is not None:
                 return cached
@@ -756,29 +803,28 @@ class HenuPluginService:
         result = mcp_server.seminar_query(
             view=view,
             target_date=target_date,
-            members=_int(params.get("members"), 0),
-            name=_text(params.get("name")),
-            room=_text(params.get("room")),
-            start_time=_text(params.get("start_time")),
-            end_time=_text(params.get("end_time")),
-            library_ids=_text(params.get("library_ids")),
-            library_names=_text(params.get("library_names")),
-            floor_ids=_text(params.get("floor_ids")),
-            floor_names=_text(params.get("floor_names")),
-            category_ids=_text(params.get("category_ids")),
-            category_names=_text(params.get("category_names")),
-            boutique_ids=_text(params.get("boutique_ids")),
-            boutique_names=_text(params.get("boutique_names")),
+            members=members,
+            name=name,
+            room=room,
+            start_time=start_time,
+            end_time=end_time,
+            library_ids=library_ids,
+            library_names=library_names,
+            floor_ids=floor_ids,
+            floor_names=floor_names,
+            category_ids=category_ids,
+            category_names=category_names,
+            boutique_ids=boutique_ids,
+            boutique_names=boutique_names,
             page=page,
-            area_id=_text(params.get("area_id")),
-            record_type=_text(params.get("record_type")) or "1",
-            limit=_int(params.get("limit"), 20),
-            mode=_text(params.get("mode")) or "books",
-            status=_text(params.get("status")),
+            area_id=area_id,
+            record_type=record_type,
+            limit=limit,
+            mode=mode,
+            status=status,
         )
 
-        # Cache successful queries
-        if result.get("success") and identity and view in {"rooms", "filters", "detail"}:
+        if result.get("success") and cache_key is not None:
             SEMINAR_QUERY_CACHE.set(cache_key, result)
 
         return result

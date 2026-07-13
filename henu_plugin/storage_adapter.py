@@ -12,9 +12,11 @@ Usage:
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +25,34 @@ if TYPE_CHECKING:
     from langbot_plugin.api.definition.plugin import BasePlugin
 
 logger = logging.getLogger(__name__)
+
+
+class StorageLoadError(RuntimeError):
+    """Raised when persisted plugin data cannot be materialized safely."""
+
+
+class StorageSaveError(RuntimeError):
+    """Raised when materialized plugin data cannot be persisted safely."""
+
+
+_STORAGE_TRANSACTION_LOCK_ATTR = "_henu_storage_transaction_lock"
+
+
+def _get_storage_transaction_lock() -> asyncio.Lock:
+    """Return the transaction lock associated with the active LangBot loop."""
+    loop = asyncio.get_running_loop()
+    lock = getattr(loop, _STORAGE_TRANSACTION_LOCK_ATTR, None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(loop, _STORAGE_TRANSACTION_LOCK_ATTR, lock)
+    return lock
+
+
+@asynccontextmanager
+async def storage_transaction() -> AsyncIterator[None]:
+    """Serialize materialize -> execute -> persist across shared temp state."""
+    async with _get_storage_transaction_lock():
+        yield
 
 # Storage key prefixes for different data types
 PREFIX_PROFILE = "user:{}:profile"
@@ -83,7 +113,7 @@ class PluginStorageAdapter:
         self._plugin = plugin
         self._storage_key = storage_key
         self._paths: UserStoragePaths | None = None
-        self._dirty: set[str] = set()  # Track which files were modified
+        self._loaded_content: dict[str, bytes] = {}
 
     def _key(self, prefix_template: str) -> str:
         """Create a storage key with user prefix."""
@@ -92,8 +122,15 @@ class PluginStorageAdapter:
     async def load_all(self) -> UserStoragePaths:
         """Load all user data from Storage to local temp files.
 
+        Concurrent callers must hold ``storage_transaction()`` until the
+        matching ``save_all()`` completes because user and shared temp paths
+        are reused between operations.
+
         Returns paths to local temp files for file operations.
         """
+        self._paths = None
+        self._loaded_content.clear()
+
         # Ensure shared temp directory exists
         if PluginStorageAdapter._shared_temp_dir is None:
             PluginStorageAdapter._shared_temp_dir = Path(
@@ -109,7 +146,7 @@ class PluginStorageAdapter:
         shared_data_dir = PluginStorageAdapter._shared_temp_dir / "shared"
         shared_data_dir.mkdir(parents=True, exist_ok=True)
 
-        self._paths = UserStoragePaths(
+        paths = UserStoragePaths(
             user_root=user_root,
             profile_file=user_root / "profile.json",
             xk_cookie_file=user_root / "xk_cookies.json",
@@ -124,104 +161,117 @@ class PluginStorageAdapter:
             shared_data_dir=shared_data_dir,
         )
 
-        # Load each data type from Storage (async)
-        await self._load_json(self._key(PREFIX_PROFILE), self._paths.profile_file)
-        await self._load_json(self._key(PREFIX_XK_COOKIE), self._paths.xk_cookie_file)
-        await self._load_json(
-            self._key(PREFIX_LIBRARY_COOKIE), self._paths.library_cookie_file
-        )
-        await self._load_json(
-            self._key(PREFIX_SEMINAR_TASK), self._paths.seminar_signin_task_file
-        )
-        await self._load_json(self._key(PREFIX_SCHEDULE), self._paths.schedule_file)
-        await self._load_json(self._key(PREFIX_YUNFZ_TOKEN), self._paths.yunfz_token_file)
-        await self._load_json(self._key(PREFIX_CAS_COOKIE), self._paths.cas_cookie_file)
-        await self._load_json(
-            self._key(PREFIX_COURSE_MONITOR_CONFIG), self._paths.course_monitor_config_file
-        )
-        await self._load_json(
-            self._key(PREFIX_COURSE_MONITOR_STATE), self._paths.course_monitor_state_file
-        )
-        await self._load_json(
-            PREFIX_SHARED_PERIOD_TIME,
-            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
-        )
-        await self._load_json(
-            PREFIX_SHARED_CALIBRATION,
-            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
-        )
-        await self._load_json(
-            PREFIX_SHARED_XIQUEER,
-            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
-        )
+        loaded_content: dict[str, bytes] = {}
+        try:
+            existing_storage_keys = await self._existing_storage_keys()
+            for storage_key, file_path in self._storage_bindings(paths):
+                if storage_key in existing_storage_keys:
+                    loaded_content[storage_key] = await self._load_json(
+                        storage_key,
+                        file_path,
+                    )
+                else:
+                    loaded_content[storage_key] = self._materialize_json(
+                        storage_key,
+                        file_path,
+                        b"",
+                    )
+        except Exception:
+            # A partial materialization must never become eligible for save_all().
+            self._paths = None
+            self._loaded_content.clear()
+            raise
 
-        self._dirty.clear()
-        return self._paths
+        self._paths = paths
+        self._loaded_content = loaded_content
+        return paths
 
     async def save_all(self) -> None:
         """Save all local temp files back to Storage."""
         if self._paths is None:
             return
 
-        # Save user data
-        await self._save_json(self._paths.profile_file, self._key(PREFIX_PROFILE))
-        await self._save_json(self._paths.xk_cookie_file, self._key(PREFIX_XK_COOKIE))
-        await self._save_json(
-            self._paths.library_cookie_file, self._key(PREFIX_LIBRARY_COOKIE)
-        )
-        await self._save_json(
-            self._paths.seminar_signin_task_file, self._key(PREFIX_SEMINAR_TASK)
-        )
-        await self._save_json(self._paths.schedule_file, self._key(PREFIX_SCHEDULE))
-        await self._save_json(self._paths.yunfz_token_file, self._key(PREFIX_YUNFZ_TOKEN))
-        await self._save_json(self._paths.cas_cookie_file, self._key(PREFIX_CAS_COOKIE))
-        await self._save_json(
-            self._paths.course_monitor_config_file, self._key(PREFIX_COURSE_MONITOR_CONFIG)
-        )
-        await self._save_json(
-            self._paths.course_monitor_state_file, self._key(PREFIX_COURSE_MONITOR_STATE)
-        )
-        await self._save_json(
-            self._paths.shared_data_dir / SHARED_PERIOD_TIME_FILE,
-            PREFIX_SHARED_PERIOD_TIME,
-        )
-        await self._save_json(
-            self._paths.shared_data_dir / SHARED_CALIBRATION_FILE,
-            PREFIX_SHARED_CALIBRATION,
-        )
-        await self._save_json(
-            self._paths.shared_data_dir / SHARED_XIQUEER_FILE,
-            PREFIX_SHARED_XIQUEER,
-        )
+        for storage_key, file_path in self._storage_bindings(self._paths):
+            baseline = self._loaded_content.get(storage_key)
+            if baseline is None or not file_path.exists():
+                continue
+            try:
+                current = file_path.read_bytes()
+            except OSError as exc:
+                raise StorageSaveError(f"读取待保存文件失败: {file_path}") from exc
+            if current == baseline:
+                continue
+            await self._save_json(file_path, storage_key, data=current)
+            self._loaded_content[storage_key] = current
 
-        self._dirty.clear()
+    def _storage_bindings(self, paths: UserStoragePaths) -> list[tuple[str, Path]]:
+        """Map every persisted Storage key to its materialized file."""
+        return [
+            (self._key(PREFIX_PROFILE), paths.profile_file),
+            (self._key(PREFIX_XK_COOKIE), paths.xk_cookie_file),
+            (self._key(PREFIX_LIBRARY_COOKIE), paths.library_cookie_file),
+            (self._key(PREFIX_SEMINAR_TASK), paths.seminar_signin_task_file),
+            (self._key(PREFIX_SCHEDULE), paths.schedule_file),
+            (self._key(PREFIX_YUNFZ_TOKEN), paths.yunfz_token_file),
+            (self._key(PREFIX_CAS_COOKIE), paths.cas_cookie_file),
+            (self._key(PREFIX_COURSE_MONITOR_CONFIG), paths.course_monitor_config_file),
+            (self._key(PREFIX_COURSE_MONITOR_STATE), paths.course_monitor_state_file),
+            (PREFIX_SHARED_PERIOD_TIME, paths.shared_data_dir / SHARED_PERIOD_TIME_FILE),
+            (PREFIX_SHARED_CALIBRATION, paths.shared_data_dir / SHARED_CALIBRATION_FILE),
+            (PREFIX_SHARED_XIQUEER, paths.shared_data_dir / SHARED_XIQUEER_FILE),
+        ]
 
-    async def _load_json(self, storage_key: str, file_path: Path) -> None:
+    async def _existing_storage_keys(self) -> set[str]:
+        """List persisted keys so a missing key is not treated as a read failure."""
+        try:
+            keys = await self._plugin.get_plugin_storage_keys()
+            return {str(key) for key in keys}
+        except Exception as exc:
+            logger.warning("Failed to list LangBot Storage keys: %s", exc)
+            raise StorageLoadError("列出 LangBot Storage 键失败") from exc
+
+    def _materialize_json(
+        self,
+        storage_key: str,
+        file_path: Path,
+        data: bytes,
+    ) -> bytes:
+        """Write persisted bytes, or an empty JSON object for a missing key."""
+        materialized = data if data else b"{}"
+        try:
+            file_path.write_bytes(materialized)
+        except OSError as exc:
+            raise StorageLoadError(f"写入临时 Storage 文件失败: {storage_key}") from exc
+        logger.debug("Loaded %s bytes from Storage: %s", len(data), storage_key)
+        return materialized
+
+    async def _load_json(self, storage_key: str, file_path: Path) -> bytes:
         """Load JSON data from Storage and write to local file."""
         try:
             data = await self._plugin.get_plugin_storage(storage_key)
-            if data:
-                file_path.write_bytes(data)
-                logger.debug(f"Loaded {len(data)} bytes from Storage: {storage_key}")
-            else:
-                # No data in storage, create empty JSON file
-                file_path.write_text("{}", encoding="utf-8")
         except Exception as e:
-            # Key doesn't exist or other error - create empty file
-            logger.debug(f"No data in Storage for {storage_key}: {e}")
-            file_path.write_text("{}", encoding="utf-8")
+            logger.warning("Failed to load Storage key %s: %s", storage_key, e)
+            raise StorageLoadError(f"读取 LangBot Storage 失败: {storage_key}") from e
 
-    async def _save_json(self, file_path: Path, storage_key: str) -> None:
+        return self._materialize_json(storage_key, file_path, data)
+
+    async def _save_json(
+        self,
+        file_path: Path,
+        storage_key: str,
+        *,
+        data: bytes | None = None,
+    ) -> None:
         """Save local file content to Storage."""
         if not file_path.exists():
             return
         try:
-            data = file_path.read_bytes()
-            await self._plugin.set_plugin_storage(storage_key, data)
-            logger.debug(f"Saved {len(data)} bytes to Storage: {storage_key}")
+            payload = file_path.read_bytes() if data is None else data
+            await self._plugin.set_plugin_storage(storage_key, payload)
+            logger.debug("Saved %s bytes to Storage: %s", len(payload), storage_key)
         except Exception as e:
-            logger.warning(f"Failed to save to Storage {storage_key}: {e}")
-            raise
+            logger.warning("Failed to save to Storage %s: %s", storage_key, e)
+            raise StorageSaveError(f"保存 LangBot Storage 失败: {storage_key}") from e
 
     # Shared data methods (cross-user)
     async def load_shared_period_time(self, file_path: Path) -> None:

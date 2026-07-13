@@ -11,7 +11,11 @@ from langbot_plugin.api.definition.components.tool.tool import Tool
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
-from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.storage_adapter import (
+    PluginStorageAdapter,
+    StorageLoadError,
+    storage_transaction,
+)
 from henu_plugin.service import get_current_user_paths, set_current_user_paths, SessionIdentity
 
 
@@ -54,46 +58,53 @@ class BaseHenuTool(Tool):
         storage_key = _resolve_storage_key(session, identity_hint)
         storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
 
-        # Load user data from Storage to temp files
-        user_paths = await storage_adapter.load_all()
-
-        # Set thread-local paths for service to use
-        set_current_user_paths(user_paths)
-
         runtime_context = None
-        if self.should_preload_runtime_context(params):
-            await self._prime_runtime_context_query_var(query_id)
-            runtime_context = await self._ensure_runtime_context(
-                query_id,
-                session,
-                identity_hint,
-                service,
-            )
-
         result: dict[str, Any] | None = None
         storage_error: Exception | None = None
-        try:
-            result = await asyncio.to_thread(
-                service.run_tool,
-                self.tool_name,
-                params,
-                session,
-                query_id,
-                identity_hint,
-            )
-        finally:
-            # Save user data back to Storage after operation
+
+        # The shared temp directory and module-level runtime paths make the
+        # complete materialize -> execute -> persist lifecycle one transaction.
+        async with storage_transaction():
             try:
-                await storage_adapter.save_all()
-            except Exception as exc:
-                storage_error = exc
-            # Clear thread-local paths
-            set_current_user_paths(None)
+                user_paths = await storage_adapter.load_all()
+            except StorageLoadError:
+                return {
+                    "success": False,
+                    "error_code": "storage_load_failed",
+                    "msg": "LangBot Storage 读取失败，请稍后重试",
+                }
+
+            set_current_user_paths(user_paths)
+            try:
+                if self.should_preload_runtime_context(params):
+                    await self._prime_runtime_context_query_var(query_id)
+                    runtime_context = await self._ensure_runtime_context(
+                        query_id,
+                        session,
+                        identity_hint,
+                        service,
+                    )
+
+                result = await asyncio.to_thread(
+                    service.run_tool,
+                    self.tool_name,
+                    params,
+                    session,
+                    query_id,
+                    identity_hint,
+                )
+            finally:
+                try:
+                    await storage_adapter.save_all()
+                except Exception as exc:
+                    storage_error = exc
+                set_current_user_paths(None)
 
         if storage_error is not None:
             failure: dict[str, Any] = {
                 "success": False,
-                "msg": f"LangBot Storage 保存失败: {storage_error}",
+                "error_code": "storage_save_failed",
+                "msg": "LangBot Storage 保存失败，请稍后重试",
             }
             if isinstance(result, dict):
                 failure["tool_result"] = result

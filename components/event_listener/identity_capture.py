@@ -11,7 +11,11 @@ from langbot_plugin.api.entities.builtin.provider import message as provider_mes
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 from langbot_plugin.api.entities import context, events
 
-from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.storage_adapter import (
+    PluginStorageAdapter,
+    StorageLoadError,
+    storage_transaction,
+)
 from henu_plugin.service import set_current_user_paths
 
 
@@ -464,15 +468,21 @@ class IdentityCaptureListener(EventListener):
     ) -> Any:
         storage_key = _resolve_storage_key(session, identity_hint)
         storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
-        user_paths = await storage_adapter.load_all()
-        set_current_user_paths(user_paths)
-        try:
-            return await asyncio.to_thread(func, *args)
-        finally:
+
+        async with storage_transaction():
             try:
-                await storage_adapter.save_all()
+                user_paths = await storage_adapter.load_all()
+            except StorageLoadError:
+                return None
+
+            set_current_user_paths(user_paths)
+            try:
+                return await asyncio.to_thread(func, *args)
             finally:
-                set_current_user_paths(None)
+                try:
+                    await storage_adapter.save_all()
+                finally:
+                    set_current_user_paths(None)
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:

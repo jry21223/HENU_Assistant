@@ -4,6 +4,7 @@ Provides thread-safe caching with configurable TTL to reduce file I/O and API ca
 """
 from __future__ import annotations
 
+import copy
 import time
 import threading
 from dataclasses import dataclass, field
@@ -55,7 +56,7 @@ class TTLCache(Generic[T]):
             if entry.is_expired():
                 del self._cache[key]
                 return None
-            return entry.value
+            return copy.deepcopy(entry.value)
 
     def set(
         self,
@@ -67,7 +68,7 @@ class TTLCache(Generic[T]):
         ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl
         with self._lock:
             self._cache[key] = CacheEntry(
-                value=value,
+                value=copy.deepcopy(value),
                 created_at=time.time(),
                 ttl_seconds=ttl,
             )
