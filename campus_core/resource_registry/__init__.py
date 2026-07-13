@@ -28,6 +28,8 @@ from .registry import (
 from .resolver import resolve_resource
 from .seed import preload_seed_if_needed
 from .sync import (
+    normalize_library_location,
+    normalize_library_seat,
     sync_classrooms_from_metadata,
     sync_library_resources,
     sync_seminar_resources,
@@ -56,6 +58,8 @@ __all__ = [
     # Resolver
     "resolve_resource",
     # Sync
+    "normalize_library_location",
+    "normalize_library_seat",
     "sync_classrooms_from_metadata",
     "sync_library_resources",
     "sync_seminar_resources",

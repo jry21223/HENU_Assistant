@@ -26,6 +26,40 @@ def _now_iso() -> str:
     return datetime.now().isoformat()
 
 
+def _first_text(data: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def normalize_library_location(location: dict[str, Any]) -> tuple[str, str]:
+    """Return the canonical area ID and name from a library location DTO."""
+    if not isinstance(location, dict):
+        return "", ""
+    return (
+        _first_text(location, "areaId", "area_id", "id"),
+        _first_text(location, "areaName", "area_name", "name", "location"),
+    )
+
+
+def normalize_library_seat(
+    seat: dict[str, Any],
+    fallback_area_id: str = "",
+) -> tuple[str, str]:
+    """Return the canonical seat number and area ID from a seat DTO."""
+    if not isinstance(seat, dict):
+        return "", str(fallback_area_id or "").strip()
+    return (
+        _first_text(seat, "seatNo", "seat_no", "no", "name"),
+        _first_text(seat, "areaId", "area_id") or str(fallback_area_id or "").strip(),
+    )
+
+
 # ── 教室同步 ──────────────────────────────────────────────
 
 
@@ -172,10 +206,12 @@ def sync_library_resources(
     synced = 0
 
     library_id = "henu_library"  # 河南大学图书馆统一 ID
+    fallback_area_id = ""
+    if len(locations) == 1:
+        fallback_area_id, _ = normalize_library_location(locations[0])
 
     for loc in locations:
-        area_id = str(loc.get("areaId", loc.get("area_id", loc.get("id", ""))))
-        area_name = str(loc.get("areaName", loc.get("area_name", loc.get("name", ""))))
+        area_id, area_name = normalize_library_location(loc)
         if not area_id or not area_name:
             continue
 
@@ -196,8 +232,7 @@ def sync_library_resources(
 
     if seats:
         for seat in seats:
-            seat_no = str(seat.get("seatNo", seat.get("seat_no", seat.get("name", ""))))
-            area_id = str(seat.get("areaId", seat.get("area_id", "")))
+            seat_no, area_id = normalize_library_seat(seat, fallback_area_id)
             if not seat_no or not area_id:
                 continue
 

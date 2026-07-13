@@ -60,3 +60,5 @@ def test_live_locations_and_seats_expose_machine_readable_counts() -> None:
     assert seats["available_count"] == 1
     assert seats["returned_count"] == 1
     assert seats["status_counts"] == {"1": 1, "0": 1}
+    assert seats["seats"][0]["seat_no"] == "A-101"
+    assert seats["seats"][0]["no"] == "A-101"

@@ -128,6 +128,8 @@ try:
         get_stats as _get_registry_stats,
         upsert_resource,
         get_resource,
+        normalize_library_location,
+        normalize_library_seat,
         sync_classrooms_from_metadata,
         sync_library_resources,
         sync_seminar_resources,
@@ -2108,7 +2110,16 @@ def _library_seats_impl(
     if hasattr(bot, "get_cas_cookies"):
         _save_cas_cookies(bot.get_cas_cookies())
     # 增量 sync 到 resource_registry
-    _enrich_library_seats(result.get("seats", []), target_area_id)
+    result_area = result.get("area")
+    resolved_area_id = ""
+    if isinstance(result_area, dict):
+        resolved_area_id = str(
+            result_area.get("id")
+            or result_area.get("area_id")
+            or result_area.get("areaId")
+            or ""
+        ).strip()
+    _enrich_library_seats(result.get("seats", []), target_area_id or resolved_area_id)
     return result
 
 
@@ -3184,8 +3195,7 @@ def _enrich_library_locations(locations: list[dict[str, Any]]) -> None:
         now = datetime.now().isoformat()
 
         for loc in locations:
-            area_id = str(loc.get("areaId", loc.get("area_id", loc.get("id", ""))))
-            area_name = str(loc.get("areaName", loc.get("area_name", loc.get("name", ""))))
+            area_id, area_name = normalize_library_location(loc)
             if not area_id or not area_name:
                 continue
 
@@ -3225,8 +3235,7 @@ def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "
         now = datetime.now().isoformat()
 
         for seat in seats:
-            seat_no = str(seat.get("seatNo", seat.get("seat_no", seat.get("name", ""))))
-            area_id = str(seat.get("areaId", seat.get("area_id", fallback_area_id)))
+            seat_no, area_id = normalize_library_seat(seat, fallback_area_id)
             if not seat_no or not area_id:
                 continue
 
