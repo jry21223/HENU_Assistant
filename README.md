@@ -1,16 +1,17 @@
 # 河大校园助手 Langbot 插件版
 
-将校园助手封装为 Langbot 插件，对外主要暴露统一 CLI 工具 `henu_cli`，并按 QQ 账号隔离保存数据。
+将校园助手封装为 Langbot 插件，对外主要暴露统一 CLI 工具 `henu_cli`，并按当前 QQ 发送者隔离账号数据。
 
 ## 安装与运行
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
 cp .env.example .env
 .venv/bin/lbp run
 ```
+
+生产环境必须在 `.env` 中配置稳定的 `HENU_MASTER_KEY`。容器重建或迁移时应继续使用同一密钥，否则已有密码密文无法解密。
 
 构建插件包：
 
@@ -20,96 +21,101 @@ cp .env.example .env
 
 ## CI 自动发布
 
-当前仓库已配置 GitHub Actions（`release-lbp.yaml`）：
-
-- 当你推送形如 `v<version>` 的 tag 时，Actions 会自动执行 `lbp build`。
-- 打包后的 `dist/*.lbpkg` 会自动上传到对应 tag 的 GitHub Release。
-
-发布示例：
-
-```bash
-git tag v2.0.3
-git push origin v2.0.3
-```
+`.github/workflows/release-lbp.yaml` 会在面向 `langbot-plugin` 的 PR 上执行编译、完整测试和 `lbp build`。推送与 `manifest.yaml` 版本一致的 `v<version>` tag 时，构建产物会上传到对应 GitHub Release。
 
 ## 常用命令
 
 ```text
 help
 account status
-account set --student-id 20230001 --password 'secret'
 schedule now
-schedule day --date 2026-03-30
+schedule day --date YYYY-MM-DD
 course status
 course plan --excel ./courses.xlsx --class 25软工1
 empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼
-empty_classroom query --view occupancy --classroom-text 十号楼101
 resource search 十号楼101
 library current
-library seats --location "<区域>" --date 2026-03-30 --time 08:00
-library reserve --location "<区域>" --seat-no "<座位号>"
-seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4
-seminar signin --auto-scan
+library locations --date YYYY-MM-DD
+library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
+seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 ```
 
-## 数据隔离
+### 敏感命令
 
-插件按当前发消息的 QQ 身份选择存储目录：
+账号绑定和校准请求必须在**私聊中直接发送**：
 
-- 群聊优先使用 `sender_id`
-- 私聊回退到 `launcher_id`
-- 用户数据位于 `data/users/<qq>/`
-- 共享节次校准文件位于 `data/shared/`
+```text
+account set --student-id <学号> --password '<密码>'
+calibration set --data '<请求体>' --cookie '<Cookie>'
+```
 
-用户目录会保存账号配置、该 QQ 用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等）、业务 Cookie/Token、研讨室签到任务、选课监控配置和课表抓取结果。教务登录优先复用或登录 IDS；IDS、Service 跳转、网络或验证码风控失败后，仅自动尝试一次 xk Kingo 独立登录，不识别验证码或循环重试。
+事件监听器会在调用模型前拦截这两类命令；密码、Cookie 和校准请求体不会进入模型消息或对话历史。群聊中的敏感命令会被拒绝。
 
-IDS 模式可供课表、选课、空教室、图书馆、研讨室和河宝复用。Kingo 降级模式只保证课表、选课状态和空教室等 xk 能力，不生成或覆盖 CAS Jar；其他服务仍需完成 IDS 登录。账号初始化、登录检查、课表同步和系统状态通过 `auth` 返回认证模式、降级状态、错误码和能力警告。
+### 外部写操作确认
 
-共享目录只保存公共校园配置和缓存，例如节次时间、节次校准状态和空教室公共请求参数；`shared:*` Storage key 不保存密码、`CASTGC`、业务 Token 或个人 Cookie。
+图书馆或研讨室的预约、签到、取消使用两阶段确认：
+
+1. 首次调用只生成预览和短期确认令牌，不会提交校园系统。
+2. 核对日期、时间、地点和对象后，在下一条消息中发送工具返回的 `confirm <token>`。
+3. 同一轮自动确认、令牌过期或参数变化都会被拒绝。
+
+如果返回 `external_committed=true` 且 `storage_persisted=false`，说明校园系统已经提交成功、但本地 Storage 保存失败。此时不得重试，应先查询当前预约或记录进行反查。
+
+## 时间语义
+
+插件在每个请求的临时 system prompt 中注入 `[HENU_RUNTIME_CONTEXT_V2]`：
+
+- 校园时间默认使用 `Asia/Shanghai`。
+- 时间快照每请求重新生成，不使用五分钟运行时缓存。
+- `schedule now/current` 不缓存；不会复用上一轮的“当前课程”。
+- 时间、QQ、学号状态不再写入用户消息历史。
+- 非法时区会明确标记请求时区和实际生效时区。
+
+当前课程仍依赖课表中的周次数据质量；工具返回 `week_filter_applied=false` 时，不应把结果表述为已按教学周精确过滤。
+
+## 数据隔离与持久化
+
+插件优先使用群聊 `sender_id`，私聊可使用 `launcher_id`。群聊缺少发送者身份时会 fail closed，不会回退到群号或 `unknown` 用户。
+
+Storage Adapter 使用以下策略：
+
+- 每请求独立 staging 目录；
+- 同一用户的 load/execute/save 由 per-user lock 串行化；
+- 只保存实际变化的 JSON；
+- Storage 读取异常不会被当作空数据；
+- 保存前执行乐观冲突检查，拒绝覆盖其他请求的新版本；
+- xiqueer Cookie 改为用户私有 Storage，不再写入 `shared:xiqueer`；
+- 共享区只保存无个人凭据的节次时间和校准状态。
+
+用户目录包含账号配置、IDS/CAS Cookie、业务 Cookie/Token、课表、研讨室签到任务和选课监控状态。插件版不会启动后台研讨室自动签到线程，需要时调用 `seminar signin --auto-scan` 并完成二次确认。
 
 ## CLI 结果与安全回显
 
-图书馆先调用 `library locations`，后续只使用返回的 `location` 或 `area_id`；座位预约只使用返回的座位号。实时区域结果保留 `source`、`is_live`、`total`、`returned_count`、`truncated` 和完整的紧凑 `location_options`；座位结果保留 `area`、`target_date`、`time_window`、`total_count`、`available_count`、`status_counts` 和有限的 `seat_options`。QQ 载荷仍保持约 2200 字符安全上限，但 `reply_text`、`llm_hint`、计数和关键 ID 优先保留。
+QQ 载荷保持约 2200 字符预算。`reply_text`、计数和稳定 ID 优先保留，长列表会生成机器可读摘要。缓存读写使用深复制，投递层的截断和字段删除不会污染后续缓存结果。
 
-当区域接口返回 `source=live_empty` 时，工具会返回 `success=false` 的明确实时空数据；不得据此猜测图书馆开放时间、区域或推荐空教室/现场方案。静态映射若返回，只标记为非实时参考。`account set`、校准等命令的密码、Cookie、Ticket、Token 和 `--data` 值会统一显示为 `<redacted>`；公开结果不会包含 `_effective_params`。真实写操作仍只以 `success=true` 为准。
+图书馆实时区域接口返回 `source=live_empty` 时，工具会明确失败；不得据此猜测开放时间、区域或替代方案。密码、Cookie、Ticket、Token、确认令牌和校准 data 不应出现在普通日志中。
 
 ## 目录
 
 - `manifest.yaml`：插件清单
-- `main.py`：插件入口
-- `components/cli_tools/`：对 LLM 暴露的统一 CLI Tool
-- `henu_plugin/service.py`：工具分发和存储上下文
-- `henu_plugin/cli.py`：CLI 命令解析和帮助
-- `mcp_server.py`：兼容 MCP/Agent 公共工具函数的薄门面
-- `henu_mcp/`：复用的校园业务逻辑和运行时路径切换
-- `campus_core/`：底层校园集成模块
+- `main.py`：插件入口，加载 Hardened service
+- `components/event_listener/`：身份捕获、时间注入、敏感命令直处理
+- `components/cli_tools/`：统一 CLI、写操作确认和 QQ 安全输出
+- `henu_plugin/hardened_service.py`：动态时间、缓存键和运行上限
+- `henu_plugin/storage_adapter.py`：Storage 事务边界与用户隔离
+- `henu_plugin/confirmation.py`：两阶段确认协议
+- `henu_mcp/`、`campus_core/`：校园业务逻辑
 
-账号与 Cookie 只保存在本地。插件版不会启动后台研讨室自动签到线程，需要时调用 `seminar signin --auto-scan` 或指定 `record_id`。
+## 登录策略
 
-## 智能选课
+教务登录优先复用或登录 IDS 统一认证；仅在 IDS、Service 跳转、网络或验证码风控失败时尝试一次 xk Kingo 独立登录。Kingo 仅保证课表、选课状态和空教室等 xk 能力，不生成或覆盖其他服务使用的 CAS Cookie。验证码会返回 `captcha_required`，不会识别、绕过或循环重试。
 
-本版本包含通用智能选课模块 `campus_core.smart_course_selector`，三种接入形态复用同一套逻辑；同时保留 xk 只读状态查询入口：
+## 说明
 
-- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。
-- 按班级筛选班级对应专业课、专业选课班 / 专业公共课、全年级公共课。
-- 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
-- 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
-- `course status` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
-- `course monitor` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
+- 需要河南大学学生账号和可访问校园相关系统的网络环境。
+- 项目仅供学习和个人使用，请遵守学校规定和各系统服务条款。
+- 正式身份认证、成绩、选课、财务和审批事项以官方渠道为准。
 
-MCP / Agent Skill 示例：
+## 许可证
 
-```bash
-python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
-```
-
-Langbot CLI 示例：
-
-```text
-course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
-course filter --excel ./courses.xlsx --class 25软工1
-course schema
-course status
-course monitor config --config-json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
-course monitor once
-```
+MIT License，见 `LICENSE`。
