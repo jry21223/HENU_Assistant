@@ -1,13 +1,16 @@
 name: Build and Release lbp
 
 on:
+  pull_request:
+    branches:
+      - langbot-plugin
   push:
     tags:
       - "v*"
   workflow_dispatch:
 
 jobs:
-  build-and-release:
+  validate-build-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,17 +22,40 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install lbp
+          python -m pip install -r requirements.txt
+          python -m pip install lbp pytest
+
+      - name: Compile plugin
+        run: python -m compileall -q components henu_plugin henu_mcp campus_core main.py mcp_server.py
+
+      - name: Run tests
+        run: python -m pytest -q
 
       - name: Build lbp package
         run: lbp build
 
+      - name: Verify manifest and tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          text = Path("manifest.yaml").read_text(encoding="utf-8")
+          match = re.search(r"^\s*version:\s*([^\s]+)\s*$", text, re.MULTILINE)
+          if not match or match.group(1) != tag:
+              raise SystemExit(f"manifest version {match.group(1) if match else 'missing'} != tag {tag}")
+          PY
+
       - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.lbpkg
