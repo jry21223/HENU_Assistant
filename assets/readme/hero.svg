@@ -1,86 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
   <title id="title">河南大学校园助手</title>
-  <desc id="desc">本地可运行的河大校园助手：课表、空教室、图书馆、研讨室等能力，通过 MCP、Langbot 与 Agent Skill 三形态交付。</desc>
+  <desc id="desc">本地可运行的河大校园助手。同一套能力，通过 MCP、Langbot、Agent Skill 三种方式交付。</desc>
 
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0b2f52"/>
-      <stop offset="100%" stop-color="#0f4c81"/>
-    </linearGradient>
-    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-      <path d="M28 0H0V28" fill="none" stroke="#f5f0e6" stroke-opacity="0.05" stroke-width="1"/>
-    </pattern>
-  </defs>
+  <!-- solid field, no grid, no gradient chrome -->
+  <rect width="1200" height="320" rx="20" fill="#0c1f33"/>
 
-  <rect width="1200" height="380" rx="28" fill="url(#bg)"/>
-  <rect width="1200" height="380" rx="28" fill="url(#grid)"/>
+  <!-- left accent bar as the only motif -->
+  <rect x="0" y="0" width="8" height="320" rx="0" fill="#c9a227"/>
 
-  <!-- soft right panel -->
-  <rect x="676" y="28" width="492" height="324" rx="22" fill="#f5f0e6" fill-opacity="0.06" stroke="#f5f0e6" stroke-opacity="0.12"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Noto Sans SC',sans-serif">
+    <!-- category -->
+    <text x="64" y="72" fill="#8aa0b5" font-size="16" font-weight="600" letter-spacing="3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">HENU  ·  CAMPUS ASSISTANT</text>
 
-  <!-- brand mark -->
-  <g transform="translate(56 48)">
-    <rect width="56" height="56" rx="14" fill="#f5f0e6"/>
-    <path d="M12 42V14h5.2v11.2h13.2V14H35.6v28h-5.2V30.4H17.2V42H12z" fill="#0f4c81"/>
-    <path d="M39 42V14h6.6c7.8 0 12 4.5 12 12.8 0 8.5-4.1 13.2-12 13.2H39zm5.2-4.6h1.9c5 0 6.4-3.7 6.4-8.6 0-4.7-1.4-8.2-6.4-8.2h-1.9v16.8z" fill="#0f4c81"/>
-  </g>
+    <!-- name -->
+    <text x="64" y="140" fill="#f4f1ea" font-size="48" font-weight="700">河南大学校园助手</text>
 
-  <g id="title-block" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Noto Sans SC',sans-serif">
-    <text x="130" y="72" fill="#8eb6d8" font-size="18" font-weight="600" letter-spacing="2">HENU · LOCAL CAMPUS ASSISTANT</text>
-    <text x="56" y="148" fill="#f5f0e6" font-size="52" font-weight="750">河南大学校园助手</text>
-    <text x="56" y="198" fill="#d7e6f4" font-size="24" font-weight="500">课表 · 空教室 · 图书馆 · 研讨室 · 河宝</text>
-    <text x="56" y="238" fill="#a9c4db" font-size="20">一套本地能力，三种交付：MCP / Langbot / Agent Skill</text>
+    <!-- one concrete line -->
+    <text x="64" y="188" fill="#b8c7d6" font-size="22">本地课表、空教室、图书馆、研讨室与河宝查询</text>
 
-    <!-- meta chips -->
-    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">
-      <rect x="56" y="278" width="108" height="36" rx="10" fill="#f5f0e6" fill-opacity="0.1" stroke="#f5f0e6" stroke-opacity="0.18"/>
-      <text x="74" y="302" fill="#f5f0e6">MIT</text>
-      <rect x="176" y="278" width="168" height="36" rx="10" fill="#f5f0e6" fill-opacity="0.1" stroke="#f5f0e6" stroke-opacity="0.18"/>
-      <text x="194" y="302" fill="#f5f0e6">3 delivery branches</text>
-      <rect x="356" y="278" width="150" height="36" rx="10" fill="#f5f0e6" fill-opacity="0.1" stroke="#f5f0e6" stroke-opacity="0.18"/>
-      <text x="374" y="302" fill="#f5f0e6">local-only data</text>
-    </g>
-  </g>
+    <!-- delivery as plain mono labels, not cards -->
+    <text x="64" y="248" fill="#c9a227" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">MCP</text>
+    <text x="130" y="248" fill="#5f7388" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">/</text>
+    <text x="152" y="248" fill="#c9a227" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">Langbot</text>
+    <text x="258" y="248" fill="#5f7388" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">/</text>
+    <text x="280" y="248" fill="#c9a227" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">Agent Skill</text>
 
-  <!-- proof: three surfaces -->
-  <g id="project-proof" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
-    <!-- connector rail -->
-    <path d="M740 98 H1116" stroke="#7ec8e3" stroke-width="2" stroke-opacity="0.55"/>
-    <circle cx="740" cy="98" r="5" fill="#7ec8e3"/>
-    <circle cx="928" cy="98" r="5" fill="#7ec8e3"/>
-    <circle cx="1116" cy="98" r="5" fill="#7ec8e3"/>
-
-    <!-- card 1 -->
-    <g transform="translate(700 120)">
-      <rect width="148" height="176" rx="16" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
-      <text x="18" y="36" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">branch</text>
-      <text x="18" y="68" fill="#f5f0e6" font-size="22" font-weight="700">MCP</text>
-      <text x="18" y="100" fill="#b7cfe3" font-size="16">stdio tools</text>
-      <text x="18" y="128" fill="#8eb6d8" font-size="15">Cherry Studio</text>
-      <text x="18" y="154" fill="#8eb6d8" font-size="15">二次集成</text>
-    </g>
-
-    <!-- card 2 -->
-    <g transform="translate(864 120)">
-      <rect width="148" height="176" rx="16" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
-      <text x="18" y="36" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">branch</text>
-      <text x="18" y="68" fill="#f5f0e6" font-size="22" font-weight="700">Langbot</text>
-      <text x="18" y="100" fill="#b7cfe3" font-size="16">QQ 插件</text>
-      <text x="18" y="128" fill="#8eb6d8" font-size="15">按 QQ 隔离</text>
-      <text x="18" y="154" fill="#8eb6d8" font-size="15">群聊可用</text>
-    </g>
-
-    <!-- card 3 -->
-    <g transform="translate(1028 120)">
-      <rect width="148" height="176" rx="16" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
-      <text x="18" y="36" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">branch</text>
-      <text x="18" y="68" fill="#f5f0e6" font-size="22" font-weight="700">Skill</text>
-      <text x="18" y="100" fill="#b7cfe3" font-size="16">CLI 入口</text>
-      <text x="18" y="128" fill="#8eb6d8" font-size="15">Agent 调用</text>
-      <text x="18" y="154" fill="#8eb6d8" font-size="15">本地运行</text>
-    </g>
-
-    <text x="700" y="68" fill="#d7e6f4" font-size="18" font-weight="600">同一能力 · 三种接入</text>
+    <text x="64" y="286" fill="#6d8298" font-size="15" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">MIT  ·  local-only data  ·  IDS-first auth</text>
   </g>
 </svg>
-
