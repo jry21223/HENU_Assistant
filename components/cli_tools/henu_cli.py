@@ -63,6 +63,14 @@ class HenuCli(BaseHenuTool):
             }
 
         if spec.resolved_tool in WRITE_TOOL_NAMES:
+            parameter_error = self._write_parameter_error(spec)
+            if parameter_error:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_parameters_incomplete",
+                    "msg": parameter_error,
+                    "reply_text": parameter_error,
+                }
             if inline_token:
                 return await self._execute_pending(
                     token=inline_token,
@@ -75,11 +83,50 @@ class HenuCli(BaseHenuTool):
                 storage_key=storage_key,
                 canonical_command=clean_command,
                 action=spec.action,
+                parameter_summary=self._operation_summary(spec),
                 query_id=query_id,
             )
 
         result = await super().call({"command": clean_command}, session, query_id)
         return self._mark_storage_commit_state(result)
+
+    @staticmethod
+    def _write_parameter_error(spec: Any) -> str:
+        params = spec.params if isinstance(getattr(spec, "params", None), dict) else {}
+        tool = str(getattr(spec, "resolved_tool", "") or "")
+        required: dict[str, tuple[str, ...]] = {
+            "library_reserve": ("location", "seat_no", "target_date", "preferred_time"),
+            "library_auto_signin": ("record_id",),
+            "library_cancel": ("record_id",),
+            "seminar_reserve": ("area_id", "target_date", "start_time", "end_time", "title"),
+            "seminar_signin": ("record_id",),
+            "seminar_cancel": ("record_id",),
+        }
+        missing = [key for key in required.get(tool, ()) if not str(params.get(key) or "").strip()]
+        if missing:
+            flags = "、".join("--" + key.replace("_", "-") for key in missing)
+            return f"外部写操作必须显式提供完整参数，缺少：{flags}。不会使用账号默认值或隐式日期。"
+        if tool == "seminar_signin" and params.get("auto_scan"):
+            return "LangBot 写操作确认不允许 seminar signin --auto-scan；请先查询签到任务并指定 --record-id。"
+        return ""
+
+    @staticmethod
+    def _operation_summary(spec: Any) -> str:
+        params = spec.params if isinstance(getattr(spec, "params", None), dict) else {}
+        keys_by_tool = {
+            "library_reserve": ("location", "seat_no", "target_date", "preferred_time", "preferred_end_time"),
+            "library_auto_signin": ("record_id",),
+            "library_cancel": ("record_id", "record_type"),
+            "seminar_reserve": ("area_id", "target_date", "start_time", "end_time", "title"),
+            "seminar_signin": ("record_id",),
+            "seminar_cancel": ("record_id",),
+        }
+        fields = []
+        for key in keys_by_tool.get(str(getattr(spec, "resolved_tool", "") or ""), ()):
+            value = params.get(key)
+            if value not in (None, "", False):
+                fields.append(f"{key}={value}")
+        return "参数 " + "，".join(fields) if fields else "参数已规范化"
 
     async def _request_confirmation(
         self,
@@ -87,6 +134,7 @@ class HenuCli(BaseHenuTool):
         storage_key: str,
         canonical_command: str,
         action: str,
+        parameter_summary: str,
         query_id: int,
     ) -> dict[str, Any]:
         pending = create_pending_operation(
@@ -110,20 +158,21 @@ class HenuCli(BaseHenuTool):
         token = str(pending["token"])
         confirm_command = f"confirm {token}"
         action_text = action or "外部写操作"
+        summary_text = parameter_summary or "参数已规范化"
         return {
             "success": False,
             "confirmation_required": True,
             "error_code": "confirmation_required",
             "msg": f"{action_text} 尚未执行，需要用户在下一条消息中明确确认。",
             "reply_text": (
-                f"即将执行：{action_text}。本次尚未提交。"
-                f"请核对日期、时间、地点和对象；确认无误后回复：{confirm_command}"
+                f"即将执行：{action_text}；{summary_text}。本次尚未提交。"
+                f"请核对后回复：{confirm_command}"
             ),
             "confirmation_command": confirm_command,
             "expires_in_seconds": 300,
             "retry_safe": True,
             "llm_hint": "必须等待用户发送新的确认消息；禁止在当前轮次自动调用 confirm。",
-            "cli": {"mode": "confirmation", "command": redact_cli_command(canonical_command)},
+            "cli": {"mode": "confirmation", "action": action_text},
         }
 
     async def _execute_confirmation(
@@ -223,26 +272,13 @@ class HenuCli(BaseHenuTool):
 
     @staticmethod
     def _validate_identity(session, identity_hint: dict[str, Any]) -> str:
-        launcher_type = getattr(
-            getattr(session, "launcher_type", ""),
-            "value",
-            getattr(session, "launcher_type", ""),
-        )
+        launcher_type = getattr(getattr(session, "launcher_type", ""), "value", getattr(session, "launcher_type", ""))
         launcher_type = str(launcher_type or "").lower()
-        sender_id = str(
-            identity_hint.get("sender_id") or getattr(session, "sender_id", "") or ""
-        ).strip()
-        launcher_id = str(
-            identity_hint.get("launcher_id") or getattr(session, "launcher_id", "") or ""
-        ).strip()
+        sender_id = str(identity_hint.get("sender_id") or getattr(session, "sender_id", "") or "").strip()
+        launcher_id = str(identity_hint.get("launcher_id") or getattr(session, "launcher_id", "") or "").strip()
         if launcher_type == "group" and sender_id in {"", "0", "None", "none"}:
             return "群聊缺少发送者身份，已拒绝访问任何个人账号或预约数据。"
-        if sender_id in {"", "0", "None", "none"} and launcher_id in {
-            "",
-            "0",
-            "None",
-            "none",
-        }:
+        if sender_id in {"", "0", "None", "none"} and launcher_id in {"", "0", "None", "none"}:
             return "无法确认当前用户身份，已拒绝执行。"
         return ""
 
