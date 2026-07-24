@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">登录策略</title>
+  <desc id="desc">优先 IDS CAS 统一认证，失败时仅自动尝试一次 xk Kingo 降级；不识别验证码、不循环重试。</desc>
+
+  <rect width="1200" height="300" rx="28" fill="#0b2f52"/>
+
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Noto Sans SC',sans-serif">
+    <text x="48" y="52" fill="#f5f0e6" font-size="26" font-weight="750">登录怎么走</text>
+    <text x="48" y="84" fill="#8eb6d8" font-size="17">双通道 · 可解释 · 有边界</text>
+
+    <!-- step 1 -->
+    <g transform="translate(48 118)">
+      <rect width="300" height="140" rx="18" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
+      <text x="22" y="38" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">01</text>
+      <text x="22" y="72" fill="#f5f0e6" font-size="22" font-weight="700">IDS CAS</text>
+      <text x="22" y="104" fill="#b7cfe3" font-size="16">CASTGC / TGC</text>
+      <text x="22" y="130" fill="#8eb6d8" font-size="15">跨服务 SSO 优先</text>
+    </g>
+
+    <!-- arrow -->
+    <path d="M368 188 H430" stroke="#7ec8e3" stroke-width="3" stroke-linecap="round"/>
+    <path d="M422 176 L438 188 L422 200" fill="none" stroke="#7ec8e3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- step 2 -->
+    <g transform="translate(448 118)">
+      <rect width="300" height="140" rx="18" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
+      <text x="22" y="38" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">02</text>
+      <text x="22" y="72" fill="#f5f0e6" font-size="22" font-weight="700">失败才降级</text>
+      <text x="22" y="104" fill="#b7cfe3" font-size="16">xk Kingo 仅一次</text>
+      <text x="22" y="130" fill="#8eb6d8" font-size="15">验证码 → captcha_required</text>
+    </g>
+
+    <!-- arrow -->
+    <path d="M768 188 H830" stroke="#7ec8e3" stroke-width="3" stroke-linecap="round"/>
+    <path d="M822 176 L838 188 L822 200" fill="none" stroke="#7ec8e3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- step 3 -->
+    <g transform="translate(848 118)">
+      <rect width="304" height="140" rx="18" fill="#102f4d" stroke="#7ec8e3" stroke-opacity="0.35"/>
+      <text x="22" y="38" fill="#7ec8e3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">03</text>
+      <text x="22" y="72" fill="#f5f0e6" font-size="22" font-weight="700">能力边界</text>
+      <text x="22" y="104" fill="#b7cfe3" font-size="16">auth.mode / degraded</text>
+      <text x="22" y="130" fill="#8eb6d8" font-size="15">Kingo 不覆盖 CAS Cookie</text>
+    </g>
+  </g>
+</svg>

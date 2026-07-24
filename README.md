@@ -1,83 +1,127 @@
-# 河南大学校园助手
+<p align="center">
+  <img src="./assets/readme/hero.png" width="100%" alt="河南大学校园助手：本地可运行的课表、空教室、图书馆、研讨室等能力，通过 MCP、Langbot 与 Agent Skill 三形态交付">
+</p>
 
-面向河南大学学生的校园工具集合，覆盖空教室查询、课表查询、图书馆座位预约、研讨室预约、河宝社区查询等场景。
-毒瘤名单：
+**河南大学学生**本地可用的校园助手。同一套能力，按场景拆成三条独立分支：
+
+| 你想… | 用这个 | 分支 |
+| --- | --- | --- |
+| 接 MCP 客户端 / 二次集成 | MCP 服务器 | [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) |
+| 接 QQ / Langbot，多用户隔离 | Langbot 插件 | [`langbot-plugin`](https://github.com/jry21223/HENU_Assistant/tree/langbot-plugin) |
+| 当 Agent Skill / 本地 CLI | Agent Skill | [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill) |
+
+> `main` 是项目首页与文档入口；**可运行代码在对应分支**，不要在 `main` 里找完整业务实现。
+
+---
+
+## 先看结果
+
+<p align="center">
+  <img src="./assets/readme/capabilities.png" width="100%" alt="能力一览：课表、选课、空教室、图书馆、研讨室、河宝、认证与节次校准">
+</p>
+
+| 能力 | 实际能做什么 |
+| --- | --- |
+| 账号 / 系统 | 绑定学号密码、本地加密保存、系统状态 |
+| 课表 | 同步与查询（当前 / 日 / 周 / 全量） |
+| 选课 | 状态查询、智能规划、只读余量监控（可提醒） |
+| 空教室 / 资源 | 空闲与占用查询、资源映射 |
+| 图书馆 | 区域、座位、预约、签到、取消 |
+| 研讨室 | 筛选、成员组、预约、签到、取消 |
+| 河宝社区 | 请假、签到、查寝、活动、信息收集等查询 |
+| 节次校准 | 校准课表节次时间源 |
+
+**想直接体验部署版**：加 QQ 群 `1031855485`
+
+<p align="center">
+  <img src="./docs/group_qr.jpg" width="240" alt="QQ 群 1031855485 二维码">
+</p>
+
+<details>
+<summary>「毒瘤名单」（半认真）</summary>
+
 - [x] 今日校园
 - [x] 喜鹊
-- [ ] 多彩校园/水满分
+- [ ] 多彩校园 / 水满分
 - [ ] 体适能
 
-加q群直接体验部署版。1031855485
-![1031855485](./docs/group_qr.jpg)
+</details>
 
-## 选择版本
+---
 
-| 版本 | 分支 | 适合场景 |
-| --- | --- | --- |
-| Langbot 插件 | `langbot-plugin` | 接入 Langbot 机器人，按 QQ 隔离账号数据 |
-| MCP 服务器 | `mcp-server` | 接入支持 MCP 的客户端或做二次集成 |
-| Agent Skill | `agent-skill` | 在 Agent Skill 中用自然语言调用 |
+## 它和“又一个脚本”差在哪
 
-## 快速开始
+1. **三种交付形态**共享校园能力，而不是各写各的。  
+2. **登录策略可解释**：IDS 优先，失败才 **一次** Kingo 降级；不识别验证码、不循环重试。  
+3. **数据默认本地**：账号、Cookie、缓存不上传第三方；Langbot 版按 QQ 隔离。  
+4. **选课监控只读**：提醒余量变化，不代替你点选课 / 退选。
 
-Langbot 插件：
+<p align="center">
+  <img src="./assets/readme/auth-flow.png" width="100%" alt="登录策略：IDS CAS 优先，失败时仅一次 Kingo 降级，并暴露 auth 能力边界">
+</p>
+
+**Kingo 降级边界**：主要保证课表 / 选课状态 / 空教室等 xk 能力；图书馆、研讨室、河宝仍需 IDS。相关接口通过 `auth` 返回 `mode`、`degraded`、`error_code`、`warning`。
+
+---
+
+## 30 秒上手
+
+### Langbot 插件
 
 ```bash
 git clone -b langbot-plugin https://github.com/jry21223/HENU_Assistant.git
 cd HENU_Assistant
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/lbp build
+.venv/bin/lbp build   # 或 .venv/bin/lbp run
 ```
 
-MCP 服务器：
+### MCP 服务器
 
 ```bash
 git clone -b mcp-server https://github.com/jry21223/HENU_Assistant.git
 cd HENU_Assistant
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+python3 diagnose_mcp.py           # 可选
 python3 mcp_server.py --transport stdio
 ```
 
-Agent Skill：
+### Agent Skill
 
 ```bash
 git clone -b agent-skill https://github.com/jry21223/HENU_Assistant.git henu_campus_assistant
 cp -r henu_campus_assistant ~/.openclaw/workspace/skills/
+cd ~/.openclaw/workspace/skills/henu_campus_assistant
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python henu_cli.py system_status
 ```
 
-## 功能
+各分支 README 含工具列表、CLI 示例与存储路径说明。
 
-- 账号绑定与本地加密保存
-- 课表同步、当前课程、日课表、周课表查询
-- 图书馆区域查询、座位预约、当前预约、历史记录、签到、取消
-- 研讨室筛选、房间详情、分组、预约、签到、取消
-- 河宝社区请假、签到、查寝、活动、信息收集查询
-
-## 登录策略
-
-教务登录优先复用或登录 IDS 统一认证；仅在 IDS、Service 跳转、网络或验证码风控失败时，自动尝试一次 xk Kingo 独立登录。IDS 模式支持跨服务 SSO；Kingo 是降级通道，只保证课表、选课状态和空教室等 xk 能力，不为图书馆、研讨室或河宝生成、覆盖 CAS Cookie。遇到验证码会返回 `captcha_required`，不会识别、绕过或循环重试；相关工具通过 `auth` 对象公开认证模式和能力边界。
+---
 
 ## 文档
 
-- [河南大学选课接口记录](docs/course-selection-api.md)
-- [河南大学校园相关 API 汇总](docs/school-api-summary.md)
+| 文档 | 说明 |
+| --- | --- |
+| [校园相关 API 汇总](docs/school-api-summary.md) | 接口与路径整理 |
+| [选课接口记录](docs/course-selection-api.md) | 选课相关记录 |
+| [空教室 API 文档](docs/henu_empty_classroom_api_doc.md) | 空教室相关 |
 
-## 说明
+---
 
-- 需要河南大学学生账号和可访问校园相关系统的网络环境。
-- 所有校园 API 文档已集中放在本仓库 `repo/docs/` 目录，统一入口见仓库文档列表。
-- 账号、Cookie、缓存文件保存在本地，不上传到第三方服务。
-- 本项目仅供学习和个人使用，请遵守学校相关规定。
+## 使用前提与边界
 
-## 免责声明
-
-- 本仓库整理的接口与参数仅用于个人学习、调试和非生产环境验证，不得用于任何违反法律法规、院校管理制度或平台服务条款的行为。
-- API 均为公开系统交互路径与调用方式，可能因学校服务更新而变化，不保证稳定可用。
-- 请勿将本仓库用于代替官方系统的正式业务审批流程，涉及正式身份认证、成绩、选课、财务等敏感操作请以官方渠道为准。
+- 需要**河南大学学生账号**，以及可访问校园相关系统的网络环境。  
+- 账号、Cookie、缓存**仅本地保存**，不上传到第三方服务。  
+- 本项目**仅供学习与个人使用**，请遵守学校相关规定。  
+- 接口可能随学校服务变更；**不保证长期稳定**。  
+- 正式身份认证、成绩、选课提交、财务等敏感操作，请以**官方渠道**为准；勿用本仓库代替正式审批流程。  
+- 请勿用于任何违反法律法规、院校制度或平台服务条款的行为。
 
 ## 许可证
 
-MIT License，见 [LICENSE](LICENSE)。
+[MIT License](LICENSE)
