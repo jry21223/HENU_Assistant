@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">河大校园助手 · MCP</title>
+  <desc id="desc">把课表、空教室、图书馆、研讨室暴露为 stdio MCP tools</desc>
+  <rect width="1200" height="300" rx="20" fill="#0c1f33"/>
+  <rect x="0" y="0" width="8" height="300" fill="#c9a227"/>
+  <g font-family="'Noto Sans CJK SC','PingFang SC',-apple-system,sans-serif">
+    <text x="64" y="68" fill="#8aa0b5" font-size="16" font-weight="600" letter-spacing="3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">HENU  ·  MCP SERVER</text>
+    <text x="64" y="132" fill="#f4f1ea" font-size="44" font-weight="700">河大校园助手 · MCP</text>
+    <text x="64" y="182" fill="#b8c7d6" font-size="20">把课表、空教室、图书馆、研讨室暴露为 stdio MCP tools</text>
+    <text x="64" y="240" fill="#6d8298" font-size="15" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">Cherry Studio  ·  FastMCP  ·  local-only data</text>
+  </g>
+</svg>
