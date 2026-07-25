@@ -1,49 +1,53 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# 河大校园助手 · Langbot 插件 — 开发环境安装脚本
+set -euo pipefail
 
-# 河大校园助手 MCP 服务器 - 虚拟环境安装脚本
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
 
-set -e
-
-echo "🚀 河大校园助手 MCP 服务器安装"
+echo "河大校园助手 Langbot 插件 — 开发环境安装"
+echo "工作目录: $ROOT"
 echo ""
 
-# 1. 检查 Python
-echo "1️⃣ 检查 Python..."
-if ! command -v python3 &> /dev/null; then
-    echo "❌ 未找到 Python3，请先安装："
-    echo "   sudo apt install python3 python3-venv python3-pip"
-    exit 1
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "未找到 python3。请先安装 Python 3.10+（建议 3.11–3.13）。"
+  exit 1
 fi
-echo "✅ Python3 已安装"
 
-# 2. 创建虚拟环境
-echo ""
-echo "2️⃣ 创建虚拟环境..."
-if [ -d "venv" ]; then
-    rm -rf venv
-    echo "   删除旧环境"
+echo "1/4 创建虚拟环境 .venv ..."
+if [[ -d .venv ]]; then
+  echo "   已存在 .venv，复用"
+else
+  python3 -m venv .venv
 fi
-python3 -m venv venv
-echo "✅ 虚拟环境创建完成"
 
-# 3. 激活并安装依赖
-echo ""
-echo "3️⃣ 安装依赖包..."
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-echo "✅ 依赖安装完成"
+echo "2/4 安装业务依赖 + lbp ..."
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install lbp
 
-# 4. 验证安装
-echo ""
-echo "4️⃣ 验证安装..."
-python3 diagnose_mcp.py
+if [[ ! -f .env ]]; then
+  echo "3/4 从 .env.example 生成 .env ..."
+  cp .env.example .env
+  echo "   请编辑 .env：生产环境必须设置稳定的 HENU_MASTER_KEY"
+else
+  echo "3/4 已存在 .env，跳过复制"
+fi
+
+echo "4/4 检查 lbp ..."
+if ! .venv/bin/lbp --help >/dev/null 2>&1; then
+  echo "lbp 安装后仍不可用，请检查 pip 与 PATH。"
+  exit 1
+fi
 
 echo ""
-echo "🎉 安装成功！"
+echo "安装完成。"
 echo ""
-echo "使用方法："
-echo "1. 激活环境: source venv/bin/activate"
-echo "2. 运行服务: python3 mcp_server.py --transport stdio"
-echo "3. 退出环境: deactivate"
+echo "下一步："
+echo "  调试运行:  .venv/bin/lbp run"
+echo "  构建包:    .venv/bin/lbp build"
+echo "  跑测试:    .venv/bin/pip install pytest && .venv/bin/pytest"
+echo ""
+echo "终端用户若只想装插件：从 GitHub Release 下载 dist/*.lbpkg，在 LangBot 中安装，"
+echo "并配置稳定的 HENU_MASTER_KEY。详见 README「安装」。"
 echo ""

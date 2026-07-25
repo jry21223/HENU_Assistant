@@ -6,18 +6,18 @@ metadata:
     en_US: HenuCLI
     zh_Hans: 河大 CLI
   description:
-    en_US: "Unified CLI entry for HENU account, schedule, course, library, seminar, and calibration operations."
-    zh_Hans: "统一 CLI 入口，调用河大账号、课表、选课、图书馆、研讨室与节次校准能力。"
+    en_US: "Unified CLI entry for HENU account, schedule, course, empty classroom, library, seminar, 河宝, and calibration. Space-style commands only (schedule now), not agent-skill snake_case."
+    zh_Hans: "统一 CLI 入口：账号、课表、选课、空教室、图书馆、研讨室、河宝与节次校准。仅使用空格风格命令（如 schedule now），不要使用 agent-skill 的下划线子命令。"
 spec:
   parameters:
     type: object
     properties:
       command:
         type: string
-        description: CLI 命令，例如 help、account status、schedule now、library current；确认外部写操作时使用 confirm <token>
+        description: CLI 命令，例如 help、account status、schedule now、library current、empty_classroom query；确认外部写操作时使用 confirm <token>
     required:
       - command
-  llm_prompt: "统一入口，只传 command。当前日期和时间只以本轮 [HENU_RUNTIME_CONTEXT_V2] 系统块为准，不得复用历史时间。账号密码、Cookie 和校准 data 必须由用户在私聊中直接发送，插件会在调用模型前拦截；不得通过 Tool 构造或转述这些敏感值。图书馆、研讨室的预约、签到、取消属于外部写操作：首次调用只会返回 confirmation_required 和 confirm <token>；必须等待用户发送下一条明确确认消息，禁止在同一轮自动调用 confirm。查询图书馆时先 locations，再使用返回的准确 location/area_id 查询 seats；不得猜测区域或座位。工具返回 reply_text 时优先复述 reply_text，不发送完整 JSON。日期示例统一使用 YYYY-MM-DD。所有真实写操作仅以 success=true 或 external_committed=true 为准；若 external_committed=true 且 storage_persisted=false，禁止重试，先反查当前记录。"
+  llm_prompt: "统一入口，只传 command。本插件命令是空格风格（schedule now / library seats / --student-id），禁止使用 agent-skill 的 schedule_query / library_query / --student_id。当前日期和时间只以本轮 [HENU_RUNTIME_CONTEXT_V2] 系统块为准，不得复用历史时间。账号密码、Cookie 和校准 data 必须由用户在私聊中直接发送，插件会在调用模型前拦截；不得通过 Tool 构造或转述这些敏感值。图书馆、研讨室的预约、签到、取消属于外部写操作：首次调用只会返回 confirmation_required 和 confirm <token>；必须等待用户发送下一条明确确认消息，禁止在同一轮自动调用 confirm。查询图书馆时先 locations，再使用返回的准确 location/area_id 查询 seats；不得猜测区域或座位；source=live_empty 时只如实说明为空。空教室用 empty_classroom query；河宝用 yunfz 相关子命令（若 help 列出）。工具返回 reply_text 时优先复述 reply_text，不发送完整 JSON。日期示例统一使用 YYYY-MM-DD。所有真实写操作仅以 success=true 或 external_committed=true 为准；若 external_committed=true 且 storage_persisted=false，禁止重试，先反查当前记录。不确定参数时先 help 或 help <topic>。"
 execution:
   python:
     path: henu_cli_safe.py

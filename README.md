@@ -4,57 +4,98 @@
 
 Langbot 插件形态。对外主要是统一 CLI 工具 `henu_cli`，并按 **QQ 发送者** 隔离账号数据。
 
-版本见 `manifest.yaml`。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
+版本见 `manifest.yaml`（当前 **2.0.4**）。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
+
+> **命令方言**：本插件使用空格风格 CLI（`schedule now`、`library seats`、`--student-id`）。  
+> Agent Skill / MCP 使用下划线子命令（`schedule_query`、`library_query`、`--student_id`）。**不要互相粘贴。**
 
 ---
 
-## 安装与运行
+## 安装
+
+### A. 终端用户（LangBot 装插件包）
+
+前置：已部署可用的 [LangBot](https://docs.langbot.app)，并接好消息适配器（如 NapCat / OneBot）。本仓库**不是**独立 QQ 机器人。
+
+1. 打开 [Releases](https://github.com/jry21223/HENU_Assistant/releases)，下载与版本号一致的 `*.lbpkg`（由 `langbot-plugin` 分支 CI 构建）。  
+2. 在 LangBot 中安装该插件包（插件管理 / 本地导入，以你使用的 LangBot 版本文档为准）。  
+3. 为运行环境配置稳定的 **`HENU_MASTER_KEY`**（长随机串；容器重建、迁移必须沿用同一密钥，否则已有密码密文无法解密）。  
+4. 私聊机器人绑定账号（见下方「敏感命令」），再查询课表 / 图书馆等。
+
+官方插件开发与调试说明可参考：<https://docs.langbot.app/en/plugin/dev/tutor.html>
+
+### B. 开发者（本仓库调试 / 打包）
 
 ```bash
+git clone -b langbot-plugin https://github.com/jry21223/HENU_Assistant.git
+cd HENU_Assistant
+
+# 推荐一键安装（venv + 依赖 + lbp + .env）
+chmod +x install.sh && ./install.sh
+
+# 或手动：
 python3 -m venv .venv
+.venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env
-.venv/bin/lbp run
+.venv/bin/pip install lbp          # 不在 requirements.txt：开发/打包 CLI
+cp -n .env.example .env            # 已有 .env 时请勿覆盖
+# 编辑 .env：生产必须设置 HENU_MASTER_KEY=
+
+.venv/bin/lbp run                  # 连接本机 LangBot 调试 runtime
+.venv/bin/lbp build                # 产出 dist/*.lbpkg
 ```
 
-生产环境必须在 `.env` 配置稳定的 **`HENU_MASTER_KEY`**。容器重建 / 迁移要继续用同一密钥，否则已有密码密文无法解密。
+`.env` 关键字段：
 
-```bash
-.venv/bin/lbp build
-```
+| 变量 | 说明 |
+| --- | --- |
+| `DEBUG_RUNTIME_WS_URL` | 本地调试 WebSocket（默认 `ws://127.0.0.1:5401/debug/ws`） |
+| `PLUGIN_DEBUG_KEY` | 调试鉴权；空表示关闭 |
+| **`HENU_MASTER_KEY`** | 凭据加密主密钥；**生产必填且保持稳定** |
 
 ## CI 发布
 
-`.github/workflows/release-lbp.yaml`：面向 `langbot-plugin` 的 PR 会编译、完整测试并 `lbp build`。  
-推送与 `manifest.yaml` 版本一致的 `v<version>` tag 时，产物上传到 GitHub Release。
+`.github/workflows/release-lbp.yaml`：对 `langbot-plugin` 的 tag 会安装依赖与 `lbp`、执行 `lbp build`，并把 `dist/*.lbpkg` 上传到 GitHub Release。
 
 ```bash
-git tag v2.0.2
-git push origin v2.0.2
+# tag 必须与 manifest.yaml 的 version 一致
+git tag v2.0.4
+git push origin v2.0.4
 ```
 
 ---
 
 ## 常用命令
 
+工具只收一条字符串 `command`。不确定时先 `help` 或 `help <topic>`。
+
 ```text
 help
+help library
 account status
 schedule now
 schedule day --date YYYY-MM-DD
 course status
-course plan --excel ./courses.xlsx --class 25软工1
+course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
+course filter --excel ./courses.xlsx --class 25软工1
+course schema
+course monitor config --config-json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
+course monitor once
 empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼
+empty_classroom query --view occupancy --classroom-text 十号楼101
 resource search 十号楼101
 library current
 library locations --date YYYY-MM-DD
 library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
+library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD --time 08:00
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
+seminar signin --auto-scan
+confirm <token>
 ```
 
 ### 敏感命令（仅私聊直发）
 
-账号绑定与校准必须在**私聊中直接发送**：
+账号绑定与校准必须在**私聊中由用户直接发送**（不要让模型用 Tool 拼密码）：
 
 ```text
 account set --student-id <学号> --password '<密码>'
@@ -68,7 +109,7 @@ calibration set --data '<请求体>' --cookie '<Cookie>'
 图书馆 / 研讨室的预约、签到、取消：
 
 1. 首次调用只生成预览 + 短期确认令牌，**不**提交校园系统。  
-2. 核对后，下一条消息发送工具返回的 `confirm <token>`。  
+2. 用户核对后，下一条消息发送工具返回的 `confirm <token>`。  
 3. 同一轮自动确认、令牌过期、参数变化 → 拒绝。
 
 若 `external_committed=true` 且 `storage_persisted=false`：校园已提交、本地 Storage 失败——**不得重试**，应先查询当前预约/记录反查。
@@ -110,7 +151,8 @@ Storage Adapter：
 - QQ 载荷约 2200 字符预算；长列表生成机器可读摘要。  
 - 缓存深复制，截断不影响后续结果。  
 - `source=live_empty` 明确失败，禁止猜开放时间/区域。  
-- 密码、Cookie、Ticket、Token、确认令牌、校准 data 不进普通日志。
+- 密码、Cookie、Ticket、Token、确认令牌、校准 data 不进普通日志。  
+- 工具返回 `reply_text` 时，最终回复优先复述/压缩 `reply_text`，不要整段 JSON 甩给用户。
 
 ## 登录
 
@@ -121,13 +163,20 @@ IDS 优先；失败时只一次 Kingo。Kingo 主要保 xk 能力，不生成/�
 ```text
 manifest.yaml
 main.py
-components/event_listener/   # 身份、时间注入、敏感命令
-components/cli_tools/        # CLI、写确认、QQ 安全输出
+install.sh                  # 开发环境：venv + 依赖 + lbp
+components/event_listener/  # 身份、时间注入、敏感命令
+components/cli_tools/       # CLI、写确认、QQ 安全输出
 henu_plugin/hardened_service.py
 henu_plugin/storage_adapter.py
 henu_plugin/confirmation.py
 henu_mcp/  campus_core/
 tests/
+```
+
+## 测试
+
+```bash
+.venv/bin/pytest
 ```
 
 ## 边界
