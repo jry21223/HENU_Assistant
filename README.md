@@ -6,6 +6,10 @@
 
 首页与其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`langbot-plugin`](https://github.com/jry21223/HENU_Assistant/tree/langbot-plugin) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
 
+> **入口说明**：本分支入口是 `mcp_server.py`（MCP tools）。  
+> **没有** `henu_cli.py`。若需要本地 CLI / Agent Skill，请使用 [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill) 分支。  
+> 工具名与 agent-skill 子命令对齐（`schedule_query` 等），与 LangBot 空格 CLI 不同。
+
 ---
 
 ## 安装
@@ -16,10 +20,10 @@ cd henu-mcp
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python3 diagnose_mcp.py           # 可选
+python3 diagnose_mcp.py           # 可选自检
 ```
 
-也可：`./install.sh`
+也可：`./install.sh`（创建 `venv/`、安装依赖并跑 `diagnose_mcp.py`）。
 
 ## 启动
 
@@ -45,6 +49,8 @@ python3 mcp_server.py --transport stdio
 }
 ```
 
+将 `<YOUR_PROJECT_PATH>` 换成上面 clone 后的绝对路径。
+
 ---
 
 ## 工具
@@ -67,7 +73,8 @@ python3 mcp_server.py --transport stdio
 2. 相对时间先 `system_status`。  
 3. 图书馆：`locations` → `seats` → `library_reserve` → `current`。  
 4. 空教室：`empty_classroom_query(view="free")`；不确定校区/楼房时先 `campuses` / `buildings`。  
-5. 研讨室：`filters` → `rooms` → `detail` → `seminar_reserve`。
+5. 研讨室：`filters` → `rooms` → `detail` → `seminar_reserve`。  
+6. 选课规划：Excel/JSON + 偏好调用 `smart_course_selection`；监控用 `course_monitor_*`（只读）。
 
 ### 图书馆结果契约
 
@@ -80,7 +87,8 @@ python3 mcp_server.py --transport stdio
 
 - 空教室 / 自习室：**不要**说「不支持」，优先 `empty_classroom_query`。  
 - 「今天 / 现在」先 `system_status`，再传具体日期/周次/节次。  
-- 大 JSON 只概括 `msg` / `rooms` / `data`，不要整段粘贴。
+- 大 JSON 只概括 `msg` / `rooms` / `data`，不要整段粘贴。  
+- 需要 shell CLI 时改用 agent-skill，不要在本目录找 `henu_cli.py`。
 
 ---
 
@@ -101,8 +109,11 @@ python3 mcp_server.py --transport stdio
 - 输出：`henu.smart_course_selection.v1`。  
 - `course_selection_query` / `course_monitor_*` **只读**；监控可飞书提醒，不自动提交。
 
+通过 **MCP tool** `smart_course_selection` 调用（参数与 agent-skill 对齐），例如在客户端里传入 excel 路径、班级与偏好标志。本地 shell 示例请使用 agent-skill：
+
 ```bash
-python3 henu_cli.py smart_course_selection \
+# 仅 agent-skill 分支存在 henu_cli.py
+.venv/bin/python henu_cli.py smart_course_selection \
   --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
 ```
 
@@ -111,6 +122,7 @@ python3 henu_cli.py smart_course_selection \
 ```text
 mcp_server.py       # 入口 + 工具门面
 diagnose_mcp.py
+install.sh / run.sh
 henu_mcp/core/      # 课表、存储、选课监控
 henu_mcp/tools/     # MCP 工具实现
 henu_mcp/runtime.py
