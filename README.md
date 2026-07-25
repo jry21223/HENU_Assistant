@@ -6,18 +6,32 @@
 
 其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`langbot-plugin`](https://github.com/jry21223/HENU_Assistant/tree/langbot-plugin)
 
+> **命令方言**：本形态使用 `schedule_query` / `library_query` / `--student_id`。  
+> LangBot 插件使用 `schedule now` / `library seats` / `--student-id`。**不要互相粘贴。**
+
 ---
 
 ## 安装
 
+任意 Agent 运行时都可以：把本分支内容放到该运行时的 skills 目录，或直接在 clone 目录使用。
+
 ```bash
 git clone -b agent-skill https://github.com/jry21223/HENU_Assistant.git henu_campus_assistant
-cp -r henu_campus_assistant ~/.openclaw/workspace/skills/
-cd ~/.openclaw/workspace/skills/henu_campus_assistant
+cd henu_campus_assistant
 
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
+```
+
+可选：拷贝到常见 skill 目录（按你实际使用的 Agent 选择其一）：
+
+```bash
+# OpenClaw 示例
+cp -R . ~/.openclaw/workspace/skills/henu_campus_assistant
+
+# Claude Code 用户 skill 示例
+# cp -R . ~/.claude/skills/henu_campus_assistant
 ```
 
 Ubuntu/Debian 若 *externally managed environment*：
@@ -28,18 +42,18 @@ sudo apt install -y python3-venv
 
 > 不要用系统级 `pip3 install -r requirements.txt`。
 
+Agent 侧执行约定见 [`SKILL.md`](./SKILL.md)：先定位含 `henu_cli.py` 的 skill 根目录，再：
+
+```bash
+cd "<SKILL_DIR>" && .venv/bin/python henu_cli.py <command> [args]
+```
+
 ## 快速开始
 
 ```bash
 .venv/bin/python henu_cli.py system_status
 .venv/bin/python henu_cli.py schedule_query --view current
 .venv/bin/python henu_cli.py library_query --view locations
-```
-
-Agent 侧建议始终走虚拟环境解释器（见 `SKILL.md`）：
-
-```bash
-cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_cli.py <command> [args]
 ```
 
 ---
@@ -58,7 +72,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 | 河宝 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 校准 | `set_calibration_source` |
 
-完整参数见 [`SKILL.md`](./SKILL.md)。
+完整参数与决策树见 [`SKILL.md`](./SKILL.md)。
 
 ## 最短流程
 
@@ -126,7 +140,7 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 ```text
 henu_cli.py      # CLI
 mcp_server.py    # 薄门面
-SKILL.md
+SKILL.md         # Agent 引导（路径可移植 + 决策树）
 henu_mcp/
 campus_core/
 scripts/
@@ -136,7 +150,6 @@ tests/
 ## 测试
 
 ```bash
-.venv/bin/pip install pytest   # 若尚无
 .venv/bin/pytest
 ```
 
