@@ -7,21 +7,16 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
 
 from .models import (
-    ALL_RESOURCE_TYPES,
     ResourceRecord,
     build_resource_id,
 )
 from .storage import (
-    add_alias_entry,
-    add_source_mapping,
     get_resource_record,
     load_resources,
     lookup_by_alias,
-    safe_save_resources,
-    upsert_resource_record,
+    upsert_resource_bundle,
 )
 
 
@@ -35,24 +30,19 @@ def upsert_resource(record: ResourceRecord) -> ResourceRecord:
     if not d.get("updatedAt"):
         d["updatedAt"] = _now_iso()
 
-    # 保存到 resources.json
-    upsert_resource_record(d)
-
-    # 更新别名索引
     all_aliases = list(record.aliases)
     if record.canonical_name:
         all_aliases.append(record.canonical_name)
     if record.display_name:
         all_aliases.append(record.display_name)
 
-    for alias in set(all_aliases):
-        if alias.strip():
-            add_alias_entry(alias.strip(), record.resource_id)
-
-    # 更新 source mapping
     source = record.source
-    if source.get("system") and source.get("source_id"):
-        add_source_mapping(source["system"], source["source_id"], record.resource_id)
+    upsert_resource_bundle(
+        d,
+        aliases={alias.strip() for alias in all_aliases if alias.strip()},
+        source_system=str(source.get("system") or ""),
+        source_id=str(source.get("source_id") or ""),
+    )
 
     return record
 

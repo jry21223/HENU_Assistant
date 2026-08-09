@@ -4,6 +4,8 @@
 
 面向 **Agent Skill / 本地 CLI** 的校园助手。能力与 MCP 服务器版对齐。
 
+当前版本：**2.1.0**。CLI 通过 `henu_mcp.api` 调用共享业务能力，不依赖导入 MCP server adapter。
+
 其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`langbot-plugin`](https://github.com/jry21223/HENU_Assistant/tree/langbot-plugin)
 
 > **命令方言**：本形态使用 `schedule_query` / `library_query` / `--student_id`。  
@@ -20,9 +22,18 @@ git clone -b agent-skill https://github.com/jry21223/HENU_Assistant.git henu_cam
 cd henu_campus_assistant
 
 python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
+LOCK_FILE="$(python3 scripts/select_lockfile.py --check)"
+HENU_PYPI_INDEX_URL="${HENU_PYPI_INDEX_URL:-https://pypi.org/simple}"
+PIP_CONFIG_FILE=/dev/null PIP_INDEX_URL="$HENU_PYPI_INDEX_URL" PIP_EXTRA_INDEX_URL= \
+  .venv/bin/python -m pip install --require-hashes -r "$LOCK_FILE"
 ```
+
+`requirements.txt` 固定声明 `mcp==2.0.0`；selector 在 POSIX（macOS/Linux）
+选择 `requirements-lock/py3xx.txt`，冻结并校验当前 Python minor 的全部传递
+依赖。CI 在 Linux runner 上对 Python 3.10–3.14 分别执行 hash 安装、
+`pip check`、`compileall` 和完整 pytest。Windows 不在 2.1.0 发布与验收范围内。
+默认使用官方 PyPI 并忽略用户级额外索引；如使用已完整同步的可信镜像，
+可显式设置 `HENU_PYPI_INDEX_URL`。
 
 可选：拷贝到常见 skill 目录（按你实际使用的 Agent 选择其一）：
 
@@ -40,7 +51,7 @@ Ubuntu/Debian 若 *externally managed environment*：
 sudo apt install -y python3-venv
 ```
 
-> 不要用系统级 `pip3 install -r requirements.txt`。
+> 不要把依赖安装到系统 Python；始终使用独立虚拟环境和匹配的 hash lock。
 
 Agent 侧执行约定见 [`SKILL.md`](./SKILL.md)：先定位含 `henu_cli.py` 的 skill 根目录，再：
 
@@ -138,8 +149,8 @@ cd "<SKILL_DIR>" && .venv/bin/python henu_cli.py <command> [args]
 ## 目录
 
 ```text
-henu_cli.py      # CLI
-mcp_server.py    # 薄门面
+henu_cli.py      # CLI（调用 henu_mcp.api）
+mcp_server.py    # MCP adapter；CLI 不导入它
 SKILL.md         # Agent 引导（路径可移植 + 决策树）
 henu_mcp/
 campus_core/

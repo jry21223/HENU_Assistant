@@ -41,8 +41,11 @@ Thumbs.db
 *.json
 !campus_core/config/
 !campus_core/config/*.json
+!tests/fixtures/
+!tests/fixtures/*.json
 output/
 logs/
+.henu-runtime-state.lock
 
 # Sensitive data
 henu_cookies.json

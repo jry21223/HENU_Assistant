@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 HENU Campus Skill API Wrapper.
-Expose the same functional surface as mcp_server.py for CLI/Skill usage.
+Expose the shared campus API surface for CLI/Skill usage.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from mcp_server import (  # noqa: E402
+from henu_mcp.api import (  # noqa: E402
     course_monitor_config,
     course_monitor_notify_test,
     course_monitor_once,

@@ -1,0 +1,85 @@
+name: Agent Skill CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PIP_CONFIG_FILE: /dev/null
+  PIP_INDEX_URL: https://pypi.org/simple
+  PIP_EXTRA_INDEX_URL: ""
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Select frozen lock
+        id: lock
+        run: echo "path=$(python scripts/select_lockfile.py --check)" >> "$GITHUB_OUTPUT"
+
+      - name: Fresh install hash-verified requirements
+        run: python -m pip install --require-hashes -r "${{ steps.lock.outputs.path }}"
+
+      - name: Check installed dependencies
+        run: python -m pip check
+
+      - name: Audit the frozen application lock
+        run: |
+          python -m venv .audit-venv
+          .audit-venv/bin/python -m pip install pip-audit==2.10.1
+          .audit-venv/bin/python -m pip_audit --progress-spinner off --disable-pip --no-deps -r "${{ steps.lock.outputs.path }}"
+
+      - name: Compile Python sources
+        run: python -m compileall -q henu_cli.py mcp_server.py henu_mcp campus_core scripts tests
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+      - name: Run complete Agent CLI smoke
+        run: python scripts/cli_smoke.py
+
+      - name: Smoke CLI help
+        run: python henu_cli.py --help
+
+      - name: Smoke CLI status without credentials
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          assert not Path("henu_profile.json").exists()
+          completed = subprocess.run(
+              [sys.executable, "henu_cli.py", "system_status"],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          print(completed.stdout)
+          payload = json.loads(completed.stdout)
+          assert payload["success"] is True
+          account = payload["account"]["account"]
+          assert account["has_password"] is False
+          PY

@@ -7,6 +7,8 @@ description: 河南大学校园助手本地 CLI Skill。用于课表查询/同�
 
 面向 Agent Skill 的本地 Skill：用 **本 skill 目录内** 的 `henu_cli.py` 调用校园能力。
 
+当前版本：**2.1.0**。CLI 通过 `henu_mcp.api` 调用共享业务能力；帮助、参数解析和本地状态命令不依赖导入 MCP server adapter。
+
 ## 命令方言（必读）
 
 | 形态 | 示例 |
@@ -34,15 +36,32 @@ description: 河南大学校园助手本地 CLI Skill。用于课表查询/同�
 
 ```bash
 cd "$SKILL_DIR"
-if [ ! -x .venv/bin/python ]; then
-  python3 -m venv .venv
-  .venv/bin/python -m pip install --upgrade pip
-  .venv/bin/pip install -r requirements.txt
+SYSTEM_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+VENV_MINOR=""
+if [ -x .venv/bin/python ]; then
+  VENV_MINOR="$(.venv/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 fi
+if [ "$VENV_MINOR" != "$SYSTEM_MINOR" ]; then
+  python3 -m venv --clear .venv
+fi
+LOCK_FILE="$(.venv/bin/python scripts/select_lockfile.py --check)"
+HENU_PYPI_INDEX_URL="${HENU_PYPI_INDEX_URL:-https://pypi.org/simple}"
+PIP_CONFIG_FILE=/dev/null PIP_INDEX_URL="$HENU_PYPI_INDEX_URL" PIP_EXTRA_INDEX_URL= \
+  .venv/bin/python -m pip install --require-hashes -r "$LOCK_FILE"
+.venv/bin/python -m pip check
+.venv/bin/python -c 'from importlib.metadata import version; assert version("mcp") == "2.0.0"'
 ```
 
 Ubuntu/Debian 若 *externally managed environment*：`sudo apt install -y python3-venv`。  
-不要用系统级 `pip3 install -r requirements.txt`。
+不要把依赖安装到系统 Python；始终使用独立虚拟环境和匹配的 hash lock。
+
+本版本固定使用 `mcp==2.0.0`；始终以 `requirements-lock/py310.txt` 至
+`py314.txt` 中与当前解释器匹配的冻结文件创建环境，不要复用含其它 MCP 主版本的环境。
+冻结安装默认使用官方 PyPI 并忽略用户级额外索引；可信镜像只有在完整同步后才可通过
+`HENU_PYPI_INDEX_URL` 显式覆盖。
+
+本版仅支持并验收 POSIX（macOS/Linux）上的 Python 3.10–3.14；Windows 不在 2.1.0
+支持范围内，不得把 POSIX lock 当作 Windows 安装证明。
 
 执行模板（始终用 venv 解释器）：
 

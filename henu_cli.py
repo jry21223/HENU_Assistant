@@ -6,13 +6,8 @@ HENU Campus Assistant CLI for Agent Skill.
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-from henu_mcp.core.response_contract import sanitize_public_result
-
-sys.path.insert(0, str(Path(__file__).parent / "scripts"))
-from henu_campus_mcp import (  # noqa: E402
+from henu_mcp.api import (
     course_monitor_config,
     course_monitor_notify_test,
     course_monitor_once,
@@ -35,6 +30,7 @@ from henu_campus_mcp import (  # noqa: E402
     seminar_reserve,
     seminar_signin,
     set_calibration_source,
+    smart_course_selection,
     setup_account,
     sync_schedule,
     system_status,
@@ -44,6 +40,7 @@ from henu_campus_mcp import (  # noqa: E402
     yunfz_leave_query,
     yunfz_signin_query,
 )
+from henu_mcp.core.response_contract import sanitize_public_result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -322,8 +319,6 @@ def main() -> None:
                 auto_calibrate=not args.no_auto_calibrate,
             )
         elif args.command in {"smart_course_selection", "smart_course_select"}:
-            from mcp_server import smart_course_selection
-
             result = smart_course_selection(
                 source_path=args.source_path,
                 excel_path=args.excel_path,

@@ -1,0 +1,1138 @@
+{
+  "generated_from": {
+    "git_sha": "20431d6b1c0f4dfff0186ea50a9db89e2e350ade",
+    "mcp_sdk": "1.29.0"
+  },
+  "normalization": {
+    "description": "inspect.cleandoc",
+    "schema": "recursive title removal; all other keys and list order preserved"
+  },
+  "tools": [
+    {
+      "name": "smart_course_selection",
+      "description": "智能选课结构化规划工具。\n\n从教务导出的 Excel 或清洗后的 JSON 中筛选：\n1) 班级对应专业课\n2) 专业选课班 / 专业公共课\n3) 全年级公共课\n\n输出统一遵循 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions`\n是后续自动选课提交器的输入契约；本工具只做 dry-run 规划，不提交教务系统。",
+      "input_schema": {
+        "properties": {
+          "source_path": {
+            "default": "",
+            "type": "string"
+          },
+          "excel_path": {
+            "default": "",
+            "type": "string"
+          },
+          "json_path": {
+            "default": "",
+            "type": "string"
+          },
+          "user_class": {
+            "default": "",
+            "type": "string"
+          },
+          "sheet_name": {
+            "default": "2026-2027-1学期",
+            "type": "string"
+          },
+          "semester": {
+            "default": "",
+            "type": "string"
+          },
+          "mode": {
+            "default": "plan",
+            "type": "string"
+          },
+          "like_early8": {
+            "default": false,
+            "type": "boolean"
+          },
+          "avoid_early8": {
+            "default": false,
+            "type": "boolean"
+          },
+          "compact_days": {
+            "default": false,
+            "type": "boolean"
+          },
+          "target_days": {
+            "default": 3,
+            "type": "integer"
+          },
+          "avoid_evening": {
+            "default": false,
+            "type": "boolean"
+          },
+          "allow_unscheduled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "include_common": {
+            "default": true,
+            "type": "boolean"
+          },
+          "include_course_options": {
+            "default": false,
+            "type": "boolean"
+          },
+          "top_k": {
+            "default": 3,
+            "type": "integer"
+          },
+          "max_combinations": {
+            "default": 200000,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "smart_course_select",
+      "description": "兼容旧命名的智能选课入口。新接入建议使用 smart_course_selection。",
+      "input_schema": {
+        "properties": {
+          "excel_path": {
+            "type": "string"
+          },
+          "user_class": {
+            "type": "string"
+          },
+          "sheet_name": {
+            "default": "2026-2027-1学期",
+            "type": "string"
+          },
+          "semester": {
+            "default": "",
+            "type": "string"
+          },
+          "like_early8": {
+            "default": false,
+            "type": "boolean"
+          },
+          "avoid_early8": {
+            "default": false,
+            "type": "boolean"
+          },
+          "compact_days": {
+            "default": false,
+            "type": "boolean"
+          },
+          "target_days": {
+            "default": 3,
+            "type": "integer"
+          },
+          "avoid_evening": {
+            "default": false,
+            "type": "boolean"
+          },
+          "allow_unscheduled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "top_k": {
+            "default": 3,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "excel_path",
+          "user_class"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "setup_account",
+      "description": "【必须调用】初始化河大账号 - 这是使用其他功能的前提\n\n【执行协议（必须遵守）】\n1) 在给用户任何\"已完成/已成功\"结论前，必须先真实调用本工具并等待返回。\n2) 回复时必须基于本次返回中的 success/msg/account 字段，不得凭空补全。\n3) 若调用失败或未调用，必须明确说明未完成，禁止使用完成时态描述结果。\n\n功能：\n1) 保存学号和密码到本地\n2) 验证登录河大教务系统\n3) 自动校准节次时间\n\n重要：不要编造账号信息，必须使用用户提供的真实学号和密码调用此工具。",
+      "input_schema": {
+        "properties": {
+          "student_id": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "library_location": {
+            "default": "",
+            "type": "string"
+          },
+          "library_seat_no": {
+            "default": "",
+            "type": "string"
+          },
+          "verify_login": {
+            "default": true,
+            "type": "boolean"
+          },
+          "calibrate_period_time": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "student_id",
+          "password"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "sync_schedule",
+      "description": "【必须调用】同步课表 - 从教务系统获取真实课表数据\n\n【执行协议（必须遵守）】\n1) 禁止直接口述\"已同步课表\"，必须先调用此工具。\n2) 回复中必须转述本次返回的 success/msg 与关键文件字段。\n3) 如果工具失败，必须如实返回失败原因，不得伪造课表内容。\n\n功能：从河大教务系统抓取课表并生成结构化数据\n\n重要：不要编造课表信息，必须调用此工具获取真实数据。\n课表数据包含：课程名称、教师、时间、地点等详细信息。",
+      "input_schema": {
+        "properties": {
+          "xn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "xq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "auto_calibrate": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "library_query",
+      "description": "统一查询图书馆信息。\n\nview:\n- locations: 图书馆区域列表（可传 target_date 获取指定日期实时可预约区域）\n- seats: 当前可用座位列表（需传 location 或 area_id，可传 target_date/preferred_time）\n- current: 当前预约\n- records: 历史预约记录\n\n规则：\n1) 查询 `current` 或 `records` 前必须先调用 `system_status` 确认当前日期时间。\n2) 预约前应先查询 `locations`，不得凭记忆列举区域。\n3) 回复仅可基于本次返回结果，不得编造。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "current",
+            "type": "string"
+          },
+          "record_type": {
+            "default": "1",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          },
+          "target_date": {
+            "default": "",
+            "type": "string"
+          },
+          "location": {
+            "default": "",
+            "type": "string"
+          },
+          "area_id": {
+            "default": "",
+            "type": "string"
+          },
+          "preferred_time": {
+            "default": "08:00",
+            "type": "string"
+          },
+          "preferred_end_time": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "library_reserve",
+      "description": "【必须调用】预约图书馆座位 - 执行真实的座位预约操作\n\n【执行协议（必须遵守）】\n1) 禁止在未调用工具时说\"已预约成功/已帮你预约\"。\n2) 回复必须包含本次返回的 success/msg/date（以及 applied_time 如有）。\n3) 调用失败时必须原样转述失败原因，不得改写为成功。\n\n功能：向图书馆系统提交座位预约请求\n参数：\n- location: 图书馆区域名称（如\"一楼东\"）\n- seat_no: 座位号（如\"001\"）\n- resource_id: 资源ID（如 henu:library:seat:...），优先级高于 location/seat_no\n- target_date: 预约日期（格式：YYYY-MM-DD，默认明天）\n- preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）\n- preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）\n- retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）\n- retry_interval_seconds: 抢约重试间隔秒数（1-60）\n- max_attempts: 最大尝试次数（1-120）\n\n⚠️ 严禁编造预约结果！\n- 不要说\"预约成功\"除非此工具返回 success: true\n- 不要假装已经预约，必须实际调用此工具\n- 预约失败时必须如实告知用户失败原因\n- 只有工具返回的结果才是真实的预约状态",
+      "input_schema": {
+        "properties": {
+          "location": {
+            "default": "",
+            "type": "string"
+          },
+          "seat_no": {
+            "default": "",
+            "type": "string"
+          },
+          "target_date": {
+            "default": "",
+            "type": "string"
+          },
+          "preferred_time": {
+            "default": "08:00",
+            "type": "string"
+          },
+          "preferred_end_time": {
+            "default": "",
+            "type": "string"
+          },
+          "resource_id": {
+            "default": "",
+            "type": "string"
+          },
+          "retry_until": {
+            "default": "",
+            "type": "string"
+          },
+          "retry_interval_seconds": {
+            "default": 2,
+            "type": "integer"
+          },
+          "max_attempts": {
+            "default": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "library_auto_signin",
+      "description": "【必须调用】图书馆自动签到 - 对当前预约执行真实签到操作\n\n【执行协议（必须遵守）】\n1) 禁止在未调用本工具前说\"已签到\"。\n2) 回复时只可依据本次返回的 success/msg/sign_path/record 字段。\n3) 若没有可签到记录或签到失败，必须如实说明原因。\n\n功能：自动查找当前可签到的图书馆座位预约并执行签到。\n建议先通过 `library_query(view=\"current\")` 查看当前预约。\nrecord_id 留空时自动选择当前可签到记录；传入后只对指定记录尝试签到。",
+      "input_schema": {
+        "properties": {
+          "record_id": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "library_cancel",
+      "description": "【必须调用】取消图书馆预约 - 执行真实的取消操作\n\n【执行协议（必须遵守）】\n1) 禁止在未调用本工具前说\"已取消\"。\n2) 只可依据本次返回 success/msg 输出取消结果。\n3) 失败时必须明确为\"取消失败\"，并附原始原因。\n\n功能：向图书馆系统提交取消预约请求\nrecord_type 支持 auto 自动识别\n\n重要：不要假装取消成功，必须调用此工具执行真实的取消操作。",
+      "input_schema": {
+        "properties": {
+          "record_id": {
+            "type": "string"
+          },
+          "record_type": {
+            "default": "auto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_selection_query",
+      "description": "安全查询选课第一阶段状态。\n\n当前仅支持 view=status，只调用已知只读端点，不执行选课提交。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "status",
+            "type": "string"
+          },
+          "xktype": {
+            "default": "2",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_selection_plan",
+      "description": "根据候选课程 JSON 生成不冲突的选课计划。\n\n该工具只做本地规划，不读取或提交 HENU 选课接口。",
+      "input_schema": {
+        "properties": {
+          "candidates_json": {
+            "type": "string"
+          },
+          "existing_schedule_json": {
+            "default": "",
+            "type": "string"
+          },
+          "preferences_json": {
+            "default": "",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidates_json"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_selection_submit",
+      "description": "占位工具：当前版本不执行真实选课提交。",
+      "input_schema": {
+        "properties": {
+          "payload_json": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_monitor_config",
+      "description": "查看或保存选课余量监控配置。\n\n配置只保存课程目标、偏好和通知环境变量名，不保存教务账号或密码。",
+      "input_schema": {
+        "properties": {
+          "config_json": {
+            "default": "",
+            "type": "string"
+          },
+          "merge": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_monitor_once",
+      "description": "执行一次只读选课余量检查。\n\n检测到目标教学班余量变化时可发送飞书提醒；不会点击选课、提交或退选。",
+      "input_schema": {
+        "properties": {
+          "config_json": {
+            "default": "",
+            "type": "string"
+          },
+          "send_notifications": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_monitor_run",
+      "description": "按配置间隔运行选课余量监控。\n\n默认只检查一次；传入 max_checks 或 duration_seconds 可持续运行。间隔最低 60 秒。",
+      "input_schema": {
+        "properties": {
+          "config_json": {
+            "default": "",
+            "type": "string"
+          },
+          "max_checks": {
+            "default": 1,
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "default": 0,
+            "type": "integer"
+          },
+          "send_notifications": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "course_monitor_notify_test",
+      "description": "测试选课余量飞书通知。\n\n不访问教务系统，不执行选课提交。",
+      "input_schema": {
+        "properties": {
+          "config_json": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "seminar_group",
+      "description": "统一管理研讨室 group。\n\naction:\n- list: 查看已保存 group\n- save: 保存/覆盖 group\n- delete: 删除 group",
+      "input_schema": {
+        "properties": {
+          "action": {
+            "default": "list",
+            "type": "string"
+          },
+          "group_name": {
+            "default": "",
+            "type": "string"
+          },
+          "member_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "seminar_query",
+      "description": "统一查询研讨室信息。\n\nview:\n- filters: 筛选项\n- rooms: 可预约房间列表\n- detail: 房间详情和预约参数\n- records: 预约记录\n- signin_tasks: 自动签到任务\n\n规则：\n1) 查询 `records` 前必须先调用 `system_status` 确认当前日期时间。\n2) 预约前通常先按 `filters` -> `rooms` -> `detail` 逐步查询。\n3) `rooms` 返回中的 `date`/`available_slots` 表示可预约时段；`raw_occupied_date`/`occupied_slots` 表示已占用时段。\n4) 回复仅可基于本次返回结果，不得编造。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "rooms",
+            "type": "string"
+          },
+          "target_date": {
+            "default": "",
+            "type": "string"
+          },
+          "members": {
+            "default": 0,
+            "type": "integer"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "room": {
+            "default": "",
+            "type": "string"
+          },
+          "start_time": {
+            "default": "",
+            "type": "string"
+          },
+          "end_time": {
+            "default": "",
+            "type": "string"
+          },
+          "library_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "library_names": {
+            "default": "",
+            "type": "string"
+          },
+          "floor_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "floor_names": {
+            "default": "",
+            "type": "string"
+          },
+          "category_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "category_names": {
+            "default": "",
+            "type": "string"
+          },
+          "boutique_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "boutique_names": {
+            "default": "",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "area_id": {
+            "default": "",
+            "type": "string"
+          },
+          "record_type": {
+            "default": "1",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          },
+          "mode": {
+            "default": "books",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "seminar_signin",
+      "description": "对研讨室预约执行签到。\n\n- 传 `record_id` 时：对指定记录签到\n- 传 `auto_scan=true` 时：扫描所有已到点任务并自动签到\n\n建议先通过 `seminar_query(view=\"records\")` 或 `seminar_query(view=\"signin_tasks\")` 获取上下文。",
+      "input_schema": {
+        "properties": {
+          "record_id": {
+            "default": "",
+            "type": "string"
+          },
+          "auto_scan": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "seminar_cancel",
+      "description": "取消研讨室预约。\n\n功能：对指定研讨室预约记录执行真实取消。\n建议先通过 `seminar_query(view=\"records\")` 获取记录 id。",
+      "input_schema": {
+        "properties": {
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "seminar_reserve",
+      "description": "预约研讨室。\n\n重要规则：\n1) 申请内容 `content` 必须多于 10 个字。\n2) 实际总人数按\"当前账号 + group/member_ids 成员\"计算。\n3) 支持通过 `group_name` 使用已保存 group，也支持直接传 `member_ids`。\n4) 对于预设主题房间，需要传 `title_id`；普通房间传 `title`。\n5) `time_ranges_json` 可传 JSON 数组以支持多时间段，例如\n   `[{\"start_time\":\"09:00\",\"end_time\":\"11:00\"}]`\n6) `resource_id`（如 henu:seminar:room:...）优先级高于 area_id",
+      "input_schema": {
+        "properties": {
+          "area_id": {
+            "default": "",
+            "type": "string"
+          },
+          "target_date": {
+            "default": "",
+            "type": "string"
+          },
+          "start_time": {
+            "default": "",
+            "type": "string"
+          },
+          "end_time": {
+            "default": "",
+            "type": "string"
+          },
+          "end_date": {
+            "default": "",
+            "type": "string"
+          },
+          "title_id": {
+            "default": "",
+            "type": "string"
+          },
+          "content": {
+            "default": "",
+            "type": "string"
+          },
+          "mobile": {
+            "default": "",
+            "type": "string"
+          },
+          "group_name": {
+            "default": "",
+            "type": "string"
+          },
+          "member_ids": {
+            "default": "",
+            "type": "string"
+          },
+          "is_open": {
+            "default": 0,
+            "type": "integer"
+          },
+          "cate_id": {
+            "default": "",
+            "type": "string"
+          },
+          "time_ranges_json": {
+            "default": "",
+            "type": "string"
+          },
+          "resource_id": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "schedule_query",
+      "description": "统一查询课表信息。\n\nview:\n- current: 当前正在上的课 + 下一节课\n- day: 某一天的课表（按星期提取，不按教学周过滤）\n- week: 兼容旧客户端，返回未按教学周过滤的完整周课表\n- full: 最新完整课表\n\n参数：\n- target_date: 当 view=day 时使用，格式 YYYY-MM-DD；为空时默认今天\n\n规则：\n1) 禁止凭记忆输出课程信息，必须调用本工具。\n2) 回复仅可基于本次返回的课程数据。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "current",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "type": "string"
+          },
+          "target_date": {
+            "default": "",
+            "type": "string"
+          },
+          "auto_calibrate": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_calibration_source",
+      "description": "更新 xiqueer 校准源（抓包得到的 data/cookie）。",
+      "input_schema": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "cookie": {
+            "type": "string"
+          },
+          "user_agent": {
+            "default": "KingoPalm/2.6.449 (iPhone; iOS 26.3; Scale/3.00)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "cookie"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "system_status",
+      "description": "查看系统状态：账号、时间、节次配置、最近校准状态、输出文件。\n\n【执行协议（必须遵守）】\n1) 当用户提到\"现在/今天/明天/当前/待签到/是否过期\"等相对时间时，必须先调用本工具。\n2) 在查询图书馆或研讨室预约前，也必须先调用本工具确认当前日期时间。\n3) 回复中的时间判断只允许基于本次返回的 `server_time`。",
+      "input_schema": {
+        "properties": {
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "yunfz_leave_query",
+      "description": "查询河宝社区请假信息。\n\nview:\n- list: 请假记录列表\n- detail: 请假详情（需传 leave_id）\n- statistics: 任务统计\n\n规则：\n1) 查询前必须先调用 system_status 确认当前日期时间。\n2) 回复仅可基于本次返回结果，不得编造。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "list",
+            "type": "string"
+          },
+          "leave_id": {
+            "default": "",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "yunfz_signin_query",
+      "description": "查询河宝社区签到任务。\n\nview:\n- list: 签到任务列表\n- statistics: 任务统计\n\n规则：\n1) 查询前必须先调用 system_status 确认当前日期时间。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "list",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "yunfz_checksleep_query",
+      "description": "查询河宝社区查寝任务。\n\nview:\n- list: 查寝任务列表\n- statistics: 任务统计\n\n规则：\n1) 查询前必须先调用 system_status 确认当前日期时间。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "list",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "yunfz_activity_query",
+      "description": "查询河宝社区活动信息。\n\nview:\n- list: 活动列表\n- statistics: 任务统计\n\n规则：\n1) 查询前必须先调用 system_status 确认当前日期时间。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "list",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "yunfz_collection_query",
+      "description": "查询河宝社区信息收集任务。\n\nview:\n- list: 信息收集列表\n- statistics: 任务统计\n\n规则：\n1) 查询前必须先调用 system_status 确认当前日期时间。",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "list",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "empty_classroom_query",
+      "description": "查询空教室 / 教室信息 / 校区楼房列表\n\n数据来源：学校教务系统教室课表。仅反映学校系统中已登记的课程/占用信息，\n不包含未录入系统的临时占用。\n\nview 模式：\n- \"free\": 查询指定时间的空闲教室\n- \"day_matrix\": 查询某天所有大节的空闲教室矩阵\n- \"occupancy\": 查询单个教室某时间段的占用详情\n- \"terms\": 查询可用学期列表\n- \"campuses\": 查询校区列表\n- \"buildings\": 查询楼房列表（需 campus_code）\n- \"classrooms\": 查询教室列表\n- \"types\": 查询教室类型列表\n\n参数优先级（校区/楼房）：\n- campus_code/building_code 显式传入时优先\n- 否则使用 campus_text/building_text 通过资源 registry 解析\n- 解析失败时返回候选列表供用户选择\n\nfreshness 策略：\n- \"cache_first\"（默认）: 未过期用缓存，过期再刷新\n- \"live\": 每次请求都尝试刷新上游\n- \"stale_while_revalidate\": 先返回旧缓存，同时标记需要刷新\n- \"cache_only\": 只查缓存，不访问学校系统",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "free",
+            "type": "string"
+          },
+          "term_code": {
+            "default": "",
+            "type": "string"
+          },
+          "week": {
+            "default": 0,
+            "type": "integer"
+          },
+          "day_of_week": {
+            "default": 0,
+            "type": "integer"
+          },
+          "period": {
+            "default": 0,
+            "type": "integer"
+          },
+          "campus_code": {
+            "default": "",
+            "type": "string"
+          },
+          "building_code": {
+            "default": "",
+            "type": "string"
+          },
+          "campus_text": {
+            "default": "",
+            "type": "string"
+          },
+          "building_text": {
+            "default": "",
+            "type": "string"
+          },
+          "classroom_text": {
+            "default": "",
+            "type": "string"
+          },
+          "type_code": {
+            "default": "",
+            "type": "string"
+          },
+          "min_capacity": {
+            "default": 0,
+            "type": "integer"
+          },
+          "keyword": {
+            "default": "",
+            "type": "string"
+          },
+          "room_id": {
+            "default": "",
+            "type": "string"
+          },
+          "freshness": {
+            "default": "cache_first",
+            "type": "string"
+          },
+          "force_refresh": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "type": "integer"
+          },
+          "max_stale_seconds": {
+            "default": 86400,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "empty_classroom_sync",
+      "description": "同步指定楼房的教室课表缓存\n\n从学校教务系统拉取教室课表 HTML，解析后写入共享缓存。\n建议在查询空教室前先同步相关楼房数据。\n\n参数：\n- term_code: 学期代码，如 \"2025,1\"（必填）\n- campus_code: 校区代码，如 \"01\"（必填）\n- building_code: 楼房代码，如 \"0013\"（必填）\n- type_code: 教室类型代码，空表示全部\n- force_refresh: 是否强制刷新\n\n返回同步状态和统计信息。",
+      "input_schema": {
+        "properties": {
+          "term_code": {
+            "default": "",
+            "type": "string"
+          },
+          "campus_code": {
+            "default": "",
+            "type": "string"
+          },
+          "building_code": {
+            "default": "",
+            "type": "string"
+          },
+          "type_code": {
+            "default": "",
+            "type": "string"
+          },
+          "force_refresh": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "resource_registry_query",
+      "description": "查询全局资源编号映射\n\n统一查询教室、图书馆区域/座位、研讨室、楼房、校区等资源。\n支持通过校园自然语言（\"十号楼101\"、\"明伦十号楼\"、\"研讨室A203\"）搜索。\n\nview 模式：\n- \"search\": 按关键词搜索资源\n- \"resolve\": 自然语言解析，返回候选项及匹配分数\n- \"list\": 列出资源（可筛选类型/校区/楼房）\n- \"stats\": 查看 registry 统计信息",
+      "input_schema": {
+        "properties": {
+          "view": {
+            "default": "search",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "type": "string"
+          },
+          "resource_type": {
+            "default": "",
+            "type": "string"
+          },
+          "campus_code": {
+            "default": "",
+            "type": "string"
+          },
+          "building_code": {
+            "default": "",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    {
+      "name": "resource_registry_sync",
+      "description": "同步资源到全局编号映射\n\n将上游系统（教务、图书馆、研讨室）的资源数据同步到 registry。\n同步后的数据存入 data/shared/resource_registry/。\n\n参数：\n- scope: \"classrooms\" | \"library\" | \"seminar\" | \"all\"\n- force_refresh: 是否强制重新拉取上游数据",
+      "input_schema": {
+        "properties": {
+          "scope": {
+            "default": "all",
+            "type": "string"
+          },
+          "force_refresh": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  ]
+}
