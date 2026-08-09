@@ -1,8 +1,7 @@
 requests
 pycryptodome
-mcp
+mcp==2.0.0
 lxml
-tzdata; platform_system=='Windows'
 backports.zoneinfo; python_version<'3.9'
 cryptography>=41.0.0
 pandas>=2.0.0

@@ -1,8 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # 河大校园助手 MCP 服务器 - 虚拟环境安装脚本
 
-set -e
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
 
 echo "🚀 河大校园助手 MCP 服务器安装"
 echo ""
@@ -16,28 +19,33 @@ if ! command -v python3 &> /dev/null; then
 fi
 echo "✅ Python3 已安装"
 
+LOCK_FILE="$(python3 scripts/select_lockfile.py --check)"
+HENU_PYPI_INDEX_URL="${HENU_PYPI_INDEX_URL:-https://pypi.org/simple}"
+echo "✅ 使用冻结依赖: ${LOCK_FILE#$PROJECT_ROOT/}"
+
 # 2. 创建虚拟环境
 echo ""
 echo "2️⃣ 创建虚拟环境..."
-if [ -d "venv" ]; then
-    rm -rf venv
-    echo "   删除旧环境"
+if [ -L "venv" ]; then
+    echo "❌ 拒绝清理符号链接 venv，请人工确认后移除"
+    exit 1
 fi
-python3 -m venv venv
+python3 -m venv --clear venv
 echo "✅ 虚拟环境创建完成"
 
 # 3. 激活并安装依赖
 echo ""
 echo "3️⃣ 安装依赖包..."
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+PIP_CONFIG_FILE=/dev/null \
+PIP_INDEX_URL="$HENU_PYPI_INDEX_URL" \
+PIP_EXTRA_INDEX_URL= \
+venv/bin/python -m pip install --require-hashes -r "$LOCK_FILE"
 echo "✅ 依赖安装完成"
 
 # 4. 验证安装
 echo ""
 echo "4️⃣ 验证安装..."
-python3 diagnose_mcp.py
+venv/bin/python diagnose_mcp.py
 
 echo ""
 echo "🎉 安装成功！"

@@ -1,0 +1,2 @@
+# Test-only legacy client. The application runtime remains MCP SDK 2.0 only.
+mcp==1.29.0

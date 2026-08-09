@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import tempfile
 import threading
@@ -47,7 +48,6 @@ from campus_core.empty_classroom.lock import FileLock, lock_path_for
 from campus_core.empty_classroom.storage import (
     _sanitize,
     compute_query_hash,
-    get_locks_dir,
     save_parsed_schedule,
     load_parsed_schedule,
     save_query_cache,
@@ -65,6 +65,17 @@ def _temp_cache_dir():
     """创建临时缓存目录并 mock 路径。"""
     tmp = tempfile.mkdtemp(prefix="henu_test_")
     return Path(tmp)
+
+
+def _hold_file_lock(lock_path: str, ready, release, crash: bool) -> None:
+    lock = FileLock(Path(lock_path), timeout=2.0, stale_after=0.05)
+    if not lock.acquire():
+        os._exit(2)
+    ready.set()
+    if crash:
+        os._exit(0)
+    release.wait(5)
+    lock.release()
 
 
 # ── Models 测试 ─────────────────────────────────────────────
@@ -347,14 +358,14 @@ class TestFileLock:
         assert lock.acquire() is True
         assert lock_path.exists()
         lock.release()
-        assert not lock_path.exists()
+        assert lock_path.exists()
 
     def test_context_manager(self, tmp_path):
         lock_path = tmp_path / "test.lock"
         with FileLock(lock_path, timeout=1.0) as acquired:
             assert acquired is True
             assert lock_path.exists()
-        assert not lock_path.exists()
+        assert lock_path.exists()
 
     def test_concurrent_lock_blocks(self, tmp_path):
         lock_path = tmp_path / "test.lock"
@@ -400,20 +411,57 @@ class TestFileLock:
         assert "2025_1_01_0013" in str(path)
         assert str(path).endswith(".lock")
 
-    def test_stale_lock_break(self, tmp_path):
-        """僵尸锁（超过 60 秒）应该被打破。"""
+    def test_existing_unlocked_lock_file_does_not_block(self, tmp_path):
         lock_path = tmp_path / "stale.lock"
-        # 手动创建旧锁文件
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("12345")
-        # 设置 mtime 为 61 秒前
         stale_time = time.time() - 61
         os.utime(str(lock_path), (stale_time, stale_time))
 
         lock = FileLock(lock_path, timeout=0.5)
         assert lock.acquire() is True
         lock.release()
-        assert not lock_path.exists()
+        assert lock_path.exists()
+
+    def test_crashed_owner_is_released_by_the_kernel(self, tmp_path):
+        context = multiprocessing.get_context("spawn")
+        ready = context.Event()
+        release = context.Event()
+        process = context.Process(
+            target=_hold_file_lock,
+            args=(str(tmp_path / "crash.lock"), ready, release, True),
+        )
+        process.start()
+        assert ready.wait(5)
+        process.join(5)
+        assert process.exitcode == 0
+
+        recovered = FileLock(tmp_path / "crash.lock", timeout=0.5)
+        assert recovered.acquire() is True
+        recovered.release()
+
+    def test_live_owner_is_never_stolen_by_elapsed_time(self, tmp_path):
+        context = multiprocessing.get_context("spawn")
+        ready = context.Event()
+        release = context.Event()
+        lock_path = tmp_path / "live.lock"
+        process = context.Process(
+            target=_hold_file_lock,
+            args=(str(lock_path), ready, release, False),
+        )
+        process.start()
+        assert ready.wait(5)
+        time.sleep(0.1)
+
+        contender = FileLock(lock_path, timeout=0.15, stale_after=0.05)
+        assert contender.acquire() is False
+        contender.release()
+        still_blocked = FileLock(lock_path, timeout=0.15)
+        assert still_blocked.acquire() is False
+
+        release.set()
+        process.join(5)
+        assert process.exitcode == 0
 
 
 # ── 缓存存储测试 ────────────────────────────────────────────

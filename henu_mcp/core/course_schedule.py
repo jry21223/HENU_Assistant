@@ -6,12 +6,12 @@ import json
 import math
 import random
 import re
-import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
+import campus_core.atomic_io as atomic_io
 
 from henu_mcp.core.cas_session import (
     CAS_COOKIE_NAMES,
@@ -25,7 +25,6 @@ from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
 from henu_mcp.core.secure_storage import (
     load_encrypted_profile,
     save_encrypted_profile,
-    decrypt_value,
 )
 
 # Windows 时区支持
@@ -63,7 +62,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def save_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_io.atomic_write_json(path, data)
 
 
 class HenuXkClient:
@@ -254,7 +253,7 @@ class HenuXkClient:
     def _login_via_ids(self) -> AuthResult:
         cas_auth_url = self._cas_auth_url()
         try:
-            response = self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
+            self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
             if self._check_logged_in():
                 return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
         except Exception as exc:
