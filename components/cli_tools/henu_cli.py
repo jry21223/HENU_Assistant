@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
+import time
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
-from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import (
     WRITE_TOOL_NAMES,
     create_pending_operation,
@@ -13,10 +15,19 @@ from henu_plugin.confirmation import (
     split_confirm_token,
     validate_pending_operation,
 )
+from henu_plugin.service import _await_cancellation_safe
 
 
 class HenuCli(BaseHenuTool):
     tool_name = "henu_cli"
+    _confirmation_locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+    @classmethod
+    def _confirmation_lock(cls, storage_key: str) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
+        return cls._confirmation_locks.setdefault(
+            (loop_id, storage_key), asyncio.Lock()
+        )
 
     def should_preload_runtime_context(self, params):
         command = params.get("command") if isinstance(params, dict) else ""
@@ -137,6 +148,24 @@ class HenuCli(BaseHenuTool):
         parameter_summary: str,
         query_id: int,
     ) -> dict[str, Any]:
+        async with self._confirmation_lock(storage_key):
+            return await self._request_confirmation_unlocked(
+                storage_key=storage_key,
+                canonical_command=canonical_command,
+                action=action,
+                parameter_summary=parameter_summary,
+                query_id=query_id,
+            )
+
+    async def _request_confirmation_unlocked(
+        self,
+        *,
+        storage_key: str,
+        canonical_command: str,
+        action: str,
+        parameter_summary: str,
+        query_id: int,
+    ) -> dict[str, Any]:
         pending = create_pending_operation(
             storage_key=storage_key,
             canonical_command=canonical_command,
@@ -189,15 +218,12 @@ class HenuCli(BaseHenuTool):
             return {"success": False, "msg": f"确认命令解析失败: {exc}"}
         if len(argv) != 2 or argv[0].lower() not in {"confirm", "确认"}:
             return {"success": False, "msg": "确认命令格式为 `confirm <token>`。"}
-        pending = await self._load_pending(storage_key)
-        canonical_command = str(pending.get("command") or "") if isinstance(pending, dict) else ""
         return await self._execute_pending(
             token=argv[1],
             storage_key=storage_key,
-            canonical_command=canonical_command,
+            canonical_command="",
             session=session,
             query_id=query_id,
-            pending=pending,
         )
 
     async def _execute_pending(
@@ -208,47 +234,117 @@ class HenuCli(BaseHenuTool):
         canonical_command: str,
         session,
         query_id: int,
-        pending: Any = None,
     ) -> dict[str, Any]:
-        if pending is None:
+        async with self._confirmation_lock(storage_key):
             pending = await self._load_pending(storage_key)
-        check = validate_pending_operation(
-            pending,
-            token=token,
-            storage_key=storage_key,
-            canonical_command=canonical_command,
-            query_id=query_id,
-        )
-        if not check.ok:
-            return {
-                "success": False,
-                "error_code": "confirmation_invalid",
-                "msg": check.message,
-                "retry_safe": True,
-            }
+            command = canonical_command or (
+                str(pending.get("command") or "")
+                if isinstance(pending, dict)
+                else ""
+            )
+            check = validate_pending_operation(
+                pending,
+                token=token,
+                storage_key=storage_key,
+                canonical_command=command,
+                query_id=query_id,
+            )
+            if not check.ok:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_invalid",
+                    "msg": check.message,
+                    "retry_safe": True,
+                }
 
-        spec = inspect_cli_command(canonical_command)
-        if spec.resolved_tool not in WRITE_TOOL_NAMES:
-            return {
-                "success": False,
-                "error_code": "confirmation_scope_invalid",
-                "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
-            }
+            spec = inspect_cli_command(command)
+            if spec.resolved_tool not in WRITE_TOOL_NAMES:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_scope_invalid",
+                    "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
+                }
 
-        result = await super().call({"command": canonical_command}, session, query_id)
-        result = self._mark_storage_commit_state(result)
-        if isinstance(result, dict) and (
-            result.get("success") or result.get("external_committed")
-        ):
             try:
-                await self.plugin.set_plugin_storage(
-                    pending_storage_key(storage_key), b"{}"
+                await self._store_confirmation_receipt(
+                    storage_key=storage_key,
+                    pending=pending,
+                    query_id=query_id,
+                    status="executing",
                 )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_storage_failed",
+                    "msg": f"占用确认令牌失败，外部操作未执行: {exc}",
+                    "retry_safe": True,
+                }
+
+            try:
+                result = await super().call({"command": command}, session, query_id)
+            except BaseException:
+                try:
+                    await self._store_confirmation_receipt(
+                        storage_key=storage_key,
+                        pending=pending,
+                        query_id=query_id,
+                        status="uncertain",
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # The durable pre-execution receipt already consumes the
+                    # token, so a cleanup failure cannot make it replayable.
+                    pass
+                raise
+
+            result = self._mark_storage_commit_state(result)
+            committed = isinstance(result, dict) and bool(
+                result.get("success") or result.get("external_committed")
+            )
+            try:
+                await self._store_confirmation_receipt(
+                    storage_key=storage_key,
+                    pending=pending,
+                    query_id=query_id,
+                    status="committed" if committed else "failed",
+                )
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                # The Tool result already distinguishes an external commit from
-                # local persistence. Do not mask a completed campus operation.
-                result.setdefault("confirmation_cleanup_failed", True)
-        return result
+                # The executing receipt already blocks replay. Preserve the
+                # business result but make the persistence uncertainty visible.
+                if isinstance(result, dict):
+                    result.setdefault("confirmation_cleanup_failed", True)
+                    result["retry_safe"] = False
+            return result
+
+    async def _store_confirmation_receipt(
+        self,
+        *,
+        storage_key: str,
+        pending: Any,
+        query_id: int,
+        status: str,
+    ) -> None:
+        source = pending if isinstance(pending, dict) else {}
+        receipt = {
+            "schema": "henu.confirmation-receipt.v1",
+            "status": status,
+            "fingerprint": str(source.get("fingerprint") or ""),
+            "command": str(source.get("command") or ""),
+            "created_query_id": source.get("created_query_id"),
+            "consumed_query_id": int(query_id),
+            "updated_at": time.time(),
+        }
+        await _await_cancellation_safe(
+            self.plugin.set_plugin_storage(
+                pending_storage_key(storage_key),
+                json.dumps(receipt, ensure_ascii=False).encode("utf-8"),
+            )
+        )
 
     async def _load_pending(self, storage_key: str) -> dict[str, Any]:
         try:
@@ -274,8 +370,24 @@ class HenuCli(BaseHenuTool):
     def _validate_identity(session, identity_hint: dict[str, Any]) -> str:
         launcher_type = getattr(getattr(session, "launcher_type", ""), "value", getattr(session, "launcher_type", ""))
         launcher_type = str(launcher_type or "").lower()
-        sender_id = str(identity_hint.get("sender_id") or getattr(session, "sender_id", "") or "").strip()
-        launcher_id = str(identity_hint.get("launcher_id") or getattr(session, "launcher_id", "") or "").strip()
+        sender_id = str(getattr(session, "sender_id", "") or "").strip()
+        launcher_id = str(getattr(session, "launcher_id", "") or "").strip()
+        trusted = {
+            "sender_id": sender_id,
+            "launcher_id": launcher_id,
+            "launcher_type": launcher_type,
+        }
+        for field, trusted_value in trusted.items():
+            hinted_value = identity_hint.get(field)
+            if hinted_value in (None, ""):
+                continue
+            normalized_hint = str(
+                getattr(hinted_value, "value", hinted_value) or ""
+            ).strip()
+            if field == "launcher_type":
+                normalized_hint = normalized_hint.lower()
+            if normalized_hint != trusted_value:
+                return "调用身份与请求上下文不一致，已拒绝访问任何个人数据。"
         if launcher_type == "group" and sender_id in {"", "0", "None", "none"}:
             return "群聊缺少发送者身份，已拒绝访问任何个人账号或预约数据。"
         if sender_id in {"", "0", "None", "none"} and launcher_id in {"", "0", "None", "none"}:

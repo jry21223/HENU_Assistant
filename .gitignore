@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -25,6 +26,7 @@ MANIFEST
 # Virtual environments
 venv/
 .venv/
+.lbp-build-venv/
 env/
 ENV/
 
@@ -41,20 +43,32 @@ Thumbs.db
 
 # Project specific
 .worktrees/
-*.json
-!campus_core/config/
-!campus_core/config/*.json
+# lbp 0.1.2 does not implement gitignore `!` negation. Keep tracked static
+# resources under campus_core/config packageable and ignore runtime JSON by name.
 output/
 logs/
 data/
 .tmp_inspect/
-.env
+.env*
 build_out/
 *.lbpkg
+.henu-runtime-state.lock
 
 # Sensitive data
+cas_cookies.json
+course_monitor_config.json
+course_monitor_state.json
 henu_cookies.json
 henu_library_cookies.json
 henu_profile.json
-period_time_*.json
-xiqueer_*.json
+henu_cas_cookies.json
+henu_yunfz_token.json
+library_cookies.json
+profile.json
+schedule_clean_latest.json
+seminar_signin_tasks.json
+period_time_config.json
+period_time_calibration_state.json
+xk_cookies.json
+xiqueer_period_time_request.json
+yunfz_token.json

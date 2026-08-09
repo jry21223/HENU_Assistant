@@ -4,31 +4,99 @@ on:
   pull_request:
     branches:
       - langbot-plugin
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      mcp_server_sha:
+        description: "Released mcp-server branch head (40-character SHA)"
+        required: true
+        type: string
+      agent_skill_sha:
+        description: "Released agent-skill branch head (40-character SHA)"
+        required: true
+        type: string
+      langbot_plugin_sha:
+        description: "Tagged langbot-plugin branch head (40-character SHA)"
+        required: true
+        type: string
+      read_only_smoke_evidence:
+        description: "HTTPS URL for the credential-free real-account read-only smoke record"
+        required: true
+        type: string
+      mcp_server_ci_run_url:
+        description: "Successful CI Actions run URL whose head SHA is mcp_server_sha"
+        required: true
+        type: string
+      agent_skill_ci_run_url:
+        description: "Successful Agent Skill CI run URL whose head SHA is agent_skill_sha"
+        required: true
+        type: string
+      langbot_plugin_ci_run_url:
+        description: "Successful LangBot Python matrix run URL whose head SHA is langbot_plugin_sha"
+        required: true
+        type: string
+      mcp_server_released:
+        description: "Confirm mcp-server was released and verified first"
+        required: true
+        default: false
+        type: boolean
+      agent_skill_released:
+        description: "Confirm agent-skill was released and verified second"
+        required: true
+        default: false
+        type: boolean
+      langbot_runtime_context_verified:
+        description: "Confirm the target LangBot host injected trusted session/query_id through the real Tool handler"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  PIP_CONFIG_FILE: /dev/null
+  PIP_INDEX_URL: https://pypi.org/simple
+  PIP_EXTRA_INDEX_URL: ""
 
 jobs:
-  validate-build-release:
+  validate-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: requirements-lock/py313.txt
 
-      - name: Install dependencies
+      - name: Select frozen lock
+        id: lock
+        run: echo "path=$(python scripts/select_lockfile.py --check)" >> "$GITHUB_OUTPUT"
+
+      - name: Install hash-verified dependencies
+        run: python -m pip install --require-hashes -r "${{ steps.lock.outputs.path }}"
+
+      - name: Install isolated hash-verified lbp builder
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install lbp pytest
+          python -m venv .lbp-build-venv
+          .lbp-build-venv/bin/python -m pip install --require-hashes -r requirements-lock/lbp-py313.txt
+          test "$(.lbp-build-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("lbp"))')" = "0.1.2"
+
+      - name: Check dependency consistency
+        run: python -m pip check
+
+      - name: Audit the frozen application lock
+        run: |
+          python -m venv .audit-venv
+          .audit-venv/bin/python -m pip install pip-audit==2.10.1
+          .audit-venv/bin/python -m pip_audit --progress-spinner off --disable-pip --no-deps -r "${{ steps.lock.outputs.path }}"
+          .audit-venv/bin/python -m pip_audit --progress-spinner off --disable-pip --no-deps -r requirements-lock/lbp-py313.txt
 
       - name: Compile plugin
         run: python -m compileall -q components henu_plugin henu_mcp campus_core main.py mcp_server.py
@@ -37,25 +105,138 @@ jobs:
         run: python -m pytest -q
 
       - name: Build lbp package
-        run: lbp build
+        run: python scripts/build_plugin.py
 
-      - name: Verify manifest and tag version
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Fetch the three release branch heads
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
+          git fetch --no-tags origin \
+            +refs/heads/mcp-server:refs/remotes/origin/mcp-server \
+            +refs/heads/agent-skill:refs/remotes/origin/agent-skill \
+            +refs/heads/langbot-plugin:refs/remotes/origin/langbot-plugin
 
-          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-          text = Path("manifest.yaml").read_text(encoding="utf-8")
-          match = re.search(r"^\s*version:\s*([^\s]+)\s*$", text, re.MULTILINE)
-          if not match or match.group(1) != tag:
-              raise SystemExit(f"manifest version {match.group(1) if match else 'missing'} != tag {tag}")
-          PY
+      - name: Validate metadata.version, fixed SHAs, release order, tag, and smoke evidence
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          MCP_SERVER_SHA: ${{ inputs.mcp_server_sha }}
+          AGENT_SKILL_SHA: ${{ inputs.agent_skill_sha }}
+          LANGBOT_PLUGIN_SHA: ${{ inputs.langbot_plugin_sha }}
+          READ_ONLY_SMOKE_EVIDENCE: ${{ inputs.read_only_smoke_evidence }}
+          MCP_SERVER_CI_RUN_URL: ${{ inputs.mcp_server_ci_run_url }}
+          AGENT_SKILL_CI_RUN_URL: ${{ inputs.agent_skill_ci_run_url }}
+          LANGBOT_PLUGIN_CI_RUN_URL: ${{ inputs.langbot_plugin_ci_run_url }}
+          MCP_SERVER_RELEASED: ${{ inputs.mcp_server_released }}
+          AGENT_SKILL_RELEASED: ${{ inputs.agent_skill_released }}
+          LANGBOT_RUNTIME_CONTEXT_VERIFIED: ${{ inputs.langbot_runtime_context_verified }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/validate_release_train.py \
+            --expected-version 2.1.0 \
+            --mcp-sha "$MCP_SERVER_SHA" \
+            --agent-sha "$AGENT_SKILL_SHA" \
+            --langbot-sha "$LANGBOT_PLUGIN_SHA" \
+            --smoke-evidence "$READ_ONLY_SMOKE_EVIDENCE" \
+            --mcp-ci-run-url "$MCP_SERVER_CI_RUN_URL" \
+            --agent-ci-run-url "$AGENT_SKILL_CI_RUN_URL" \
+            --langbot-ci-run-url "$LANGBOT_PLUGIN_CI_RUN_URL" \
+            --mcp-released "$MCP_SERVER_RELEASED" \
+            --agent-released "$AGENT_SKILL_RELEASED" \
+            --langbot-runtime-context-verified "$LANGBOT_RUNTIME_CONTEXT_VERIFIED"
 
-      - name: Upload release assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Stage verified release asset
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
+          name: langbot-lbp
+          path: dist/*.lbpkg
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate-build
+    concurrency:
+      group: henu-assistant-v2.1.0-release
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    environment: henu-production-release
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout the approved LangBot SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.langbot_plugin_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python 3.13 for final validation
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-lock/py313.txt
+
+      - name: Install the frozen validator environment
+        run: |
+          LOCK_FILE="$(python scripts/select_lockfile.py --check)"
+          python -m pip install --require-hashes -r "$LOCK_FILE"
+
+      - name: Fetch the three release branch heads after approval
+        run: |
+          git fetch --force origin \
+            +refs/tags/v2.1.0:refs/tags/v2.1.0 \
+            +refs/heads/mcp-server:refs/remotes/origin/mcp-server \
+            +refs/heads/agent-skill:refs/remotes/origin/agent-skill \
+            +refs/heads/langbot-plugin:refs/remotes/origin/langbot-plugin
+
+      - name: Revalidate the release train after protected approval
+        env:
+          MCP_SERVER_SHA: ${{ inputs.mcp_server_sha }}
+          AGENT_SKILL_SHA: ${{ inputs.agent_skill_sha }}
+          LANGBOT_PLUGIN_SHA: ${{ inputs.langbot_plugin_sha }}
+          READ_ONLY_SMOKE_EVIDENCE: ${{ inputs.read_only_smoke_evidence }}
+          MCP_SERVER_CI_RUN_URL: ${{ inputs.mcp_server_ci_run_url }}
+          AGENT_SKILL_CI_RUN_URL: ${{ inputs.agent_skill_ci_run_url }}
+          LANGBOT_PLUGIN_CI_RUN_URL: ${{ inputs.langbot_plugin_ci_run_url }}
+          MCP_SERVER_RELEASED: ${{ inputs.mcp_server_released }}
+          AGENT_SKILL_RELEASED: ${{ inputs.agent_skill_released }}
+          LANGBOT_RUNTIME_CONTEXT_VERIFIED: ${{ inputs.langbot_runtime_context_verified }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/validate_release_train.py \
+            --expected-version 2.1.0 \
+            --mcp-sha "$MCP_SERVER_SHA" \
+            --agent-sha "$AGENT_SKILL_SHA" \
+            --langbot-sha "$LANGBOT_PLUGIN_SHA" \
+            --smoke-evidence "$READ_ONLY_SMOKE_EVIDENCE" \
+            --mcp-ci-run-url "$MCP_SERVER_CI_RUN_URL" \
+            --agent-ci-run-url "$AGENT_SKILL_CI_RUN_URL" \
+            --langbot-ci-run-url "$LANGBOT_PLUGIN_CI_RUN_URL" \
+            --mcp-released "$MCP_SERVER_RELEASED" \
+            --agent-released "$AGENT_SKILL_RELEASED" \
+            --langbot-runtime-context-verified "$LANGBOT_RUNTIME_CONTEXT_VERIFIED"
+
+      - name: Download verified release asset
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0, Node 24
+        with:
+          name: langbot-lbp
+          path: dist
+
+      - name: Upload GitHub Release asset
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: v2.1.0
           files: dist/*.lbpkg
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          body: |
+            HENU Assistant 2.1.0 immutable release train
+
+            - MCP Server SHA: ${{ inputs.mcp_server_sha }}
+            - Agent Skill SHA: ${{ inputs.agent_skill_sha }}
+            - LangBot Plugin SHA: ${{ inputs.langbot_plugin_sha }}
+            - MCP Server CI: ${{ inputs.mcp_server_ci_run_url }}
+            - Agent Skill CI: ${{ inputs.agent_skill_ci_run_url }}
+            - LangBot Plugin CI: ${{ inputs.langbot_plugin_ci_run_url }}
+            - Read-only smoke evidence: ${{ inputs.read_only_smoke_evidence }}

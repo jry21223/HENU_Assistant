@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import hashlib
 import re
 from typing import Any, Callable
@@ -12,13 +12,18 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from langbot_plugin.api.entities import context, events
 
 from henu_plugin.storage_adapter import PluginStorageAdapter
-from henu_plugin.service import set_current_user_paths
+from henu_plugin.service import (
+    _await_cancellation_safe,
+    _run_sync_cancellation_safe,
+    set_current_user_paths,
+)
 
 
 def _resolve_storage_key(session: provider_session.Session, identity_hint: dict) -> str:
-    """Resolve storage key from session and identity hint."""
-    sender_id = str(identity_hint.get("sender_id") or session.sender_id or "").strip()
-    launcher_id = str(identity_hint.get("launcher_id") or session.launcher_id or "").strip()
+    """Resolve storage only from the event-derived Session."""
+    del identity_hint
+    sender_id = str(session.sender_id or "").strip()
+    launcher_id = str(session.launcher_id or "").strip()
     qq = sender_id or launcher_id or "unknown"
 
     storage_key = re.sub(r"[^0-9A-Za-z._-]+", "_", qq).strip("._-")
@@ -465,14 +470,20 @@ class IdentityCaptureListener(EventListener):
         storage_key = _resolve_storage_key(session, identity_hint)
         storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
         user_paths = await storage_adapter.load_all()
-        set_current_user_paths(user_paths)
         try:
-            return await asyncio.to_thread(func, *args)
-        finally:
+            set_current_user_paths(user_paths)
             try:
-                await storage_adapter.save_all()
-            finally:
-                set_current_user_paths(None)
+                result = await _run_sync_cancellation_safe(func, *args)
+            except BaseException:
+                # Preserve the operation's exception (especially cancellation)
+                # if persistence also fails while closing the transaction.
+                with contextlib.suppress(Exception):
+                    await _await_cancellation_safe(storage_adapter.save_all())
+                raise
+            await _await_cancellation_safe(storage_adapter.save_all())
+            return result
+        finally:
+            set_current_user_paths(None)
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:

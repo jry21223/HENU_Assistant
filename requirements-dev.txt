@@ -1,0 +1,4 @@
+-r requirements.txt
+
+langbot-plugin==0.5.0
+pytest>=8.0.0,<10

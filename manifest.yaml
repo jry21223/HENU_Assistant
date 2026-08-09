@@ -4,7 +4,7 @@ metadata:
   author: jry21223
   name: henu_assistant
   repository: "https://github.com/jry21223/HENU_Assistant"
-  version: 2.0.4
+  version: 2.1.0
   description:
     en_US: "Henan University assistant for Langbot with per-QQ isolation, fresh request time context, fail-closed storage, and confirmed external writes."
     zh_Hans: "河南大学校园助手 Langbot 插件版：按 QQ 隔离数据、每请求刷新时间上下文、Storage 故障闭锁、外部写操作二次确认。"

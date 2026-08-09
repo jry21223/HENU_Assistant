@@ -8,7 +8,9 @@ MCP / Agent Skill 默认用户为 "local"，Langbot 可按 QQ 传入 user_key。
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 # 可由 Langbot 的 _activate_user_storage() 在运行时覆盖
 _BASE_DIR: Path | None = None
@@ -29,6 +31,18 @@ def set_base_dir(path: Path) -> None:
     """运行时覆盖项目根目录（Langbot 用）。"""
     global _BASE_DIR
     _BASE_DIR = Path(path)
+
+
+@contextmanager
+def activated_base_dir(path: Path) -> Iterator[None]:
+    """Temporarily bind shared/user registry paths to one runtime root."""
+    global _BASE_DIR
+    previous = _BASE_DIR
+    _BASE_DIR = Path(path)
+    try:
+        yield
+    finally:
+        _BASE_DIR = previous
 
 
 def get_shared_data_dir() -> Path:

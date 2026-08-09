@@ -1,19 +1,9 @@
 from __future__ import annotations
 
-import base64
 import datetime as dt
-import json
-import math
-import random
 import re
 import time
-from html import unescape
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
-
-import requests
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
 
 from .time_utils import _now_dt, TimeUtilsMixin
 
@@ -745,28 +735,59 @@ class SeatReservationMixin:
             return {"success": False, "msg": f"取消预约异常: {exc}"}
 
     @staticmethod
-    def _parse_retry_until(retry_until: str) -> dt.datetime | None:
+    def _parse_retry_until(
+        retry_until: str,
+        *,
+        now: dt.datetime | None = None,
+    ) -> dt.datetime | None:
         text = str(retry_until or "").strip()
         if not text:
             return None
 
-        now = _now_dt()
-        hhmm = self._to_hhmm(text)
-        if re.fullmatch(r"\d{2}:\d{2}", hhmm):
-            hour, minute = [int(part) for part in hhmm.split(":")]
-            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        now = now or _now_dt()
+        if re.fullmatch(r"\d{1,2}\s*[:：]\s*\d{1,2}", text):
+            normalized_time = TimeUtilsMixin._to_hhmm(text)
+            if not re.fullmatch(r"\d{2}:\d{2}", normalized_time):
+                return None
+            hour, minute = (int(part) for part in normalized_time.split(":"))
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                return None
+            try:
+                return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except ValueError:
+                return None
 
-        normalized = text.replace("Z", "+00:00")
+        normalized = f"{text[:-1]}+00:00" if text.endswith(("Z", "z")) else text
         try:
             parsed = dt.datetime.fromisoformat(normalized)
         except ValueError:
             return None
         if parsed.tzinfo is None:
-            try:
-                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-            except Exception:
-                pass
+            parsed = parsed.replace(tzinfo=now.tzinfo)
         return parsed
+
+    @classmethod
+    def _validate_retry_until(
+        cls,
+        retry_until: str | None,
+    ) -> tuple[dt.datetime | None, dict[str, Any] | None]:
+        text = str(retry_until or "").strip()
+        if not text:
+            return None, None
+        now = _now_dt()
+        deadline = cls._parse_retry_until(text, now=now)
+        if deadline is None:
+            return None, {
+                "success": False,
+                "msg": "retry_until 格式必须为 HH:MM 或 ISO 日期时间",
+            }
+        if deadline <= now:
+            return deadline, {
+                "success": False,
+                "msg": "retry_until 已过期，未执行登录或预约",
+                "retry_until": deadline.isoformat(),
+            }
+        return deadline, None
 
     @staticmethod
     def _is_retryable_reserve_error(message: str) -> bool:
@@ -908,13 +929,14 @@ class SeatReservationMixin:
         except ValueError:
             return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD"}
 
-        # 避免使用过期 token 直接进入预约流程
+        retry_deadline, retry_error = self._validate_retry_until(retry_until)
+        if retry_error is not None:
+            return retry_error
+
+        # 避免使用过期 token 直接进入预约流程。retry 输入校验必须先完成，
+        # 防止无效或已过期的请求触发任何登录、写入或预约网络调用。
         if not self._is_token_valid() and not self.login():
             return self._login_failed_result()
-
-        retry_deadline = self._parse_retry_until(str(retry_until or ""))
-        if str(retry_until or "").strip() and retry_deadline is None:
-            return {"success": False, "msg": "retry_until 格式必须为 HH:MM 或 ISO 日期时间"}
 
         try:
             interval = max(1, min(60, int(retry_interval_seconds)))
@@ -930,7 +952,7 @@ class SeatReservationMixin:
         last_result: dict[str, Any] = {}
         attempts = 0
         while attempts < attempts_limit:
-            if retry_deadline is not None and _now_dt() > retry_deadline:
+            if retry_deadline is not None and _now_dt() >= retry_deadline:
                 break
             attempts += 1
             try:
@@ -970,7 +992,7 @@ class SeatReservationMixin:
         if last_result:
             last_result["success"] = False
             last_result["attempts"] = attempts
-            if retry_deadline is not None and _now_dt() > retry_deadline:
+            if retry_deadline is not None and _now_dt() >= retry_deadline:
                 last_result["msg"] = f"{last_result.get('msg', '预约失败')}；已到达 retry_until，停止抢约"
             return last_result
         return {"success": False, "msg": "未执行预约尝试"}

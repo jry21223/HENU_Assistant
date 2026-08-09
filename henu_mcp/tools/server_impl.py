@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import threading
@@ -12,7 +11,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
-from mcp.server.fastmcp import FastMCP
+
+from campus_core.seat_reservation import SeatReservationMixin
 
 from henu_mcp.core.cas_session import (
     extract_cas_cookies as _extract_ids_cas_cookies,
@@ -56,14 +56,10 @@ from henu_mcp.core.period_times import (
 )
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from henu_mcp.core.secure_storage import (
-    encrypt_value,
-    decrypt_value,
-    is_encrypted,
     load_encrypted_profile,
     save_encrypted_profile,
 )
 
-mcp = FastMCP("henu-campus-unified")
 BASE_DIR = Path(__file__).resolve().parents[2]
 PERIOD_TIME_FILE = BASE_DIR / "period_time_config.json"
 PERIOD_CALIBRATION_STATE_FILE = BASE_DIR / "period_time_calibration_state.json"
@@ -94,9 +90,11 @@ DEFAULT_PERIOD_TIMES: dict[str, dict[str, str]] = {
     "15": {"start": "20:55", "end": "21:40"},
 }
 _SEMINAR_SIGNIN_TASK_LOCK = threading.Lock()
-_SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
-_SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
+
+
+class SeminarTaskStateError(RuntimeError):
+    """Raised when persisted seminar sign-in state cannot be trusted."""
 
 # 尝试导入校园核心模块
 HenuCampusBot = None
@@ -126,11 +124,7 @@ try:
         search_resources,
         list_resources as _list_registry_resources,
         get_stats as _get_registry_stats,
-        upsert_resource,
-        get_resource,
         sync_classrooms_from_metadata,
-        sync_library_resources,
-        sync_seminar_resources,
     )
     _resource_registry_available = True
 except Exception:
@@ -643,11 +637,26 @@ def _saved_seminar_mobile() -> str:
 
 
 def _load_seminar_signin_tasks() -> list[dict[str, Any]]:
-    data = load_json(SEMINAR_SIGNIN_TASK_FILE)
-    tasks = data.get("tasks") or []
-    if not isinstance(tasks, list):
+    try:
+        raw = SEMINAR_SIGNIN_TASK_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return []
-    return [item for item in tasks if isinstance(item, dict)]
+    except (OSError, UnicodeError) as exc:
+        raise SeminarTaskStateError("无法读取研讨室签到任务状态") from exc
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SeminarTaskStateError("研讨室签到任务状态 JSON 已损坏") from exc
+    if not isinstance(data, dict):
+        raise SeminarTaskStateError("研讨室签到任务状态必须是 JSON 对象")
+
+    tasks = data.get("tasks", [])
+    if not isinstance(tasks, list):
+        raise SeminarTaskStateError("研讨室签到任务字段 tasks 必须是列表")
+    if any(not isinstance(item, dict) for item in tasks):
+        raise SeminarTaskStateError("研讨室签到任务列表包含无效条目")
+    return list(tasks)
 
 
 def _save_seminar_signin_tasks(tasks: list[dict[str, Any]]) -> None:
@@ -1208,7 +1217,12 @@ def _process_seminar_signin_tasks(
     due_tasks: list[dict[str, Any]] = []
     for task in tasks:
         status_text = str(task.get("status") or "").strip() or "pending"
-        if status_text in {"success", "cancelled", "expired"}:
+        if status_text == "processing":
+            task["status"] = "uncertain"
+            task["last_msg"] = "上次签到进程在提交后未完成确认；为避免重复签到，需人工核验"
+            task["updated_at"] = _format_dt_text(now)
+            continue
+        if status_text in {"success", "cancelled", "expired", "uncertain"}:
             continue
         if target_task_id and str(task.get("task_id") or "").strip() != target_task_id:
             continue
@@ -1252,9 +1266,6 @@ def _process_seminar_signin_tasks(
     now_text = _format_dt_text(now)
     for task in due_tasks:
         processed_count += 1
-        task["attempts"] = int(task.get("attempts") or 0) + 1
-        task["updated_at"] = now_text
-
         record, record_msg = _resolve_seminar_record_for_task(bot, task)
         if record is None:
             task["last_msg"] = record_msg or "未找到对应预约记录"
@@ -1265,7 +1276,18 @@ def _process_seminar_signin_tasks(
         if record_id_text:
             task["record_id"] = record_id_text
 
-        sign_result = bot.sign_in_seminar_record(record_id_text)
+        task["attempts"] = int(task.get("attempts") or 0) + 1
+        task["status"] = "processing"
+        task["claim_id"] = uuid.uuid4().hex
+        task["claimed_at"] = _format_dt_text(_now_dt())
+        task["updated_at"] = task["claimed_at"]
+        with _SEMINAR_SIGNIN_TASK_LOCK:
+            _save_seminar_signin_tasks(tasks)
+
+        try:
+            sign_result = bot.sign_in_seminar_record(record_id_text)
+        except Exception as exc:
+            sign_result = {"success": False, "msg": f"签到结果不确定: {exc}"}
         task["last_result"] = sign_result
         task["last_msg"] = str(sign_result.get("msg") or "")
         if sign_result.get("success"):
@@ -1283,7 +1305,15 @@ def _process_seminar_signin_tasks(
             task["status"] = "cancelled"
             failed_count += 1
         else:
+            task["status"] = "uncertain"
+            task["last_msg"] = (
+                task["last_msg"] or "签到结果不确定"
+            ) + "；为避免重复签到，任务不会自动重试"
             failed_count += 1
+
+        task["updated_at"] = _format_dt_text(_now_dt())
+        with _SEMINAR_SIGNIN_TASK_LOCK:
+            _save_seminar_signin_tasks(tasks)
 
     _save_library_cookies(bot.get_cookies())
     with _SEMINAR_SIGNIN_TASK_LOCK:
@@ -1299,28 +1329,6 @@ def _process_seminar_signin_tasks(
         "failed_count": failed_count,
         "now": now_text,
     }
-
-
-def _ensure_seminar_auto_signin_worker() -> None:
-    global _SEMINAR_AUTO_SIGNIN_THREAD
-    with _SEMINAR_AUTO_SIGNIN_THREAD_LOCK:
-        if _SEMINAR_AUTO_SIGNIN_THREAD and _SEMINAR_AUTO_SIGNIN_THREAD.is_alive():
-            return
-
-        def _worker() -> None:
-            while True:
-                try:
-                    _process_seminar_signin_tasks(due_only=True, trigger="background")
-                except Exception:
-                    pass
-                time.sleep(SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS)
-
-        _SEMINAR_AUTO_SIGNIN_THREAD = threading.Thread(
-            target=_worker,
-            name="seminar-auto-signin",
-            daemon=True,
-        )
-        _SEMINAR_AUTO_SIGNIN_THREAD.start()
 
 
 def _resolve_seminar_members(
@@ -2132,6 +2140,10 @@ def _library_reserve_impl(
     """
     if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
+
+    retry_deadline, retry_error = SeatReservationMixin._validate_retry_until(retry_until)
+    if retry_error is not None:
+        return retry_error
     
     profile = _effective_profile()
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
@@ -2159,7 +2171,7 @@ def _library_reserve_impl(
         target_date,
         preferred_time=str(preferred_time or "08:00"),
         preferred_end_time=str(preferred_end_time or ""),
-        retry_until=str(retry_until or ""),
+        retry_until=retry_deadline.isoformat() if retry_deadline is not None else "",
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
     )
@@ -2597,7 +2609,6 @@ def _seminar_reserve_impl(
         if task:
             saved_task = _upsert_seminar_signin_task(task)
             result["auto_signin_task"] = _seminar_task_summary(saved_task)
-            _ensure_seminar_auto_signin_worker()
     result["group_name"] = str(group_name or "").strip()
     result["member_ids"] = resolved_members
     return result
@@ -2889,11 +2900,17 @@ def _course_monitor_once_impl(config_json: str = "", send_notifications: bool = 
     matches = evaluate_matches(rows, [target for target in config.get("targets") or [] if isinstance(target, dict)])
     state = load_monitor_state()
     alerts, new_state = evaluate_alerts(matches, state)
-    save_monitor_state(new_state)
     notify_result = notify_alerts(alerts, config) if send_notifications else {"success": True, "sent": False, "msg": "已禁用通知发送"}
+    notification_failed = bool(alerts) and not bool(notify_result.get("success"))
+    if not notification_failed:
+        save_monitor_state(new_state)
     return {
-        "success": True,
-        "msg": "选课余量检查完成；本工具只提醒，不会自动选课或提交。",
+        "success": not notification_failed,
+        "msg": (
+            "选课余量提醒发送失败，未推进通知基线；下轮将重试。"
+            if notification_failed
+            else "选课余量检查完成；本工具只提醒，不会自动选课或提交。"
+        ),
         "checked_at": _now_dt().isoformat(),
         "rows_count": len(rows),
         "matches_count": len(matches),
@@ -2958,7 +2975,6 @@ def _course_monitor_run_impl(
 
 
 
-@mcp.tool()
 def smart_course_selection(
     source_path: str = "",
     excel_path: str = "",
@@ -3010,7 +3026,6 @@ def smart_course_selection(
     )
 
 
-@mcp.tool()
 def smart_course_select(
     excel_path: str,
     user_class: str,
@@ -3040,7 +3055,6 @@ def smart_course_select(
         top_k=top_k,
     )
 
-@mcp.tool()
 def setup_account(
     student_id: str,
     password: str,
@@ -3089,7 +3103,6 @@ def setup_account(
     }
 
 
-@mcp.tool()
 def sync_schedule(
     xn: str | None = None,
     xq: str | None = None,
@@ -3124,7 +3137,6 @@ def sync_schedule(
     return result
 
 
-@mcp.tool()
 def library_query(
     view: str = "current",
     record_type: str = "1",
@@ -3346,7 +3358,6 @@ def _resolve_resource_id_to_params(resource_id: str) -> dict[str, str]:
     return {}
 
 
-@mcp.tool()
 def library_reserve(
     location: str = "",
     seat_no: str = "",
@@ -3405,7 +3416,6 @@ def library_reserve(
     )
 
 
-@mcp.tool()
 def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     """
     【必须调用】图书馆自动签到 - 对当前预约执行真实签到操作
@@ -3422,7 +3432,6 @@ def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     return _library_auto_signin_impl(record_id=record_id)
 
 
-@mcp.tool()
 def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     """
     【必须调用】取消图书馆预约 - 执行真实的取消操作
@@ -3440,7 +3449,6 @@ def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     return _library_cancel_impl(record_id=record_id, record_type=record_type)
 
 
-@mcp.tool()
 def course_selection_query(view: str = "status", xktype: str = "2") -> dict[str, Any]:
     """
     安全查询选课第一阶段状态。
@@ -3453,7 +3461,6 @@ def course_selection_query(view: str = "status", xktype: str = "2") -> dict[str,
     return _course_selection_status_impl(xktype=xktype)
 
 
-@mcp.tool()
 def course_selection_plan(
     candidates_json: str,
     existing_schedule_json: str = "",
@@ -3476,7 +3483,6 @@ def course_selection_plan(
         return {"success": False, "msg": f"生成选课计划失败: {exc}"}
 
 
-@mcp.tool()
 def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
     """
     占位工具：当前版本不执行真实选课提交。
@@ -3484,7 +3490,6 @@ def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
     return _course_selection_submit_not_implemented()
 
 
-@mcp.tool()
 def course_monitor_config(config_json: str = "", merge: bool = True) -> dict[str, Any]:
     """
     查看或保存选课余量监控配置。
@@ -3494,7 +3499,6 @@ def course_monitor_config(config_json: str = "", merge: bool = True) -> dict[str
     return _course_monitor_config_impl(config_json=config_json, merge=merge)
 
 
-@mcp.tool()
 def course_monitor_once(config_json: str = "", send_notifications: bool = True) -> dict[str, Any]:
     """
     执行一次只读选课余量检查。
@@ -3504,7 +3508,6 @@ def course_monitor_once(config_json: str = "", send_notifications: bool = True) 
     return _course_monitor_once_impl(config_json=config_json, send_notifications=send_notifications)
 
 
-@mcp.tool()
 def course_monitor_run(
     config_json: str = "",
     max_checks: int = 1,
@@ -3527,7 +3530,6 @@ def course_monitor_run(
         return {"success": False, "msg": f"选课监控运行失败: {exc}"}
 
 
-@mcp.tool()
 def course_monitor_notify_test(config_json: str = "") -> dict[str, Any]:
     """
     测试选课余量飞书通知。
@@ -3543,7 +3545,6 @@ def course_monitor_notify_test(config_json: str = "") -> dict[str, Any]:
         return {"success": False, "msg": f"测试通知失败: {exc}"}
 
 
-@mcp.tool()
 def seminar_group(
     action: str = "list",
     group_name: str = "",
@@ -3568,7 +3569,6 @@ def seminar_group(
     return {"success": False, "msg": "action 仅支持 list/save/delete"}
 
 
-@mcp.tool()
 def seminar_query(
     view: str = "rooms",
     target_date: str = "",
@@ -3640,7 +3640,6 @@ def seminar_query(
     return {"success": False, "msg": "view 仅支持 filters/rooms/detail/records/signin_tasks"}
 
 
-@mcp.tool()
 def seminar_signin(record_id: str = "", auto_scan: bool = False) -> dict[str, Any]:
     """
     对研讨室预约执行签到。
@@ -3657,7 +3656,6 @@ def seminar_signin(record_id: str = "", auto_scan: bool = False) -> dict[str, An
     return _seminar_signin_impl(record_id=record_id)
 
 
-@mcp.tool()
 def seminar_cancel(record_id: str) -> dict[str, Any]:
     """
     取消研讨室预约。
@@ -3668,7 +3666,6 @@ def seminar_cancel(record_id: str) -> dict[str, Any]:
     return _seminar_cancel_impl(record_id=record_id)
 
 
-@mcp.tool()
 def seminar_reserve(
     area_id: str = "",
     target_date: str = "",
@@ -3723,7 +3720,6 @@ def seminar_reserve(
     )
 
 
-@mcp.tool()
 def schedule_query(
     view: str = "current",
     timezone: str = "Asia/Shanghai",
@@ -3758,7 +3754,6 @@ def schedule_query(
     return {"success": False, "msg": "view 仅支持 current/day/week/full"}
 
 
-@mcp.tool()
 def set_calibration_source(
     data: str,
     cookie: str,
@@ -3784,7 +3779,6 @@ def set_calibration_source(
     }
 
 
-@mcp.tool()
 def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     """
     查看系统状态：账号、时间、节次配置、最近校准状态、输出文件。
@@ -3812,7 +3806,6 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
 
 # ==================== 河宝社区 MCP Tools ====================
 
-@mcp.tool()
 def yunfz_leave_query(
     view: str = "list",
     leave_id: str = "",
@@ -3871,7 +3864,6 @@ def yunfz_leave_query(
     return {"success": False, "msg": "view 仅支持 list/detail/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_signin_query(
     view: str = "list",
     page: int = 1,
@@ -3918,7 +3910,6 @@ def yunfz_signin_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_checksleep_query(
     view: str = "list",
     page: int = 1,
@@ -3965,7 +3956,6 @@ def yunfz_checksleep_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_activity_query(
     view: str = "list",
     page: int = 1,
@@ -4012,7 +4002,6 @@ def yunfz_activity_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_collection_query(
     view: str = "list",
     page: int = 1,
@@ -4100,14 +4089,6 @@ def _resolve_campus_and_building(
     except Exception:
         pass
 
-    # 组合查询文本
-    query_parts = [campus_text]
-    if building_text:
-        query_parts.append(building_text)
-    if classroom_text:
-        query_parts.append(classroom_text)
-    full_query = " ".join(query_parts)
-
     # 1. 先解析校区
     campus_code = ""
     campus_name = ""
@@ -4166,7 +4147,6 @@ def _resolve_campus_and_building(
     }
 
 
-@mcp.tool()
 def empty_classroom_query(
     view: str = "free",
     term_code: str = "",
@@ -4437,7 +4417,7 @@ def _empty_classroom_occupancy_query(
 ) -> dict[str, Any]:
     """查询单个教室某时间段的占用详情。"""
     # 先拉取课表数据
-    result = query_free_classrooms(
+    query_free_classrooms(
         client=client,
         term_code=term_code,
         week=week,
@@ -4507,7 +4487,6 @@ def _empty_classroom_occupancy_query(
     }
 
 
-@mcp.tool()
 def empty_classroom_sync(
     term_code: str = "",
     campus_code: str = "",
@@ -4571,7 +4550,6 @@ def empty_classroom_sync(
 # ── 全局资源编号映射 ──────────────────────────────────────
 
 
-@mcp.tool()
 def resource_registry_query(
     view: str = "search",
     query: str = "",
@@ -4645,7 +4623,6 @@ def resource_registry_query(
     return {"success": False, "msg": f"不支持的 view: {view}，支持 search/resolve/list/stats"}
 
 
-@mcp.tool()
 def resource_registry_sync(
     scope: str = "all",
     force_refresh: bool = False,
@@ -4734,38 +4711,3 @@ def resource_registry_sync(
             "results": results,
         },
     }
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="HENU unified MCP server (schedule + library)")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "streamable-http", "sse"],
-        default="stdio",
-        help="MCP transport type",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
-    parser.add_argument("--port", type=int, default=8001, help="Port for HTTP transports")
-    parser.add_argument("--path", default="/mcp", help="HTTP endpoint path for streamable-http transport")
-    parser.add_argument(
-        "--stateless-http",
-        action="store_true",
-        help="Enable stateless HTTP mode for streamable-http transport",
-    )
-    parser.add_argument(
-        "--json-response",
-        action="store_true",
-        help="Enable JSON response mode for streamable-http transport",
-    )
-    args = parser.parse_args()
-
-    if args.transport in ("streamable-http", "sse"):
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-    if args.transport == "streamable-http":
-        mcp.settings.streamable_http_path = args.path
-        mcp.settings.stateless_http = args.stateless_http
-        mcp.settings.json_response = args.json_response
-
-    _ensure_seminar_auto_signin_worker()
-    mcp.run(transport=args.transport)
