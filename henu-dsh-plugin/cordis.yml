@@ -1,0 +1,30 @@
+# HENU Assistant · DeepSeek Harness 本地插件 patch 叠加层
+#
+# 两种用法（任选其一，内容相同）：
+#   1. 直接叠加启动：pnpm dsh web --patch C:/Users/HONOR/Desktop/jerry/henu-dsh-plugin/cordis.yml
+#   2. 合并进常驻 profile：把下面的 insert 内容合并到
+#      C:/Users/HONOR/.dsh/profiles/web/cordis.patch.yml（watchUserPatches 会热应用，
+#      运行中的 Web UI 无需重启即可加载）。
+#
+# 说明：
+# - henu-assistant 入口必须是构建产物 dist/index.js（本仓库 npm run build 产出）。
+#   Windows 下 Node ESM 只接受 file:/// 形式的绝对路径（import("C:/...") 会被拒绝），
+#   且 Node 的类型剥离不会把 src/index.ts 里的 "./cards.js" 映射到 cards.ts，
+#   因此不能直接加载 src/index.ts。
+# - mcp-henu 是官方 @deepseek-ai/dsh-mcp-client 桥接，工具以
+#   mcp__henu__library_query / mcp__henu__library_reserve 等名字注册。
+- insert:
+    - id: henu-assistant
+      name: 'file:///C:/Users/HONOR/Desktop/jerry/henu-dsh-plugin/dist/index.js'
+
+    - id: mcp-henu
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: henu
+        transport: stdio
+        command: 'C:/Users/HONOR/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
+        args:
+          - 'C:/Users/HONOR/Desktop/jerry/henu-mcp/mcp_server.py'
+          - '--transport'
+          - 'stdio'
+        cwd: 'C:/Users/HONOR/Desktop/jerry/henu-mcp'

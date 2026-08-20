@@ -1,0 +1,21 @@
+# HENU Assistant DSH patch 示例 —— 复制为 cordis.yml 或合并进
+# C:/Users/HONOR/.dsh/profiles/web/cordis.patch.yml 后使用。
+#
+# 注意：插件入口必须是构建产物 dist/index.js（先 npm run build）。
+# Windows 下 Node ESM 只接受 file:/// 绝对路径，且 Node 类型剥离不会把
+# src/index.ts 里的 "./cards.js" 映射到 cards.ts，故不能加载 src/index.ts。
+- insert:
+    - id: henu-assistant
+      name: 'file:///C:/Users/HONOR/Desktop/jerry/henu-dsh-plugin/dist/index.js'
+
+    - id: mcp-henu
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: henu
+        transport: stdio
+        command: 'C:/Users/HONOR/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
+        args:
+          - 'C:/Users/HONOR/Desktop/jerry/henu-mcp/mcp_server.py'
+          - '--transport'
+          - 'stdio'
+        cwd: 'C:/Users/HONOR/Desktop/jerry/henu-mcp'

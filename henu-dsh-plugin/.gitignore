@@ -1,0 +1,16 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+*.tsbuildinfo.*
+
+# 重新纳入被仓库根 .gitignore 的 *.json 规则忽略的清单文件
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
