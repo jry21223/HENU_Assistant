@@ -1096,7 +1096,7 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": "未绑定雨课堂账号",
-                "reply_text": "尚未绑定雨课堂账号。请私聊发送：yuketang account set --account <手机号> --password '<密码>'，再执行 yuketang login。",
+                "reply_text": "尚未绑定雨课堂账号。请先在雨课堂设置密码，使用雨课堂绑定手机号和该密码（不是学校 IDS 密码）。然后私聊发送：yuketang account set --account <手机号> --password '<密码>'，按提示确认后开始验证。尖括号仅为占位说明，请勿原样填写。",
             }
         try:
             started = bridge_client.login_password(openid, account, password)

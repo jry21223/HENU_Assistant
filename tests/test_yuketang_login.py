@@ -32,6 +32,7 @@ def test_credentials_confirmed_privately_encrypted_and_not_cross_user():
         assert b'Demo@' not in raw and b'13800000000' not in raw
         assert raw.startswith(b'enc:v2:')
         message = str(ctx.reply.call_args.args[0])
+        assert '先在雨课堂设置密码' in message
         token = message.split('yuketang confirm ')[-1]
         other = context(2, f'yuketang confirm {token}', sender='user-b')
         assert '没有有效' in await flow.process(other, other.event.text_message, 'user-b')

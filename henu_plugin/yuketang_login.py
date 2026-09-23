@@ -115,7 +115,8 @@ class YuketangLoginCoordinator:
                 pending = create_pending_operation(storage_key=sender, canonical_command=text,
                                                    query_id=ctx.query_id)
                 await plugin.set_plugin_storage(key, encrypt_value(json.dumps(pending)).encode())
-                return ('将保存并向雨课堂桥服务传递你的凭据；账号密码绑定确认后将验证登录。'
+                return ('请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码登录；不是学校 IDS 密码。'
+                        '将保存并向雨课堂桥服务传递你的凭据；账号密码绑定确认后将验证登录。'
                         f'请在下一条私聊回复：yuketang confirm {pending["token"]}')
         if spec.resolved_tool not in SENSITIVE_TOOLS:
             return '待确认内容不属于允许的雨课堂敏感操作。'
@@ -142,7 +143,7 @@ class YuketangLoginCoordinator:
             if result.get('status') == 'success':
                 return '雨课堂登录成功。学校 IDS 绑定不受影响；可用 yuketang status 查询当前状态。'
             if result.get('status') in {'failed', 'expired'}:
-                return '雨课堂登录失败或会话过期，请核对雨课堂账号密码；不会自动重复尝试。'
+                return '雨课堂登录失败或会话过期。请先在雨课堂设置密码，再核对绑定手机号和该密码；不是学校 IDS 密码。不会自动重复尝试。'
         return '雨课堂仍未返回最终登录结果，请稍后查询 yuketang status；不要重复提交。'
 
     async def call_service(self, ctx, name, params):

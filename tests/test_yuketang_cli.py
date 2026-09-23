@@ -139,6 +139,7 @@ def test_yuketang_unknown_commands() -> None:
 
 
 def test_yuketang_help_tree() -> None:
+    assert '先在雨课堂设置密码' in '\n'.join(build_help_payload('yuketang')['tips'])
     root = build_help_payload("")
     assert "yuketang status" in root["commands"]
     assert "help yuketang" in root["examples"]
