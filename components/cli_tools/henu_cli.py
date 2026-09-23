@@ -60,6 +60,7 @@ class HenuCli(BaseHenuTool):
             "yuketang_account_set",
             "yuketang_set_token",
             "yuketang_login",
+            "yuketang_logout",
         }:
             return {
                 "success": False,
@@ -123,7 +124,7 @@ class HenuCli(BaseHenuTool):
         keys_by_tool = {
             "yuketang_set_enabled": ("enabled",),
             "yuketang_domain_set": ("domain",),
-            "yuketang_lesson_set": ("auto_answer", "llm", "subjective", "enter_delay"),
+            "yuketang_lesson_set": ("auto_enter", "auto_answer", "llm", "subjective", "enter_delay"),
             "yuketang_exam_set": ("auto_answer", "llm", "subjective", "master", "slave"),
             "yuketang_list_update": ("scope", "op", "items"),
             "yuketang_start_time": ("op", "course", "slots"),

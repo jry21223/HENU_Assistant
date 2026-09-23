@@ -67,3 +67,77 @@ def test_login_replies_after_async_result_without_repeating_start(monkeypatch):
         assert '登录成功' in str(ctx.reply.call_args.args[0])
         assert flow.call_service.call_count == 1
     asyncio.run(run())
+
+
+def test_force_reaches_service_and_natural_language_group_is_rejected():
+    async def run():
+        flow = YuketangLoginCoordinator(SimpleNamespace(plugin=Plugin()))
+        flow.call_service = AsyncMock(return_value={'success': True, 'reply_text': '当前已登录'})
+        request = context(15, 'yuketang login --force')
+        await flow.handle(request, is_group=False)
+        await flow.tasks[15]
+        assert flow.call_service.call_args.args[2] == {'force': True}
+        group = context(16, '帮我退出雨课堂')
+        assert await flow.handle(group, is_group=True)
+        assert '私聊' in str(group.reply.call_args.args[0])
+        assert flow.call_service.call_count == 1
+    asyncio.run(run())
+
+
+def test_logout_waits_for_active_login_before_clearing_session(monkeypatch):
+    async def run():
+        flow = YuketangLoginCoordinator(SimpleNamespace(plugin=Plugin()))
+        waiting, finish = asyncio.Event(), asyncio.Event()
+        calls = []
+        async def service(ctx, name, params):
+            calls.append(name)
+            return ({'success':True,'login_session_id':'test-session'} if name == 'yuketang_login'
+                    else {'success':True,'reply_text':'桥端已确认退出'})
+        flow.call_service = service
+        async def sleep(_):
+            waiting.set()
+            await finish.wait()
+        monkeypatch.setattr(asyncio, 'sleep', sleep)
+        monkeypatch.setattr(bridge_client, 'login_result', lambda sid: {'status':'success'})
+        first = context(40, '登录雨课堂')
+        await flow.handle(first, is_group=False)
+        await asyncio.wait_for(waiting.wait(), timeout=1)
+        last = context(41, '退出登录雨课堂')
+        await flow.handle(last, is_group=False)
+        assert calls == ['yuketang_login']
+        assert '尚未完成退出' in str(last.reply.call_args.args[0])
+        finish.set()
+        await asyncio.wait_for(asyncio.gather(flow.tasks[40], flow.tasks[41]), timeout=1)
+        assert calls == ['yuketang_login', 'yuketang_logout']
+        assert '桥端已确认退出' in str(last.reply.call_args.args[0])
+    asyncio.run(run())
+
+
+def test_write_ahead_failure_prevents_remote_login_and_unknown_survives_restart():
+    async def run():
+        plugin = Plugin()
+        flow = YuketangLoginCoordinator(SimpleNamespace(plugin=plugin))
+        flow.call_service = AsyncMock(return_value={'success':False,'msg':'remote result unknown'})
+        request = context(60, 'yuketang login')
+        plugin.set_plugin_storage = AsyncMock(side_effect=RuntimeError('storage failure'))
+        await flow.handle(request, is_group=False)
+        await flow.tasks[60]
+        flow.call_service.assert_not_called()
+        plugin = Plugin()
+        flow = YuketangLoginCoordinator(SimpleNamespace(plugin=plugin))
+        flow.call_service = AsyncMock(return_value={'success':False,'msg':'remote result unknown'})
+        request = context(61, 'yuketang login')
+        await flow.handle(request, is_group=False)
+        await flow.tasks[61]
+        restarted = YuketangLoginCoordinator(SimpleNamespace(plugin=plugin))
+        restarted.call_service = AsyncMock(return_value={'success':False,'reply_text':'退出尚未确认'})
+        retry = context(62, 'yuketang login --force')
+        await restarted.handle(retry, is_group=False)
+        await restarted.tasks[62]
+        restarted.call_service.assert_not_called()
+        logout = context(63, 'yuketang logout')
+        await restarted.handle(logout, is_group=False)
+        await restarted.tasks[63]
+        assert restarted.call_service.call_args.args[2]['login_inflight_unknown'] is True
+        assert '尚未确认' in str(logout.reply.call_args.args[0])
+    asyncio.run(run())
