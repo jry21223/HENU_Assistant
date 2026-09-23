@@ -435,12 +435,13 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "summary": "雨课堂监听配置：总开关、域名、课堂/考试开关与名单、进班延时、邀请码。",
             "commands": [
                 "yuketang status",
-                "yuketang login",
+                "yuketang login [--force]   # cookie 仍有效时提示跳过；--force 强制重登",
+                "yuketang logout   # 退出登录：清守护进程侧 cookie 并停用监听（保留绑定）",
                 "yuketang account set --account <手机号> --password '<密码>'   # 敏感，仅私聊",
                 "yuketang config show [lesson|exam|other]",
                 "yuketang enable / yuketang disable",
                 "yuketang domain set --domain <www|pro|changjiang|huanghe>",
-                "yuketang lesson set --auto-answer <on|off> [--llm <on|off>] [--subjective <on|off>] [--enter-delay <0-600>]",
+                "yuketang lesson set --auto-enter <on|off> [--auto-answer <on|off>] [--llm <on|off>] [--subjective <on|off>] [--enter-delay <0-600>]",
                 "yuketang lesson whitelist|blacklist add|remove|clear <课程名>...",
                 "yuketang lesson start-time set --course <课程名> --slots \"1=08:00,2=13:30\"",
                 "yuketang lesson start-time clear --course <课程名>",
@@ -457,6 +458,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
             "tips": [
                 "开关是总闸（对该 QQ 的全部课程生效），黑白名单决定范围；黑名单优先于白名单，课程名完全匹配。",
+                "--auto-enter 关闭后开课不再进班/答题，考试监听不受影响；自动进班/自动答题/大模型默认开。",
                 "exam 白名单为空等于考试功能整体关闭（与 lesson 相反）。",
                 "课件 PDF / PPT 进度 / 试卷文件推送已整体停用，ppt/si/paper 不可配置。",
                 "--enter-delay 是“开班后等多久进班”（秒）；start-time 是“钟表几点前不进”，两者独立。",
@@ -470,7 +472,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "topic": normalized,
             "summary": "雨课堂课堂（lesson）配置。",
             "commands": [
-                "yuketang lesson set --auto-answer <on|off> --llm <on|off> --subjective <on|off> --enter-delay <0-600>",
+                "yuketang lesson set --auto-enter <on|off> --auto-answer <on|off> --llm <on|off> --subjective <on|off> --enter-delay <0-600>",
                 "yuketang lesson whitelist add|remove|clear <课程名>...",
                 "yuketang lesson blacklist add|remove|clear <课程名>...",
                 "yuketang lesson start-time set --course <课程名> --slots \"1=08:00,2=13:30\"",
@@ -482,6 +484,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "yuketang lesson start-time set --course 未央.机器学习 --slots \"1=08:00\"",
             ],
             "tips": [
+                "自动进班/自动答题/大模型默认开；主观题默认关。",
+                "--auto-enter 关：开课后不进班（不签到/不监听/不答题）。",
                 "--auto-answer 开而 --llm 关时，无答案会提交默认答案。",
                 "--subjective 默认关：主观题只打印不作答；开启后交由大模型生成并提交。",
                 "课程名与雨课堂首页课程标签完全匹配（含“未央.”等前缀）。",
@@ -1561,8 +1565,12 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
 
     if sub in {"login", "登录"}:
+        options, _, error = _parse_options(argv[2:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang")
         return CliCommandSpec(
-            raw=raw, argv=argv, resolved_tool="yuketang_login", params={},
+            raw=raw, argv=argv, resolved_tool="yuketang_login",
+            params={"force": _flag(options, "force")},
             action="yuketang login", should_preload_runtime_context=False,
         )
 
@@ -1593,6 +1601,12 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             raw=raw, argv=argv, resolved_tool="yuketang_set_enabled",
             params={"enabled": "on" if sub in {"enable", "启用"} else "off"},
             action=f"yuketang {sub}", should_preload_runtime_context=False,
+        )
+
+    if sub in {"logout", "退出登录"}:
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_logout", params={},
+            action="yuketang logout", should_preload_runtime_context=False,
         )
 
     if sub in {"config", "配置"}:
@@ -1648,16 +1662,17 @@ def _parse_yuketang_lesson(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         for key, message in _YUKETANG_LESSON_MISPLACED.items():
             if key in options:
                 return _error_spec(raw, f"{message}。", help_topic="yuketang lesson")
-        known = {"auto_answer", "llm", "subjective", "enter_delay"}
+        known = {"auto_enter", "auto_answer", "llm", "subjective", "enter_delay"}
         if not (known & options.keys()):
             return _error_spec(
                 raw,
-                "没有可配置项。支持 --auto-answer/--llm/--subjective/--enter-delay。",
+                "没有可配置项。支持 --auto-enter/--auto-answer/--llm/--subjective/--enter-delay。",
                 help_topic="yuketang lesson",
             )
         return CliCommandSpec(
             raw=raw, argv=argv, resolved_tool="yuketang_lesson_set",
             params={
+                "auto_enter": _string_option(options, "auto_enter"),
                 "auto_answer": _string_option(options, "auto_answer"),
                 "llm": _string_option(options, "llm"),
                 "subjective": _string_option(options, "subjective"),

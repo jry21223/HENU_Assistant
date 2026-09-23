@@ -91,7 +91,7 @@ library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD 
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 yuketang status
-yuketang lesson set --auto-answer on --llm on --subjective off --enter-delay 30
+yuketang lesson set --auto-enter on --auto-answer on --llm on --subjective off --enter-delay 30
 yuketang lesson whitelist add <课程名>
 yuketang exam set --master on
 confirm <token>
@@ -108,15 +108,16 @@ yuketang exam set --x-access-token '<考试系统令牌>'
 yuketang account set --account <手机号> --password '<密码>'
 yuketang confirm <token>
 yuketang login
+yuketang logout
 ```
 
-事件监听器会在进模型前拦截这些命令；密码、Cookie、校准请求体、考试令牌与登录动作不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**
+事件监听器会在进模型前拦截这些命令；密码、Cookie、校准请求体、考试令牌与登录动作不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**此外私聊中的自然语言短语“登录雨课堂 / 帮我重新登录一下雨课堂 / 退出登录雨课堂”等（整句、指名雨课堂）会在进模型前直接执行对应登录/退出动作。
 
 ### 雨课堂（yuketang）配置
 
 绑定前请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码；不要使用学校 IDS 密码。私聊发送绑定命令并按提示确认后，插件会后台验证并回复结果。
 
-按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
+按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课堂侧自动进班、自动答题、大模型**默认开**（`--auto-enter off` / `--auto-answer off` / `--llm off` 关闭；`--auto-enter off` 后开课不进班不答题，考试监听不受影响）。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。`yuketang logout` 退出登录：清除守护进程侧 cookie 并停用监听（绑定与配置保留，自动续期不会把登录续回来；恢复用 `yuketang enable` + `yuketang login`）。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
 
 #### 守护进程桥（可选）
 
@@ -124,7 +125,9 @@ yuketang login
 
 账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户私聊 `yuketang confirm <token>` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
 
-启用、域名、课堂/考试设置及课程范围修改使用 `confirm <token>` 二次确认，整体 `yuketang disable` 直接处理。功能面向所有用户开放，但默认不开启自动化。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+启用、域名、课堂/考试设置及课程范围修改使用 `confirm <token>` 二次确认，整体 `yuketang disable` 直接处理。功能面向所有用户开放，总开关仍默认关闭；课堂自动进班、自动答题、大模型子开关默认开启，存量显式 off 保持不变。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+
+私聊可直接说“登录雨课堂”“帮我重新登录一下雨课堂”“退出登录雨课堂”；重新登录会强制验证，普通登录在有效 Cookie 剩余超过一小时的时候复用。账号密码变更确认后强制验证新凭据，不复用旧账号 Cookie。退出不删除绑定，并先持久化停用后通知桥端；存在进行中的登录时等待，结果不明时不宣称已完成退出。请求前的加密在途记录在重启后仍有效；若网络丢失响应而无法确认会话，需要维护者核实桥端后处理，不能盲目重试。
 
 正式验收需要真实用户私聊绑定、收到最终结果、状态查询、配置确认及停止同步。仅 HTTP 200 或桥鉴权通过不构成完整验收。请求级响应关联与跨重启重放保护需桥端配套，当前不单方面更改 v1 协议。
 

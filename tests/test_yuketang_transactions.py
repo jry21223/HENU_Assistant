@@ -1,4 +1,6 @@
 import asyncio
+import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -62,3 +64,53 @@ def test_actual_live_listener_commits_then_logs_in_and_storage_failure_never_pus
             assert all(b'Demo123@' not in value for value in plugin.data.values())
     asyncio.run(run(False))
     asyncio.run(run(True))
+
+
+def test_logout_persists_stop_before_bridge_and_reports_remote_failure(monkeypatch):
+    async def run(fail_storage, remote_ok):
+        plugin = Storage()
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = plugin
+        flow = YuketangLoginCoordinator(listener)
+        monkeypatch.setattr(bridge_client, 'bridge_settings', lambda: {'url': 'https://test.invalid'})
+        monkeypatch.setattr(bridge_client, 'push_config', lambda user, config: {'ok': True, 'hash': bridge_client.canonical_hash(config)})
+        def remote_logout(user):
+            assert json.loads(plugin.data['user:test-a:yuketang_config'])['enabled'] is False
+            return {'ok': remote_ok}
+        logout = Mock(side_effect=remote_logout)
+        monkeypatch.setattr(bridge_client, 'logout', logout)
+        plugin.fail_user_snapshot = fail_storage
+        request = ctx(20, '退出登录雨课堂')
+        await flow.handle(request, is_group=False)
+        await flow.tasks[20]
+        message = str(request.reply.call_args.args[0])
+        if fail_storage:
+            assert not logout.called
+            assert '未完成' in message
+        else:
+            assert logout.called
+            assert ('桥端已确认退出' in message) is remote_ok
+            if not remote_ok:
+                assert '尚未确认' in message
+    asyncio.run(run(False, True))
+    asyncio.run(run(False, False))
+    asyncio.run(run(True, True))
+
+
+def test_valid_cookie_skips_login_but_force_does_not(monkeypatch):
+    async def run():
+        plugin = Storage()
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = plugin
+        flow = YuketangLoginCoordinator(listener)
+        monkeypatch.setattr(bridge_client, 'bridge_settings', lambda: None)
+        request = ctx(30, '')
+        await flow.call_service(request, 'yuketang_account_set', {'account':'13800000000','password':'Demo123@'})
+        monkeypatch.setattr(bridge_client, 'fetch_status', lambda user: {'ok':True,'cookie':{'expires_ms':int(time.time()*1000)+7200000}})
+        start = Mock(return_value={'ok':True,'session_id':'synthetic'})
+        monkeypatch.setattr(bridge_client, 'login_password', start)
+        result = await flow.call_service(request, 'yuketang_login', {'force':False})
+        assert result['success'] and not start.called and 'login_session_id' not in result
+        forced = await flow.call_service(request, 'yuketang_login', {'force':True})
+        assert forced['login_session_id'] == 'synthetic' and start.call_count == 1
+    asyncio.run(run())

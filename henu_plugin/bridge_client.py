@@ -164,3 +164,8 @@ def login_password(openid: str, account: str, password: str, timeout: float = 10
 
 def login_result(session_id: str, timeout: float = 3.0) -> dict[str, Any]:
     return call("/v1/login/result", {"session_id": session_id}, timeout=timeout)
+
+
+def logout(openid: str, timeout: float = 5.0) -> dict[str, Any]:
+    """清除守护进程侧该 openid 的登录态（cookie）。"""
+    return call("/v1/logout", {"openid": openid}, timeout=timeout)

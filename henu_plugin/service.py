@@ -5,6 +5,7 @@ import contextvars
 import hashlib
 import re
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -187,6 +188,7 @@ class HenuPluginService:
             "yuketang_set_token": self._yuketang_set_token,
             "yuketang_account_set": self._yuketang_account_set,
             "yuketang_login": self._yuketang_login,
+            "yuketang_logout": self._yuketang_logout,
         }
 
     def get_sender_account_context(
@@ -1096,8 +1098,28 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": "未绑定雨课堂账号",
+                "error_code": "account_unbound",
                 "reply_text": "尚未绑定雨课堂账号。请先在雨课堂设置密码，使用雨课堂绑定手机号和该密码（不是学校 IDS 密码）。然后私聊发送：yuketang account set --account <手机号> --password '<密码>'，按提示确认后开始验证。尖括号仅为占位说明，请勿原样填写。",
             }
+        force = bool(params.get("force"))
+        if not force:
+            try:
+                live = bridge_client.fetch_status(openid)
+                cookie = live.get("cookie") if isinstance(live.get("cookie"), dict) else None
+                expires_ms = _int((cookie or {}).get("expires_ms"), 0)
+                if live.get("ok") and cookie and expires_ms > int(time.time() * 1000) + 3600_000:
+                    who = _text(cookie.get("username")) or "已登录"
+                    expires = _text(cookie.get("expires_at"))
+                    return {
+                        "success": True,
+                        "msg": "雨课堂已登录，未重新登录",
+                        "reply_text": (
+                            f"当前已登录：{who}，cookie 有效期至 {expires or '未知'}；本次未重复登录。\n"
+                            "如需强制重新登录（例如换了密码）：yuketang login --force"
+                        ),
+                    }
+            except bridge_client.BridgeError:
+                pass  # 桥不可达时照旧走登录流程，由登录请求报错
         try:
             started = bridge_client.login_password(openid, account, password)
         except bridge_client.BridgeError as exc:
@@ -1107,13 +1129,22 @@ class HenuPluginService:
                 "reply_text": "守护进程桥不可达，稍后再试 `yuketang login`（配置不受影响）。",
             }
         if not started.get("ok"):
-            return {"success": False, "msg": "桥端未接受登录请求",
+            return {"success": False, "error_code": "bridge_login_rejected", "msg": "桥端未接受登录请求",
                     "reply_text": "桥端未接受登录请求，请稍后查询状态。"}
         session_id = _text(started.get("session_id"))
         if not session_id:
             return {'success': False, 'msg': '桥端未返回有效登录会话。'}
-        return {'success': True, 'login_session_id': session_id,
+        return {'success': True, 'login_session_id': session_id, 'listening_enabled': bool(config.get('enabled')),
                 'msg': '雨课堂登录已启动，尚未验证成功。'}
+
+    def _yuketang_logout(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Persist stop first; the transaction owner contacts the bridge later."""
+        result = self._yuketang_apply(yuketang_config.apply_logout)
+        if result.get('success'):
+            result['_yuketang_logout_required'] = True
+            result['_yuketang_logout_uncertain'] = bool(params.get('login_inflight_unknown'))
+            result['reply_text'] = '本地监听已停用，正在请求桥端清除登录态；绑定账号与配置保留。'
+        return result
 
 
 def _run_in_user_storage(storage_paths: UserStoragePaths, func: Callable[..., Any], *args: Any) -> Any:
