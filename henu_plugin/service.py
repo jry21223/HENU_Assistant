@@ -37,6 +37,8 @@ from henu_plugin.storage_adapter import (
     SHARED_PERIOD_TIME_FILE,
     SHARED_XIQUEER_FILE,
 )
+from henu_plugin import yuketang_config
+from henu_plugin import bridge_client
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -98,6 +100,7 @@ class UserStoragePaths:
     schedule_file: Path
     yunfz_token_file: Path
     cas_cookie_file: Path
+    yuketang_config_file: Path
     output_dir: Path
     shared_data_dir: Path  # 公共共享缓存目录（data/shared/）
 
@@ -173,6 +176,17 @@ class HenuPluginService:
             "empty_classroom_sync": self._empty_classroom_sync,
             "resource_registry_query": self._resource_registry_query,
             "resource_registry_sync": self._resource_registry_sync,
+            "yuketang_status": self._yuketang_status,
+            "yuketang_config_show": self._yuketang_config_show,
+            "yuketang_set_enabled": self._yuketang_set_enabled,
+            "yuketang_domain_set": self._yuketang_domain_set,
+            "yuketang_lesson_set": self._yuketang_lesson_set,
+            "yuketang_exam_set": self._yuketang_exam_set,
+            "yuketang_list_update": self._yuketang_list_update,
+            "yuketang_start_time": self._yuketang_start_time,
+            "yuketang_set_token": self._yuketang_set_token,
+            "yuketang_account_set": self._yuketang_account_set,
+            "yuketang_login": self._yuketang_login,
         }
 
     def get_sender_account_context(
@@ -907,6 +921,226 @@ class HenuPluginService:
             scope=_text(params.get("scope")) or "all",
             force_refresh=_bool(params.get("force_refresh"), False),
         )
+
+    def _yuketang_config_path(self) -> Path:
+        paths = get_current_user_paths()
+        if paths is None or not getattr(paths, "yuketang_config_file", None):
+            raise RuntimeError("User storage paths not set for yuketang config.")
+        return paths.yuketang_config_file
+
+    def _current_openid(self) -> str:
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        return (identity.qq if identity else "") or ""
+
+    def _bridge_push(self, config: dict[str, Any]) -> dict[str, Any]:
+        """配置写成功后的尽力推送。桥不可达不影响本地成功语义。"""
+        try:
+            if bridge_client.bridge_settings() is None:
+                return {"status": "disabled"}
+            openid = self._current_openid()
+            if not openid:
+                return {"status": "no_identity"}
+            result = bridge_client.push_config(
+                openid, yuketang_config.sanitize_config(config)
+            )
+            if result.get("ok"):
+                return {"status": "ok", "hash": _text(result.get("hash"))}
+            return {"status": "rejected", "detail": _text(result.get("msg"))}
+        except bridge_client.BridgeError as exc:
+            return {"status": "unreachable", "detail": str(exc)}
+
+    def _bridge_merge_status(self, result: dict[str, Any]) -> dict[str, Any]:
+        """status 查询时合并守护进程实时状态；哈希不一致顺手重推自愈。"""
+        try:
+            if bridge_client.bridge_settings() is None:
+                return result
+            openid = self._current_openid()
+            if not openid:
+                return result
+            live = bridge_client.fetch_status(openid)
+            if not live.get("ok"):
+                return result
+
+            notes: list[str] = []
+            cookie = live.get("cookie") if isinstance(live.get("cookie"), dict) else None
+            if cookie:
+                who = _text(cookie.get("username")) or openid[-6:]
+                expires = _text(cookie.get("expires_at"))
+                notes.append(
+                    f"登录状态：已登录（{who}，有效期至 {expires or '未知'}）"
+                    if expires else f"登录状态：已登录（{who}，有效期未知）"
+                )
+            else:
+                notes.append("登录状态：未登录（yuketang login 可出二维码）")
+
+            local_config = yuketang_config.load_config(self._yuketang_config_path())
+            local_hash = bridge_client.canonical_hash(
+                yuketang_config.sanitize_config(local_config)
+            )
+            if live.get("config_present") and _text(live.get("config_hash")) != local_hash:
+                pushed = bridge_client.push_config(
+                    openid, yuketang_config.sanitize_config(local_config)
+                )
+                if pushed.get("ok"):
+                    notes.append("配置与守护进程不一致，已自动重新同步")
+
+            uptime = _int(live.get("uptime_s"), 0)
+            notes.append(f"守护进程：已连接（桥在线 {uptime} 秒）")
+            result["bridge"] = {"status": "ok", "uptime_s": uptime}
+
+            lines = _text(result.get("reply_text"), strip=False).split("\n")
+            merged = [notes.pop(0) if line.startswith("登录状态：") else line for line in lines]
+            merged = ["守护进程：已连接" if line.startswith("守护进程：") else line for line in merged]
+            for note in notes:
+                merged.append(note)
+            result["reply_text"] = "\n".join(merged)
+        except bridge_client.BridgeError:
+            lines = _text(result.get("reply_text"), strip=False).split("\n")
+            result["reply_text"] = "\n".join(
+                "守护进程：不可达（配置已本地保存，恢复后自动同步）"
+                if line.startswith("守护进程：") else line
+                for line in lines
+            )
+            result["bridge"] = {"status": "unreachable"}
+        except Exception:
+            pass
+        return result
+
+    def _yuketang_read(self) -> dict[str, Any]:
+        return yuketang_config.load_config(self._yuketang_config_path())
+
+    def _yuketang_apply(
+        self, applier: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        config_file = self._yuketang_config_path()
+        config = yuketang_config.load_config(config_file)
+        result = applier(config)
+        if isinstance(result, dict) and result.get("success"):
+            yuketang_config.save_config(config_file, config)
+            push = self._bridge_push(config)
+            result["bridge"] = push
+            if push.get("status") == "ok":
+                result["reply_text"] = _text(result.get("reply_text"), strip=False) + "\n已同步守护进程（≤30 秒生效）。"
+            elif push.get("status") == "unreachable":
+                result["reply_text"] = _text(result.get("reply_text"), strip=False) + "\n守护进程不可达：已保存，恢复后自动同步。"
+        return result
+
+    def _yuketang_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._bridge_merge_status(
+            yuketang_config.build_status_result(self._yuketang_read())
+        )
+
+    def _yuketang_config_show(self, params: dict[str, Any]) -> dict[str, Any]:
+        return yuketang_config.build_config_show_result(
+            self._yuketang_read(), _text(params.get("topic"))
+        )
+
+    def _yuketang_set_enabled(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_enabled(config, params.get("enabled"))
+        )
+
+    def _yuketang_domain_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_domain(config, params.get("domain"))
+        )
+
+    def _yuketang_lesson_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_lesson_set(config, params)
+        )
+
+    def _yuketang_exam_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_exam_set(config, params)
+        )
+
+    def _yuketang_list_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_list_update(
+                config,
+                _text(params.get("scope")),
+                _text(params.get("op")),
+                params.get("items") or [],
+            )
+        )
+
+    def _yuketang_start_time(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_start_time(
+                config,
+                _text(params.get("op")),
+                params.get("course"),
+                params.get("slots"),
+            )
+        )
+
+    def _yuketang_set_token(self, params: dict[str, Any]) -> dict[str, Any]:
+        token = params.get("x_access_token")
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_token(config, token)
+        )
+
+    def _yuketang_account_set(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._yuketang_apply(
+            lambda config: yuketang_config.apply_account_set(
+                config, params.get("account"), params.get("password")
+            )
+        )
+
+    def _yuketang_login(self, params: dict[str, Any]) -> dict[str, Any]:
+        """调用守护进程密码登录并轮询结果。在 worker 线程内同步等待（~1 分钟）。"""
+        openid = self._current_openid()
+        config = yuketang_config.load_config(self._yuketang_config_path())
+        account = _text(config.get("credentials", {}).get("account"))
+        password = str(config.get("credentials", {}).get("password") or "")
+        if not account or not password:
+            return {
+                "success": False,
+                "msg": "未绑定雨课堂账号",
+                "reply_text": "尚未绑定雨课堂账号。请私聊发送：yuketang account set --account <手机号> --password '<密码>'，再执行 yuketang login。",
+            }
+        try:
+            started = bridge_client.login_password(openid, account, password)
+        except bridge_client.BridgeError as exc:
+            return {
+                "success": False,
+                "msg": f"桥不可达: {exc}",
+                "reply_text": "守护进程桥不可达，稍后再试 `yuketang login`（配置不受影响）。",
+            }
+        if not started.get("ok"):
+            return {"success": False, "msg": _text(started.get("msg")) or "启动登录失败",
+                    "reply_text": f"启动登录失败：{_text(started.get('msg'))}"}
+
+        import time as _time
+        session_id = _text(started.get("session_id"))
+        for _ in range(40):  # 最多 ~160 秒
+            _time.sleep(4)
+            try:
+                result = bridge_client.login_result(session_id)
+            except bridge_client.BridgeError as exc:
+                return {"success": False, "msg": f"查询登录结果失败: {exc}",
+                        "reply_text": "登录结果查询中断，稍后用 `yuketang status` 查看。"}
+            status = _text(result.get("status"))
+            if status == "success":
+                username = _text(result.get("username"))
+                expires = _text(result.get("expires_at"))
+                reply = f"登录成功：{username or '已登录'}"
+                if expires:
+                    from datetime import datetime as _dt
+                    try:
+                        reply += f"，cookie 有效期至 {_dt.fromtimestamp(float(expires)).strftime('%Y-%m-%d %H:%M')}"
+                    except (ValueError, OSError):
+                        pass
+                reply += "。守护进程将在到期前自动续期。"
+                return {"success": True, "msg": "yuketang 登录成功",
+                        "reply_text": reply, "bridge": {"status": "login_ok"}}
+            if status in {"failed", "expired"}:
+                detail = _text(result.get("error")) or status
+                return {"success": False, "msg": f"登录失败: {detail}",
+                        "reply_text": f"登录失败（{detail}）。凭据仍保留，可重发 yuketang login 再试。"}
+        return {"success": False, "msg": "登录超时",
+                "reply_text": "登录仍在进行（超过 160 秒），稍后用 `yuketang status` 查看结果。"}
 
 
 def _run_in_user_storage(storage_paths: UserStoragePaths, func: Callable[..., Any], *args: Any) -> Any:

@@ -31,6 +31,7 @@ PREFIX_YUNFZ_TOKEN = "user:{}:yunfz_token"
 PREFIX_CAS_COOKIE = "user:{}:cas_cookie"
 PREFIX_COURSE_MONITOR_CONFIG = "user:{}:course_monitor_config"
 PREFIX_COURSE_MONITOR_STATE = "user:{}:course_monitor_state"
+PREFIX_YUKETANG_CONFIG = "user:{}:yuketang_config"
 # xiqueer request data contains a Cookie and therefore must be user-private.
 PREFIX_USER_XIQUEER = "user:{}:xiqueer"
 PREFIX_SHARED_PERIOD_TIME = "shared:period_time"
@@ -68,6 +69,7 @@ class UserStoragePaths:
     cas_cookie_file: Path
     course_monitor_config_file: Path
     course_monitor_state_file: Path
+    yuketang_config_file: Path
     xiqueer_request_file: Path
     output_dir: Path
     shared_data_dir: Path
@@ -142,6 +144,7 @@ class PluginStorageAdapter:
             cas_cookie_file=user_root / "cas_cookies.json",
             course_monitor_config_file=output_dir / "course_monitor_config.json",
             course_monitor_state_file=output_dir / "course_monitor_state.json",
+            yuketang_config_file=user_root / "yuketang_config.json",
             xiqueer_request_file=user_root / XIQUEER_FILE,
             output_dir=output_dir,
             shared_data_dir=shared_data_dir,
@@ -167,6 +170,10 @@ class PluginStorageAdapter:
             _StorageFile(
                 self._key(PREFIX_COURSE_MONITOR_STATE),
                 paths.course_monitor_state_file,
+            ),
+            _StorageFile(
+                self._key(PREFIX_YUKETANG_CONFIG),
+                paths.yuketang_config_file,
             ),
             _StorageFile(self._key(PREFIX_USER_XIQUEER), paths.xiqueer_request_file),
             _StorageFile(

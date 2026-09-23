@@ -20,7 +20,7 @@ class CliCommandSpec:
 
 
 _SENSITIVE_OPTION_PATTERN = re.compile(
-    r"(?i)(--(?:password|passwd|cookie|data|token|authorization|api[-_]?key)(?:=|\s+))"
+    r"(?i)(--(?:password|passwd|cookie|data|token|authorization|api[-_]?key|x[-_]?access[-_]?token)(?:=|\s+))"
     r"(\"[^\"]*\"|'[^']*'|[^\s]+)"
 )
 
@@ -34,6 +34,8 @@ _SENSITIVE_OPTION_NAMES = frozenset(
         "--authorization",
         "--api-key",
         "--api_key",
+        "--x-access-token",
+        "--x_access_token",
     }
 )
 
@@ -69,7 +71,8 @@ def redact_cli_params(params: dict[str, Any]) -> dict[str, Any]:
         if normalized in {
             "password", "passwd", "cookie", "data", "token",
             "authorization", "api_key", "api-key", "secret", "access_token",
-            "refresh_token", "ticket", "castgc", "tgc", "ssessionid", "deskey",
+            "x_access_token", "x-access-token", "refresh_token", "ticket",
+            "castgc", "tgc", "ssessionid", "deskey",
         }:
             result[key] = "<redacted>"
     return result
@@ -129,6 +132,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_empty_classroom(raw, argv)
     if head in {"resource", "资源", "registry"}:
         return _parse_resource(raw, argv)
+    if head in {"yuketang", "雨课堂"}:
+        return _parse_yuketang(raw, argv)
 
     return _error_spec(
         raw,
@@ -158,6 +163,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "resource search 十号楼101",
                 "yunfz leave list",
                 "yunfz signin list",
+                "yuketang status",
+                "yuketang lesson set --auto-answer on --llm on",
                 "status",
                 "help <topic>",
             ],
@@ -170,6 +177,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "help empty_classroom",
                 "help resource",
                 "help yunfz",
+                "help yuketang",
             ],
             "tips": [
                 "写操作只在 `success=true` 时才算完成。",
@@ -421,6 +429,85 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized == "yuketang":
+        return {
+            "topic": normalized,
+            "summary": "雨课堂监听配置：总开关、域名、课堂/考试开关与名单、进班延时、邀请码。",
+            "commands": [
+                "yuketang status",
+                "yuketang login",
+                "yuketang account set --account <手机号> --password '<密码>'   # 敏感，仅私聊",
+                "yuketang config show [lesson|exam|other]",
+                "yuketang enable / yuketang disable",
+                "yuketang domain set --domain <www|pro|changjiang|huanghe>",
+                "yuketang lesson set --auto-answer <on|off> [--llm <on|off>] [--subjective <on|off>] [--enter-delay <0-600>]",
+                "yuketang lesson whitelist|blacklist add|remove|clear <课程名>...",
+                "yuketang lesson start-time set --course <课程名> --slots \"1=08:00,2=13:30\"",
+                "yuketang lesson start-time clear --course <课程名>",
+                "yuketang exam set --auto-answer <on|off> [--llm <on|off>] [--subjective <on|off>] [--master <on|off>] [--slave <on|off>]",
+                "yuketang exam whitelist add|remove|clear <课程名>...",
+                "yuketang codes add|remove|clear <邀请码>...",
+                "yuketang exam set --x-access-token '<token>'   # 敏感，仅私聊单独发送",
+            ],
+            "examples": [
+                "yuketang status",
+                "yuketang lesson set --auto-answer on --llm on --subjective off --enter-delay 30",
+                "yuketang exam whitelist add 未央.机器学习",
+                "yuketang lesson start-time set --course 未央.机器学习 --slots \"1=08:00,2=13:30\"",
+            ],
+            "tips": [
+                "开关是总闸（对该 QQ 的全部课程生效），黑白名单决定范围；黑名单优先于白名单，课程名完全匹配。",
+                "exam 白名单为空等于考试功能整体关闭（与 lesson 相反）。",
+                "课件 PDF / PPT 进度 / 试卷文件推送已整体停用，ppt/si/paper 不可配置。",
+                "--enter-delay 是“开班后等多久进班”（秒）；start-time 是“钟表几点前不进”，两者独立。",
+                "--x-access-token 属敏感值，必须由用户在私聊中直接发送整条命令，模型不得构造或复述。",
+                "先私聊 `yuketang account set` 绑定雨课堂账号，再私聊 `yuketang login` 登录（自动过验证码，约 1 分钟）；两条均为仅私聊命令，由插件在进模型前直接处理，群聊发送会被拒绝。",
+            ],
+        }
+
+    if normalized == "yuketang lesson":
+        return {
+            "topic": normalized,
+            "summary": "雨课堂课堂（lesson）配置。",
+            "commands": [
+                "yuketang lesson set --auto-answer <on|off> --llm <on|off> --subjective <on|off> --enter-delay <0-600>",
+                "yuketang lesson whitelist add|remove|clear <课程名>...",
+                "yuketang lesson blacklist add|remove|clear <课程名>...",
+                "yuketang lesson start-time set --course <课程名> --slots \"1=08:00,2=13:30\"",
+                "yuketang lesson start-time clear --course <课程名>",
+            ],
+            "examples": [
+                "yuketang lesson set --auto-answer on --llm on",
+                "yuketang lesson blacklist add 未央.深度学习",
+                "yuketang lesson start-time set --course 未央.机器学习 --slots \"1=08:00\"",
+            ],
+            "tips": [
+                "--auto-answer 开而 --llm 关时，无答案会提交默认答案。",
+                "--subjective 默认关：主观题只打印不作答；开启后交由大模型生成并提交。",
+                "课程名与雨课堂首页课程标签完全匹配（含“未央.”等前缀）。",
+            ],
+        }
+
+    if normalized == "yuketang exam":
+        return {
+            "topic": normalized,
+            "summary": "雨课堂考试（exam）配置。",
+            "commands": [
+                "yuketang exam set --auto-answer <on|off> [--llm <on|off>] [--subjective <on|off>] [--master <on|off>] [--slave <on|off>]",
+                "yuketang exam whitelist add|remove|clear <课程名>...",
+                "yuketang exam set --x-access-token '<token>'   # 敏感，仅私聊单独发送",
+            ],
+            "examples": [
+                "yuketang exam set --auto-answer on --llm on",
+                "yuketang exam whitelist add 未央.机器学习",
+            ],
+            "tips": [
+                "白名单为空等于考试功能整体关闭。",
+                "--master 与 --slave 互斥，不能同时开启。",
+                "--x-access-token 必须私聊直发、单独成条，不得与其他配置混在同一条命令。",
+            ],
+        }
+
     return {
         "topic": normalized,
         "summary": f"未找到 `help {normalized}` 的专用说明，可先退回上一级主题。",
@@ -457,6 +544,12 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
             return ["resource search 十号楼101", "resource stats"]
         if topic == "yunfz":
             return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list"]
+        if topic == "yuketang":
+            return ["yuketang status", "yuketang lesson set --auto-answer on", "help yuketang lesson"]
+        if topic == "yuketang lesson":
+            return ["yuketang lesson set --auto-answer on --llm on", "yuketang lesson whitelist add <课程名>", "yuketang lesson start-time set --course <课程名> --slots \"1=08:00\""]
+        if topic == "yuketang exam":
+            return ["yuketang exam whitelist add <课程名>", "yuketang exam set --auto-answer on", "yuketang status"]
         return ["help"]
 
     resolved_tool = spec.resolved_tool or ""
@@ -522,6 +615,24 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["yunfz leave detail --leave-id <ID>", "yunfz leave statistics"]
     if resolved_tool in {"yunfz_signin_query", "yunfz_checksleep_query", "yunfz_activity_query", "yunfz_collection_query"}:
         return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list", "yunfz activity list"]
+    if resolved_tool == "yuketang_status":
+        return ["yuketang config show", "yuketang lesson set --auto-answer on", "help yuketang"]
+    if resolved_tool == "yuketang_config_show":
+        return ["yuketang status", "yuketang lesson set --auto-answer on", "yuketang exam whitelist add <课程名>"]
+    if resolved_tool == "yuketang_set_enabled":
+        return ["yuketang status"] if success else ["yuketang status", "help yuketang"]
+    if resolved_tool == "yuketang_domain_set":
+        return ["yuketang status", "yuketang enable"]
+    if resolved_tool == "yuketang_lesson_set":
+        return ["yuketang config show lesson", "yuketang lesson whitelist add <课程名>"] if success else ["help yuketang lesson"]
+    if resolved_tool == "yuketang_exam_set":
+        return ["yuketang config show exam", "yuketang exam whitelist add <课程名>"] if success else ["help yuketang exam"]
+    if resolved_tool == "yuketang_list_update":
+        return ["yuketang status", "yuketang config show"]
+    if resolved_tool == "yuketang_start_time":
+        return ["yuketang config show lesson", "yuketang lesson set --enter-delay 30"] if success else ["help yuketang lesson"]
+    if resolved_tool == "yuketang_set_token":
+        return ["yuketang status", "yuketang config show exam"]
     return ["help"]
 
 
@@ -1398,6 +1509,271 @@ def _parse_resource(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             params={"view": "stats"}, action="查看统计", should_preload_runtime_context=False)
 
     return _error_spec(raw, f"不支持: {sub}，支持 搜索/解析/同步/统计", help_topic="resource")
+
+
+_YUKETANG_LESSON_FORBIDDEN = {
+    "ppt": "ppt",
+    "si": "si",
+    "progress": "si",
+    "paper": "paper",
+}
+_YUKETANG_LESSON_MISPLACED = {
+    "x_access_token": "--x-access-token 属于 exam 配置，且必须私聊单独发送",
+    "master": "--master 属于 exam 配置",
+    "slave": "--slave 属于 exam 配置",
+}
+_YUKETANG_EXAM_FORBIDDEN = {
+    "ppt": "ppt",
+    "paper": "paper",
+    "si": "si",
+    "progress": "si",
+}
+_YUKETANG_LIST_SCOPES = {
+    "whitelist": "lesson_whitelist",
+    "白名单": "lesson_whitelist",
+    "blacklist": "lesson_blacklist",
+    "黑名单": "lesson_blacklist",
+}
+
+
+def _yuketang_forbidden_error(raw: str, options: dict[str, Any], forbidden: dict[str, str]) -> str | None:
+    for key, _ in forbidden.items():
+        if key in options:
+            return (
+                "课件 PDF、PPT 进度、试卷文件推送已整体停用，不可配置"
+                f"（`--{key.replace('_', '-')}` 已冻结为关闭）。"
+            )
+    return None
+
+
+def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 1:
+        return _help_spec(raw, argv, "yuketang")
+
+    sub = argv[1].lower()
+    if sub in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "yuketang")
+
+    if sub in {"status", "状态"}:
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_status", params={},
+            action="yuketang status", should_preload_runtime_context=False,
+        )
+
+    if sub in {"login", "登录"}:
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_login", params={},
+            action="yuketang login", should_preload_runtime_context=False,
+        )
+
+    if sub in {"account", "账号"}:
+        if len(argv) < 3 or argv[2].lower() not in {"set", "bind", "绑定", "设置"}:
+            return _error_spec(
+                raw,
+                "用法: yuketang account set --account <手机号> --password '<密码>'（仅私聊）。",
+                help_topic="yuketang",
+            )
+        options, _, error = _parse_options(argv[3:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang")
+        missing = _missing_required(options, "account", "password")
+        if missing:
+            return _error_spec(raw, missing, help_topic="yuketang")
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_account_set",
+            params={
+                "account": _string_option(options, "account"),
+                "password": _string_option(options, "password", strip=False),
+            },
+            action="yuketang account set", should_preload_runtime_context=False,
+        )
+
+    if sub in {"enable", "disable", "启用", "停用"}:
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_set_enabled",
+            params={"enabled": "on" if sub in {"enable", "启用"} else "off"},
+            action=f"yuketang {sub}", should_preload_runtime_context=False,
+        )
+
+    if sub in {"config", "配置"}:
+        topic = argv[3].lower() if len(argv) > 3 else ""
+        if len(argv) < 3 or argv[2].lower() not in {"show", "查看"}:
+            return _error_spec(raw, "用法: yuketang config show [lesson|exam|other]。", help_topic="yuketang")
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_config_show",
+            params={"topic": topic}, action="yuketang config show",
+            should_preload_runtime_context=False,
+        )
+
+    if sub in {"domain", "域名"}:
+        if len(argv) < 3 or argv[2].lower() not in {"set", "设置"}:
+            return _error_spec(raw, "用法: yuketang domain set --domain <www|pro|changjiang|huanghe>。", help_topic="yuketang")
+        options, _, error = _parse_options(argv[3:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang")
+        domain = _string_option(options, "domain")
+        if not domain:
+            return _error_spec(raw, "缺少参数 `--domain <www|pro|changjiang|huanghe>`。", help_topic="yuketang")
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_domain_set",
+            params={"domain": domain}, action="yuketang domain set",
+            should_preload_runtime_context=False,
+        )
+
+    if sub in {"lesson", "课堂"}:
+        return _parse_yuketang_lesson(raw, argv)
+    if sub in {"exam", "考试"}:
+        return _parse_yuketang_exam(raw, argv)
+    if sub in {"codes", "code", "邀请码"}:
+        return _parse_yuketang_listop(raw, argv, scope="codes", help_topic="yuketang")
+
+    return _error_spec(raw, f"未知命令 `yuketang {argv[1]}`。", help_topic="yuketang")
+
+
+def _parse_yuketang_lesson(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 2:
+        return _help_spec(raw, argv, "yuketang lesson")
+
+    verb = argv[2].lower()
+    if verb in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "yuketang lesson")
+
+    if verb in {"set", "设置"}:
+        options, _, error = _parse_options(argv[3:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang lesson")
+        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_LESSON_FORBIDDEN)
+        if forbidden:
+            return _error_spec(raw, forbidden, help_topic="yuketang lesson")
+        for key, message in _YUKETANG_LESSON_MISPLACED.items():
+            if key in options:
+                return _error_spec(raw, f"{message}。", help_topic="yuketang lesson")
+        known = {"auto_answer", "llm", "subjective", "enter_delay"}
+        if not (known & options.keys()):
+            return _error_spec(
+                raw,
+                "没有可配置项。支持 --auto-answer/--llm/--subjective/--enter-delay。",
+                help_topic="yuketang lesson",
+            )
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_lesson_set",
+            params={
+                "auto_answer": _string_option(options, "auto_answer"),
+                "llm": _string_option(options, "llm"),
+                "subjective": _string_option(options, "subjective"),
+                "enter_delay": _string_option(options, "enter_delay"),
+            },
+            action="yuketang lesson set", should_preload_runtime_context=False,
+        )
+
+    if verb in _YUKETANG_LIST_SCOPES:
+        return _parse_yuketang_listop(raw, argv, scope=_YUKETANG_LIST_SCOPES[verb], help_topic="yuketang lesson")
+
+    if verb in {"start-time", "starttime", "进班时间"}:
+        if len(argv) < 4 or argv[3].lower() not in {"set", "clear", "设置", "清除"}:
+            return _error_spec(
+                raw,
+                "用法: yuketang lesson start-time set --course <课程名> --slots \"1=08:00,2=13:30\" "
+                "或 yuketang lesson start-time clear --course <课程名>。",
+                help_topic="yuketang lesson",
+            )
+        op = "set" if argv[3].lower() in {"set", "设置"} else "clear"
+        options, _, error = _parse_options(argv[4:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang lesson")
+        course = _string_option(options, "course")
+        slots = _string_option(options, "slots")
+        if not course:
+            return _error_spec(raw, "缺少参数 `--course <课程名>`。", help_topic="yuketang lesson")
+        if op == "set" and not slots:
+            return _error_spec(raw, "缺少参数 `--slots \"1=08:00,2=13:30\"`。", help_topic="yuketang lesson")
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_start_time",
+            params={"op": op, "course": course, "slots": slots},
+            action="yuketang lesson start-time", should_preload_runtime_context=False,
+        )
+
+    return _error_spec(raw, f"未知命令 `yuketang lesson {argv[2]}`。", help_topic="yuketang lesson")
+
+
+def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 2:
+        return _help_spec(raw, argv, "yuketang exam")
+
+    verb = argv[2].lower()
+    if verb in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "yuketang exam")
+
+    if verb in {"set", "设置"}:
+        options, _, error = _parse_options(argv[3:])
+        if error:
+            return _error_spec(raw, error, help_topic="yuketang exam")
+        has_token = "x_access_token" in options
+        normal_flags = {"auto_answer", "llm", "subjective", "master", "slave"} & options.keys()
+        if has_token and normal_flags:
+            return _error_spec(
+                raw,
+                "`--x-access-token` 必须单独发送：yuketang exam set --x-access-token '<token>'，"
+                "不要与其他配置项混在一条命令里。",
+                help_topic="yuketang exam",
+            )
+        if has_token:
+            token = _string_option(options, "x_access_token", strip=False)
+            if not token:
+                return _error_spec(raw, "缺少令牌值: yuketang exam set --x-access-token '<token>'。", help_topic="yuketang exam")
+            return CliCommandSpec(
+                raw=raw, argv=argv, resolved_tool="yuketang_set_token",
+                params={"x_access_token": token},
+                action="yuketang exam set token", should_preload_runtime_context=False,
+            )
+        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_EXAM_FORBIDDEN)
+        if forbidden:
+            return _error_spec(raw, forbidden, help_topic="yuketang exam")
+        if not normal_flags:
+            return _error_spec(
+                raw,
+                "没有可配置项。支持 --auto-answer/--llm/--subjective/--master/--slave"
+                "（--x-access-token 需单独私聊发送）。",
+                help_topic="yuketang exam",
+            )
+        return CliCommandSpec(
+            raw=raw, argv=argv, resolved_tool="yuketang_exam_set",
+            params={
+                "auto_answer": _string_option(options, "auto_answer"),
+                "llm": _string_option(options, "llm"),
+                "subjective": _string_option(options, "subjective"),
+                "master": _string_option(options, "master"),
+                "slave": _string_option(options, "slave"),
+            },
+            action="yuketang exam set", should_preload_runtime_context=False,
+        )
+
+    if verb in {"whitelist", "白名单"}:
+        return _parse_yuketang_listop(raw, argv, scope="exam_whitelist", help_topic="yuketang exam")
+
+    return _error_spec(raw, f"未知命令 `yuketang exam {argv[2]}`。", help_topic="yuketang exam")
+
+
+def _parse_yuketang_listop(raw: str, argv: tuple[str, ...], scope: str, help_topic: str) -> CliCommandSpec:
+    base = 3 if scope in {"lesson_whitelist", "lesson_blacklist", "exam_whitelist"} else 2
+    if len(argv) <= base:
+        return _error_spec(raw, f"缺少 add/remove/clear 子操作。", help_topic=help_topic)
+
+    op = argv[base].lower()
+    if op not in {"add", "remove", "clear", "新增", "移除", "清空"}:
+        return _error_spec(raw, f"未知操作 `{argv[base]}`，支持 add/remove/clear。", help_topic=help_topic)
+    op = {"新增": "add", "移除": "remove", "清空": "clear"}.get(op, op)
+    items = [str(item) for item in argv[base + 1:]]
+    if op == "clear" and items:
+        return _error_spec(raw, "`clear` 不接受额外名称参数。", help_topic=help_topic)
+    if op in {"add", "remove"} and not items:
+        return _error_spec(raw, f"缺少名称参数。", help_topic=help_topic)
+
+    return CliCommandSpec(
+        raw=raw, argv=argv, resolved_tool="yuketang_list_update",
+        params={"scope": scope, "op": op, "items": items},
+        action=f"yuketang list {scope} {op}", should_preload_runtime_context=False,
+    )
 
 
 def _int_opt(options: dict, *keys: str, default: int = 0) -> int:
