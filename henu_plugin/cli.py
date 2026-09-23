@@ -461,7 +461,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "课件 PDF / PPT 进度 / 试卷文件推送已整体停用，ppt/si/paper 不可配置。",
                 "--enter-delay 是“开班后等多久进班”（秒）；start-time 是“钟表几点前不进”，两者独立。",
                 "--x-access-token 属敏感值，必须由用户在私聊中直接发送整条命令，模型不得构造或复述。",
-                "先私聊 `yuketang account set` 绑定雨课堂账号，再私聊 `yuketang login` 登录（自动过验证码，约 1 分钟）；两条均为仅私聊命令，由插件在进模型前直接处理，群聊发送会被拒绝。",
+                "请先在雨课堂设置密码，使用雨课堂绑定手机号和该密码，而不是学校 IDS 密码。再私聊 `yuketang account set` 并按提示确认，插件将后台验证并回复结果；已有绑定可私聊 `yuketang login`。群聊凭据会被拒绝，密码不会交给模型。",
             ],
         }
 
