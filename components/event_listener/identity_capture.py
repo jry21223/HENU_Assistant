@@ -12,6 +12,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from langbot_plugin.api.entities import context, events
 
 from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.yuketang_sync import sync_after_commit
 from henu_plugin.service import set_current_user_paths
 
 
@@ -467,12 +468,14 @@ class IdentityCaptureListener(EventListener):
         user_paths = await storage_adapter.load_all()
         set_current_user_paths(user_paths)
         try:
-            return await asyncio.to_thread(func, *args)
+            result = await asyncio.to_thread(func, *args)
         finally:
             try:
                 await storage_adapter.save_all()
             finally:
                 set_current_user_paths(None)
+        await sync_after_commit(self.plugin, storage_key, result)
+        return result
 
     async def _safe_get_query_var(self, ctx: context.EventContext, key: str) -> object:
         try:

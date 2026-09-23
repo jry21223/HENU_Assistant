@@ -314,6 +314,10 @@ def test_token_masking_never_leaks() -> None:
         assert result["success"]
         ycfg.save_config(config_file, config)
 
+        stored_text = config_file.read_text(encoding="utf-8")
+        assert token not in stored_text
+        assert "enc:v2:" in stored_text
+
         reloaded = ycfg.load_config(config_file)
         assert reloaded["credentials"]["x_access_token"] == token
 
@@ -387,6 +391,11 @@ def test_apply_account_set_and_redaction() -> None:
         assert result["success"], result["msg"]
         ycfg.save_config(config_file, config)
 
+        stored_text = config_file.read_text(encoding="utf-8")
+        assert "13800001234" not in stored_text
+        assert "pw123456" not in stored_text
+        assert stored_text.count("enc:v2:") >= 2
+
         reloaded = ycfg.load_config(config_file)
         assert reloaded["credentials"]["account"] == "13800001234"
         assert reloaded["credentials"]["password"] == "pw123456"
@@ -403,6 +412,29 @@ def test_apply_account_set_and_redaction() -> None:
 
         assert not ycfg.apply_account_set(config, "", "x" * 8)["success"]
         assert not ycfg.apply_account_set(config, "13800001234", "123")["success"]
+
+    _with_config_file(body)
+
+
+def test_plaintext_credentials_are_migrated_on_read() -> None:
+    def body(config_file: Path) -> None:
+        raw = ycfg.default_config()
+        raw["credentials"] = {
+            "x_access_token": "legacy-token",
+            "account": "13800001234",
+            "password": "legacy-password",
+        }
+        config_file.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+        loaded = ycfg.load_config(config_file)
+
+        assert loaded["credentials"]["x_access_token"] == "legacy-token"
+        assert loaded["credentials"]["account"] == "13800001234"
+        assert loaded["credentials"]["password"] == "legacy-password"
+        stored_text = config_file.read_text(encoding="utf-8")
+        assert "legacy-token" not in stored_text
+        assert "13800001234" not in stored_text
+        assert "legacy-password" not in stored_text
 
     _with_config_file(body)
 

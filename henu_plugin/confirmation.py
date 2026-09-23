@@ -18,6 +18,12 @@ WRITE_TOOL_NAMES = frozenset(
         "seminar_reserve",
         "seminar_signin",
         "seminar_cancel",
+        "yuketang_set_enabled",
+        "yuketang_domain_set",
+        "yuketang_lesson_set",
+        "yuketang_exam_set",
+        "yuketang_list_update",
+        "yuketang_start_time",
     }
 )
 

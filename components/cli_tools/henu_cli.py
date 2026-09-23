@@ -54,7 +54,13 @@ class HenuCli(BaseHenuTool):
         # Account passwords and calibration cookies are handled directly by the
         # event listener before the model is called. Fail closed if a provider
         # nevertheless attempts to invoke them through the Tool surface.
-        if spec.resolved_tool in {"setup_account", "set_calibration_source"}:
+        if spec.resolved_tool in {
+            "setup_account",
+            "set_calibration_source",
+            "yuketang_account_set",
+            "yuketang_set_token",
+            "yuketang_login",
+        }:
             return {
                 "success": False,
                 "error_code": "direct_private_command_required",
@@ -62,7 +68,8 @@ class HenuCli(BaseHenuTool):
                 "reply_text": "请在私聊中直接发送绑定或校准命令；插件会在调用模型前处理，不会把密码或 Cookie 发给模型。",
             }
 
-        if spec.resolved_tool in WRITE_TOOL_NAMES:
+        stopping_yuketang = spec.resolved_tool == 'yuketang_set_enabled' and spec.params.get('enabled') == 'off'
+        if spec.resolved_tool in WRITE_TOOL_NAMES and not stopping_yuketang:
             parameter_error = self._write_parameter_error(spec)
             if parameter_error:
                 return {
@@ -114,6 +121,12 @@ class HenuCli(BaseHenuTool):
     def _operation_summary(spec: Any) -> str:
         params = spec.params if isinstance(getattr(spec, "params", None), dict) else {}
         keys_by_tool = {
+            "yuketang_set_enabled": ("enabled",),
+            "yuketang_domain_set": ("domain",),
+            "yuketang_lesson_set": ("auto_answer", "llm", "subjective", "enter_delay"),
+            "yuketang_exam_set": ("auto_answer", "llm", "subjective", "master", "slave"),
+            "yuketang_list_update": ("scope", "op", "items"),
+            "yuketang_start_time": ("op", "course", "slots"),
             "library_reserve": ("location", "seat_no", "target_date", "preferred_time", "preferred_end_time"),
             "library_auto_signin": ("record_id",),
             "library_cancel": ("record_id", "record_type"),
@@ -287,6 +300,12 @@ class HenuCli(BaseHenuTool):
         if not isinstance(result, dict):
             return result
         tool_result = result.get("tool_result")
+        if isinstance(tool_result, dict) and tool_result.get('_yuketang_sync_required'):
+            result.update(external_committed=False, storage_persisted=False, retry_safe=True)
+            result['msg'] = '本地雨课堂配置保存失败，未推送桥端；请稍后重试。'
+            result['reply_text'] = result['msg']
+            result.pop('tool_result', None)
+            return result
         if (
             result.get("success") is False
             and isinstance(tool_result, dict)

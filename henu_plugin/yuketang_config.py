@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 import os
 import re
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
+
+from henu_mcp.core.secure_storage import decrypt_value, encrypt_value, is_encrypted
 
 DOMAIN_ALIASES = {
     "www": "www.yuketang.cn",
@@ -45,6 +48,7 @@ _LIST_SCOPES = {
 
 _ON_VALUES = {"1", "true", "yes", "on", "开", "开启", "是"}
 _OFF_VALUES = {"0", "false", "no", "off", "关", "关闭", "否"}
+_CREDENTIAL_FIELDS = ("x_access_token", "account", "password")
 
 
 def default_config() -> dict[str, Any]:
@@ -163,12 +167,34 @@ def load_config(config_file: Path) -> dict[str, Any]:
         raw = json.loads(config_file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"读取雨课堂配置失败（不当作空配置处理）: {exc}") from exc
-    return sanitize_config(raw)
+    credentials = raw.get("credentials") if isinstance(raw.get("credentials"), dict) else {}
+    migrated_plaintext = False
+    decrypted = dict(credentials)
+    for field in _CREDENTIAL_FIELDS:
+        value = str(credentials.get(field) or "")
+        if value and is_encrypted(value):
+            try:
+                decrypted[field] = decrypt_value(value)
+            except Exception as exc:
+                raise RuntimeError(f"雨课堂凭据无法解密，请检查 HENU_MASTER_KEY: {field}") from exc
+        elif value:
+            migrated_plaintext = True
+    raw = dict(raw)
+    raw["credentials"] = decrypted
+    payload = sanitize_config(raw)
+    if migrated_plaintext:
+        save_config(config_file, payload)
+    return payload
 
 
 def save_config(config_file: Path, config: Any) -> None:
     payload = sanitize_config(config)
-    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    stored = deepcopy(payload)
+    for field in _CREDENTIAL_FIELDS:
+        value = str(stored["credentials"].get(field) or "")
+        stored["credentials"][field] = encrypt_value(value) if value else ""
+    stored["credential_key_version"] = "v2"
+    text = json.dumps(stored, ensure_ascii=False, indent=2)
     temp_file = config_file.with_name(config_file.name + ".tmp")
     temp_file.write_text(text, encoding="utf-8")
     os.replace(temp_file, config_file)

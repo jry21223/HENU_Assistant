@@ -105,6 +105,8 @@ confirm <token>
 account set --student-id <学号> --password '<密码>'
 calibration set --data '<请求体>' --cookie '<Cookie>'
 yuketang exam set --x-access-token '<考试系统令牌>'
+yuketang account set --account <手机号> --password '<密码>'
+yuketang confirm <token>
 yuketang login
 ```
 
@@ -116,7 +118,13 @@ yuketang login
 
 #### 守护进程桥（可选）
 
-雨课堂守护进程可部署在另一台服务器（B）。插件通过环境变量 `HENU_BRIDGE_URL` / `HENU_BRIDGE_SECRET` 指向 B 的 `bridge.py` 端点；全部流量为 AES-256-GCM 加密信封（密钥由 secret 派生，时间戳+nonce 防重放），因此普通 HTTP 即可，无需证书。桥不可达时配置命令照常成功（Storage 是事实源），恢复后经 status 哈希核对自动重推。发送者按通道标识（官方机器人为 openid）索引。
+雨课堂守护进程可部署在另一台服务器（B）。在插件根目录 `.env` 配置 `HENU_BRIDGE_URL` / `HENU_BRIDGE_SECRET`；支持环境变量覆盖，但不要假定插件子进程继承容器环境。仅允许 HTTPS，额外使用 AES-256-GCM 信封，禁止重定向，客户端拒绝窗口内重复响应。桥端是可信的凭据接收方，不是对其隐藏密码的存储服务。
+
+账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户私聊 `yuketang confirm <token>` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
+
+启用、域名、课堂/考试设置及课程范围修改使用 `confirm <token>` 二次确认，整体 `yuketang disable` 直接处理。功能面向所有用户开放，但默认不开启自动化。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+
+正式验收需要真实用户私聊绑定、收到最终结果、状态查询、配置确认及停止同步。仅 HTTP 200 或桥鉴权通过不构成完整验收。请求级响应关联与跨重启重放保护需桥端配套，当前不单方面更改 v1 协议。
 
 ### 外部写操作：两阶段确认
 
