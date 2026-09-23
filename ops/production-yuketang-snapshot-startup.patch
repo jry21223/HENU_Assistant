@@ -1,0 +1,28 @@
+--- a/henu_plugin/storage_adapter.py
++++ b/henu_plugin/storage_adapter.py
+@@ -60,6 +60,7 @@
+     PREFIX_CAS_COOKIE,
+     PREFIX_COURSE_MONITOR_CONFIG,
+     PREFIX_COURSE_MONITOR_STATE,
++    PREFIX_YUKETANG_CONFIG,
+     PREFIX_USER_XIQUEER,
+ )
+ SHARED_LEGACY_KEYS = (
+@@ -665,6 +666,17 @@
+                 raise StorageLoadError(
+                     f"LangBot Storage 返回了不支持的数据类型 ({snapshot_key})"
+                 )
++            if schema == USER_SNAPSHOT_SCHEMA:
++                new_key = PREFIX_YUKETANG_CONFIG.format(storage_key)
++                try:
++                    old_files = json.loads(bytes(raw).decode('utf-8')).get('files')
++                except (ValueError, AttributeError, UnicodeError):
++                    old_files = None
++                if isinstance(old_files, dict) and new_key not in old_files and new_key not in known_keys:
++                    # Reconcile a pre-feature generation against its own keys.
++                    # Request materialization supplies the new empty record;
++                    # the next ordinary commit upgrades the snapshot atomically.
++                    legacy_keys.remove(new_key)
+             payloads, mirror_complete = cls._decode_snapshot_payload(
+                 snapshot_key,
+                 schema,
