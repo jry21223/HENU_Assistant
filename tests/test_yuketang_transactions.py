@@ -9,6 +9,7 @@ from components.event_listener.identity_capture_safe import SafeIdentityCaptureL
 from henu_plugin.hardened_service import HardenedHenuPluginService
 from henu_plugin import bridge_client
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
+from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 
 
 class Storage:
@@ -26,7 +27,7 @@ class Storage:
 
 def ctx(number, command):
     return SimpleNamespace(query_id=number,
-        event=SimpleNamespace(text_message=command, sender_id='test-a', launcher_id='test-a'),
+        event=SimpleNamespace(text_message=command, sender_id='test-a', launcher_id='test-a', launcher_type='person'),
         prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
 
 
@@ -36,6 +37,7 @@ def test_actual_live_listener_commits_then_logs_in_and_storage_failure_never_pus
         listener = SafeIdentityCaptureListener()
         listener.plugin = plugin
         flow = YuketangLoginCoordinator(listener)
+        listener._yuketang_login = flow
         async_sleep = AsyncMock()
         monkeypatch.setattr(asyncio, 'sleep', async_sleep)
         monkeypatch.setattr(bridge_client, 'bridge_settings', lambda: {'url': 'https://test.invalid'})
@@ -50,10 +52,9 @@ def test_actual_live_listener_commits_then_logs_in_and_storage_failure_never_pus
         start = ctx(1, "yuketang account set --account 13800000000 --password 'Demo123@'")
         await flow.handle(start, is_group=False)
         await flow.tasks[1]
-        token = str(start.reply.call_args.args[0]).split('yuketang confirm ')[-1]
         plugin.fail_user_snapshot = fail
-        confirm = ctx(2, 'yuketang confirm ' + token)
-        await flow.handle(confirm, is_group=False)
+        confirm = ctx(2, '确认')
+        await ConfirmationShortcut(listener).handle(confirm)
         await flow.tasks[2]
         if fail:
             assert not push_mock.called and not login_mock.called

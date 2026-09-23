@@ -94,7 +94,7 @@ yuketang status
 yuketang lesson set --auto-enter on --auto-answer on --llm on --subjective off --enter-delay 30
 yuketang lesson whitelist add <课程名>
 yuketang exam set --master on
-confirm <token>
+确认
 ```
 
 ### 敏感命令（仅私聊直发）
@@ -106,7 +106,7 @@ account set --student-id <学号> --password '<密码>'
 calibration set --data '<请求体>' --cookie '<Cookie>'
 yuketang exam set --x-access-token '<考试系统令牌>'
 yuketang account set --account <手机号> --password '<密码>'
-yuketang confirm <token>
+确认
 yuketang login
 yuketang logout
 ```
@@ -123,9 +123,9 @@ yuketang logout
 
 雨课堂守护进程可部署在另一台服务器（B）。在插件根目录 `.env` 配置 `HENU_BRIDGE_URL` / `HENU_BRIDGE_SECRET`；支持环境变量覆盖，但不要假定插件子进程继承容器环境。仅允许 HTTPS，额外使用 AES-256-GCM 信封，禁止重定向，客户端拒绝窗口内重复响应。桥端是可信的凭据接收方，不是对其隐藏密码的存储服务。
 
-账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户私聊 `yuketang confirm <token>` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
+账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户在下一条私聊直接回复 `确认` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
 
-启用、域名、课堂/考试设置及课程范围修改使用 `confirm <token>` 二次确认，整体 `yuketang disable` 直接处理。功能面向所有用户开放，总开关仍默认关闭；课堂自动进班、自动答题、大模型子开关默认开启，存量显式 off 保持不变。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+启用、域名、课堂/考试设置及课程范围修改由用户在下一条消息直接回复 `确认`，整体 `yuketang disable` 直接处理。功能面向所有用户开放，总开关仍默认关闭；课堂自动进班、自动答题、大模型子开关默认开启，存量显式 off 保持不变。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
 
 私聊可直接说“登录雨课堂”“帮我重新登录一下雨课堂”“退出登录雨课堂”；重新登录会强制验证，普通登录在有效 Cookie 剩余超过一小时的时候复用。账号密码变更确认后强制验证新凭据，不复用旧账号 Cookie。退出不删除绑定，并先持久化停用后通知桥端；存在进行中的登录时等待，结果不明时不宣称已完成退出。请求前的加密在途记录在重启后仍有效；若网络丢失响应而无法确认会话，需要维护者核实桥端后处理，不能盲目重试。
 
@@ -133,10 +133,12 @@ yuketang logout
 
 ### 外部写操作：两阶段确认
 
+确认只接受用户真实消息，模型不得代确认。待确认操作按用户和聊天绑定、5 分钟过期；若同时有雨课堂凭据与其他操作，插件会要求回复“确认绑定”或“确认操作”消歧。旧的 `confirm <token>` / `yuketang confirm <token>` 仅保留兼容，不再作为默认提示。升级前创建的旧记录可重新发起后使用快捷确认。
+
 图书馆 / 研讨室的预约、签到、取消：
 
 1. 首次调用只生成预览 + 短期确认令牌，**不**提交校园系统。  
-2. 用户核对后，下一条消息发送工具返回的 `confirm <token>`。  
+2. 用户核对后，下一条消息直接回复 `确认`，无需复制令牌。
 3. 同一轮自动确认、令牌过期、参数变化 → 拒绝。
 
 若 `external_committed=true` 且 `storage_persisted=false`：校园已提交、本地 Storage 失败——**不得重试**，应先查询当前预约/记录反查。

@@ -1,9 +1,11 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin import bridge_client
+from henu_mcp.core.secure_storage import decrypt_value
 
 
 class Plugin:
@@ -17,7 +19,7 @@ class Plugin:
 
 def context(query_id, text, sender='user-a'):
     return SimpleNamespace(query_id=query_id,
-        event=SimpleNamespace(text_message=text, sender_id=sender, launcher_id=sender),
+        event=SimpleNamespace(text_message=text, sender_id=sender, launcher_id=sender, launcher_type='person'),
         prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
 
 
@@ -33,7 +35,8 @@ def test_credentials_confirmed_privately_encrypted_and_not_cross_user():
         assert raw.startswith(b'enc:v2:')
         message = str(ctx.reply.call_args.args[0])
         assert '先在雨课堂设置密码' in message
-        token = message.split('yuketang confirm ')[-1]
+        token = json.loads(decrypt_value(raw.decode()))['token']
+        assert token not in message
         other = context(2, f'yuketang confirm {token}', sender='user-b')
         assert '没有有效' in await flow.process(other, other.event.text_message, 'user-b')
         ctx.prevent_default.assert_called()

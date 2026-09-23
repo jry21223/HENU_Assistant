@@ -12,7 +12,7 @@ from langbot_plugin.api.entities.builtin.provider.session import Session, Launch
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
 from henu_plugin import bridge_client
 from henu_plugin.cli import inspect_cli_command
-from henu_plugin.confirmation import create_pending_operation, validate_pending_operation
+from henu_plugin.confirmation import create_pending_operation, validate_pending_operation, conversation_context
 from henu_plugin.yuketang_nl import match_action
 
 
@@ -26,8 +26,8 @@ class YuketangLoginCoordinator:
         self.users = {}
         self.last_login = {}
 
-    async def handle(self, ctx, *, is_group: bool) -> bool:
-        text = str(getattr(ctx.event, 'text_message', '') or getattr(ctx.event, 'message_chain', '')).strip()
+    async def handle(self, ctx, *, is_group: bool, command: str | None = None) -> bool:
+        text = command if command is not None else str(getattr(ctx.event, 'text_message', '') or getattr(ctx.event, 'message_chain', '')).strip()
         action = match_action(text)
         if action:
             force = action == 'login' and any(word in text for word in ('重新', '再次'))
@@ -124,10 +124,11 @@ class YuketangLoginCoordinator:
             if spec.resolved_tool in {'yuketang_account_set', 'yuketang_set_token'}:
                 pending = create_pending_operation(storage_key=sender, canonical_command=text,
                                                    query_id=ctx.query_id)
+                pending['conversation'] = conversation_context(ctx.event)
                 await plugin.set_plugin_storage(key, encrypt_value(json.dumps(pending)).encode())
                 return ('请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码登录；不是学校 IDS 密码。'
                         '将保存并向雨课堂桥服务传递你的凭据；账号密码绑定确认后将验证登录。'
-                        f'请在下一条私聊回复：yuketang confirm {pending["token"]}')
+                        '请核对后在下一条私聊直接回复“确认”（5 分钟内有效），无需复制代码。')
         if spec.resolved_tool not in SENSITIVE_TOOLS:
             return '待确认内容不属于允许的雨课堂敏感操作。'
         if spec.resolved_tool == 'yuketang_logout':

@@ -10,6 +10,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
+from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -39,13 +40,18 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
     async def initialize(self):
         await super().initialize()
         self._yuketang_login = YuketangLoginCoordinator(self)
+        self._confirmation_shortcut = ConfirmationShortcut(self)
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if await self._confirmation_shortcut.handle(ctx):
+                return
             await self._yuketang_login.handle(ctx, is_group=False)
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if await self._confirmation_shortcut.handle(ctx):
+                return
             await self._yuketang_login.handle(ctx, is_group=True)
 
         @self.handler(events.PersonNormalMessageReceived)
@@ -190,6 +196,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         *,
         is_group: bool,
     ) -> None:
+        if await self._confirmation_shortcut.handle(ctx):
+            return
         if await self._yuketang_login.handle(ctx, is_group=is_group):
             return
         text = str(getattr(ctx.event, "text_message", "") or "").strip()

@@ -7,6 +7,7 @@ from typing import Any
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
 from henu_plugin.confirmation import (
+    conversation_context,
     WRITE_TOOL_NAMES,
     create_pending_operation,
     pending_storage_key,
@@ -93,6 +94,7 @@ class HenuCli(BaseHenuTool):
                 action=spec.action,
                 parameter_summary=self._operation_summary(spec),
                 query_id=query_id,
+                conversation=conversation_context(session),
             )
 
         result = await super().call({"command": clean_command}, session, query_id)
@@ -150,6 +152,7 @@ class HenuCli(BaseHenuTool):
         action: str,
         parameter_summary: str,
         query_id: int,
+        conversation: dict[str, str],
     ) -> dict[str, Any]:
         pending = create_pending_operation(
             storage_key=storage_key,
@@ -157,6 +160,7 @@ class HenuCli(BaseHenuTool):
             query_id=query_id,
         )
         key = pending_storage_key(storage_key)
+        pending['conversation'] = conversation
         try:
             await self.plugin.set_plugin_storage(
                 key,
@@ -169,8 +173,7 @@ class HenuCli(BaseHenuTool):
                 "msg": f"保存待确认操作失败: {exc}",
             }
 
-        token = str(pending["token"])
-        confirm_command = f"confirm {token}"
+        confirm_command = "确认"
         action_text = action or "外部写操作"
         summary_text = parameter_summary or "参数已规范化"
         return {
@@ -180,7 +183,7 @@ class HenuCli(BaseHenuTool):
             "msg": f"{action_text} 尚未执行，需要用户在下一条消息中明确确认。",
             "reply_text": (
                 f"即将执行：{action_text}；{summary_text}。本次尚未提交。"
-                f"请核对后回复：{confirm_command}"
+                f"请核对后在下一条消息直接回复“{confirm_command}”（5 分钟内有效）。"
             ),
             "confirmation_command": confirm_command,
             "expires_in_seconds": 300,
