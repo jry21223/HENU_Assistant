@@ -34,6 +34,12 @@ class ConfirmationCheck:
     message: str = ""
 
 
+def conversation_context(source: Any) -> dict[str, str]:
+    kind = getattr(source, 'launcher_type', '')
+    return {'launcher_type': str(getattr(kind, 'value', kind)).lower(),
+            'launcher_id': str(getattr(source, 'launcher_id', '') or '').strip()}
+
+
 def split_confirm_token(command: Any) -> tuple[str, str]:
     """Remove --confirm-token from a CLI command and return (command, token)."""
     raw = str(command or "").strip()
