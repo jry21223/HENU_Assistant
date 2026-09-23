@@ -12,6 +12,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
 from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.yuketang_sync import sync_after_commit
 from henu_plugin.service import get_current_user_paths, set_current_user_paths, SessionIdentity
 
 
@@ -103,6 +104,8 @@ class BaseHenuTool(Tool):
             server_time = runtime_context.get("server_time")
             if isinstance(server_time, dict) and server_time:
                 result.setdefault("server_time_snapshot", server_time)
+
+        await sync_after_commit(self.plugin, storage_key, result)
 
         self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)

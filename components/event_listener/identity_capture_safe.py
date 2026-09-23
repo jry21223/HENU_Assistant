@@ -9,6 +9,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.cli import inspect_cli_command
+from henu_plugin.yuketang_login import YuketangLoginCoordinator
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -20,10 +21,32 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         "account bind",
         "calibration set",
         "calibrate set",
+        "yuketang account set",  # 含密码
+        "yuketang login",        # 登录动作，仅私聊直处理
+        "yuketang 登录",
     )
+    # yuketang 令牌命令只在含 --x-access-token 时视为敏感，其余 exam set 走正常模型链路。
+    _YUKETANG_TOKEN_PREFIX = "yuketang exam set"
+    _YUKETANG_TOKEN_FLAG = "--x-access-token"
+    _SENSITIVE_TOOLS = {
+        "setup_account",
+        "set_calibration_source",
+        "yuketang_set_token",
+        "yuketang_account_set",
+        "yuketang_login",
+    }
 
     async def initialize(self):
         await super().initialize()
+        self._yuketang_login = YuketangLoginCoordinator(self)
+
+        @self.handler(events.PersonMessageReceived)
+        async def on_private_yuketang(ctx: context.EventContext):
+            await self._yuketang_login.handle(ctx, is_group=False)
+
+        @self.handler(events.GroupMessageReceived)
+        async def on_group_yuketang(ctx: context.EventContext):
+            await self._yuketang_login.handle(ctx, is_group=True)
 
         @self.handler(events.PersonNormalMessageReceived)
         async def on_private_sensitive_command(ctx: context.EventContext):
@@ -167,20 +190,40 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         *,
         is_group: bool,
     ) -> None:
+        if await self._yuketang_login.handle(ctx, is_group=is_group):
+            return
         text = str(getattr(ctx.event, "text_message", "") or "").strip()
         compact = " ".join(text.lower().split())
-        if not compact.startswith(self._SENSITIVE_PREFIXES):
+        spec = inspect_cli_command(text)
+        parser_sensitive = spec.resolved_tool in self._SENSITIVE_TOOLS
+        yuketang_credential_intent = (
+            compact.startswith(("yuketang ", "雨课堂 "))
+            and any(
+                marker in compact
+                for marker in (
+                    "--password",
+                    "--x-access-token",
+                    "--x_access_token",
+                    " login",
+                    " 登录",
+                )
+            )
+        )
+        if (
+            not parser_sensitive
+            and not compact.startswith(self._SENSITIVE_PREFIXES)
+            and not yuketang_credential_intent
+        ):
             return
 
         if is_group:
             self._reply_and_stop(
                 ctx,
-                "账号密码、Cookie 和校准请求只能在私聊中提交；本条消息未发送给模型，也未执行。",
+                "账号密码、Cookie、校准请求、考试令牌和 yuketang 登录只能在私聊中执行；本条消息未发送给模型，也未执行。",
             )
             return
 
-        spec = inspect_cli_command(text)
-        if spec.error or spec.resolved_tool not in {"setup_account", "set_calibration_source"}:
+        if spec.error or spec.resolved_tool not in self._SENSITIVE_TOOLS:
             self._reply_and_stop(ctx, spec.error or "敏感命令格式无效。")
             return
 
@@ -221,10 +264,10 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         if isinstance(result, dict):
             if result.get("success"):
-                message = str(result.get("msg") or "操作完成")
-                message += "。该命令已在调用模型前处理，密码或 Cookie 未进入模型上下文。"
+                message = str(result.get("reply_text") or result.get("msg") or "操作完成")
+                message += "\n该命令已在调用模型前处理，密码或 Cookie 未进入模型上下文。"
             else:
-                message = str(result.get("msg") or "操作失败")
+                message = str(result.get("reply_text") or result.get("msg") or "操作失败")
         else:
             message = "操作失败：服务返回了异常结果。"
         self._reply_and_stop(ctx, message)

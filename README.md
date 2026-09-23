@@ -90,6 +90,10 @@ library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
 library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD --time 08:00
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
+yuketang status
+yuketang lesson set --auto-answer on --llm on --subjective off --enter-delay 30
+yuketang lesson whitelist add <课程名>
+yuketang exam set --master on
 confirm <token>
 ```
 
@@ -100,9 +104,27 @@ confirm <token>
 ```text
 account set --student-id <学号> --password '<密码>'
 calibration set --data '<请求体>' --cookie '<Cookie>'
+yuketang exam set --x-access-token '<考试系统令牌>'
+yuketang account set --account <手机号> --password '<密码>'
+yuketang confirm <token>
+yuketang login
 ```
 
-事件监听器会在进模型前拦截这两类命令；密码、Cookie、校准请求体不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**
+事件监听器会在进模型前拦截这些命令；密码、Cookie、校准请求体、考试令牌与登录动作不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**
+
+### 雨课堂（yuketang）配置
+
+按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
+
+#### 守护进程桥（可选）
+
+雨课堂守护进程可部署在另一台服务器（B）。在插件根目录 `.env` 配置 `HENU_BRIDGE_URL` / `HENU_BRIDGE_SECRET`；支持环境变量覆盖，但不要假定插件子进程继承容器环境。仅允许 HTTPS，额外使用 AES-256-GCM 信封，禁止重定向，客户端拒绝窗口内重复响应。桥端是可信的凭据接收方，不是对其隐藏密码的存储服务。
+
+账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户私聊 `yuketang confirm <token>` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
+
+启用、域名、课堂/考试设置及课程范围修改使用 `confirm <token>` 二次确认，整体 `yuketang disable` 直接处理。功能面向所有用户开放，但默认不开启自动化。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+
+正式验收需要真实用户私聊绑定、收到最终结果、状态查询、配置确认及停止同步。仅 HTTP 200 或桥鉴权通过不构成完整验收。请求级响应关联与跨重启重放保护需桥端配套，当前不单方面更改 v1 协议。
 
 ### 外部写操作：两阶段确认
 
