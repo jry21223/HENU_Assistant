@@ -1,0 +1,40 @@
+--- a/pkg/platform/sources/qqofficial.py
++++ b/pkg/platform/sources/qqofficial.py
+@@ -97,9 +97,9 @@
+         return content_list
+ 
+     @staticmethod
+-    async def target2yiri(message: str, message_id: str, pic_url: str, content_type):
++    async def target2yiri(message: str, message_id: str, pic_url: str, content_type, source_time=None):
+         yiri_msg_list = []
+-        yiri_msg_list.append(platform_message.Source(id=message_id, time=datetime.datetime.now()))
++        yiri_msg_list.append(platform_message.Source(id=message_id, time=source_time or datetime.datetime.now()))
+         if pic_url is not None:
+             base64_url = await image.get_qq_official_image_base64(pic_url=pic_url, content_type=content_type)
+             yiri_msg_list.append(platform_message.Image(base64=base64_url))
+@@ -119,11 +119,16 @@
+         """
+         QQ官方消息转换为LB对象
+         """
++        source_time = None
++        if event.t == 'C2C_MESSAGE_CREATE':
++            # Keep the original QQ event time through plugin serialization.
++            source_time = datetime.datetime.strptime(event.timestamp, '%Y-%m-%dT%H:%M:%S%z')
+         yiri_chain = await QQOfficialMessageConverter.target2yiri(
+             message=event.content,
+             message_id=event.d_id,
+             pic_url=event.attachments,
+             content_type=event.content_type,
++            source_time=source_time,
+         )
+ 
+         if event.t == 'C2C_MESSAGE_CREATE':
+@@ -135,7 +140,7 @@
+             return platform_events.FriendMessage(
+                 sender=friend,
+                 message_chain=yiri_chain,
+-                time=int(datetime.datetime.strptime(event.timestamp, '%Y-%m-%dT%H:%M:%S%z').timestamp()),
++                time=int(source_time.timestamp()),
+                 source_platform_object=event,
+             )
+ 
