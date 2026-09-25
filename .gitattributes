@@ -1,0 +1,3 @@
+# Unified diff context uses a single-space line for an empty source line.
+ops/qq-binding-receipt-route.patch whitespace=-blank-at-eol
+ops/qq-binding-sdk-quote.patch whitespace=-blank-at-eol

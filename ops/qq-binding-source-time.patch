@@ -1,0 +1,18 @@
+--- a/pkg/platform/sources/qqofficial.py
++++ b/pkg/platform/sources/qqofficial.py
+@@ -100 +100 @@
+-    async def target2yiri(message: str, message_id: str, pic_url: str, content_type):
++    async def target2yiri(message: str, message_id: str, pic_url: str, content_type, source_time=None):
+@@ -102 +102 @@
+-        yiri_msg_list.append(platform_message.Source(id=message_id, time=datetime.datetime.now()))
++        yiri_msg_list.append(platform_message.Source(id=message_id, time=source_time or datetime.datetime.now()))
+@@ -121,0 +122,4 @@
++        source_time = None
++        if event.t == 'C2C_MESSAGE_CREATE':
++            # Keep the original QQ event time through plugin serialization.
++            source_time = datetime.datetime.strptime(event.timestamp, '%Y-%m-%dT%H:%M:%S%z')
+@@ -126,0 +131 @@
++            source_time=source_time,
+@@ -138 +143 @@
+-                time=int(datetime.datetime.strptime(event.timestamp, '%Y-%m-%dT%H:%M:%S%z').timestamp()),
++                time=int(source_time.timestamp()),

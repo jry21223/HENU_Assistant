@@ -1,0 +1,9 @@
+--- a/pkg/pipeline/pipelinemgr.py
++++ b/pkg/pipeline/pipelinemgr.py
+@@ -403,5 +403,6 @@
+             if (contains_sensitive_credentials(str(query.message_chain))
+                     or is_yuketang_command(query.message_chain)
++                    or str(query.message_chain).strip().rstrip('。！!') in {'绑定 HENU KIT', '绑定HENU KIT'}
+                     or is_plain_confirmation(query.message_chain)):
+                 asyncio.get_running_loop().call_later(
+                     300, cache.pop, query.query_id, None
