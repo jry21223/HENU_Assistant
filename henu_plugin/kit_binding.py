@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -168,6 +169,8 @@ class KitBindingCoordinator:
                 continue
             if not isinstance(pending, dict):
                 raise ValueError("invalid KIT pending record")
+            if pending.get("terminal") is True:
+                continue
             candidate_bot = pending.get("bot")
             if not isinstance(candidate_bot, str) or not candidate_bot:
                 raise ValueError("KIT pending Bot identity unavailable")
@@ -202,6 +205,8 @@ class KitBindingCoordinator:
             if settings and not bot:
                 bot = await ctx.get_bot_uuid()
         except Exception:
+            if confirming and not is_group and await self._consume_orphan_quote(ctx):
+                return True
             if confirming and not is_group:
                 try:
                     if await self._remember_fallback_confirmation(ctx, bot):
@@ -230,6 +235,8 @@ class KitBindingCoordinator:
             await self._stop_reply(ctx, "HENU KIT 绑定服务暂时不可用，请联系维护者。")
             return True
         if is_group or not settings or bot != settings["bot_uuid"]:
+            if confirming and not is_group and await self._consume_orphan_quote(ctx):
+                return True
             if confirming and not is_group:
                 try:
                     if await self._remember_fallback_confirmation(ctx, bot):
@@ -280,8 +287,8 @@ class KitBindingCoordinator:
         async with lock:
             try:
                 source_id, source_time = await self._source_details(ctx)
-                if not confirming and not self._valid_c2c_provenance(
-                    ctx, sender, source_time
+                if not self._valid_c2c_provenance(
+                    ctx, sender, source_id, source_time
                 ):
                     await self._stop_reply(
                         ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
@@ -292,8 +299,19 @@ class KitBindingCoordinator:
                     if not confirming:
                         await self.listener.plugin.set_plugin_storage(key, b"")
                     pending = None
+                if confirming and pending and pending.get("terminal") is True:
+                    await self._stop_reply(
+                        ctx,
+                        "目标账号提示已失效，请重新发送“绑定 HENU KIT”。",
+                    )
+                    return True
                 if confirming:
                     if not pending:
+                        if self._quote_present(ctx, source_id):
+                            await self._stop_reply(
+                                ctx, "引用的绑定操作已失效，请重新发起。"
+                            )
+                            return True
                         if text == "确认":
                             if await self._has_active_pending_for_sender(
                                 sender, conversation
@@ -305,25 +323,14 @@ class KitBindingCoordinator:
                                 return True
                             if (
                                 source_id
-                                and self._valid_c2c_provenance(ctx, sender, source_time)
                                 and await self._used_source(key, sender, source_id)
                             ):
                                 ctx.prevent_default()
                                 ctx.prevent_postorder()
                                 return True
                             return False
-                        if not self._valid_c2c_provenance(ctx, sender, source_time):
-                            await self._stop_reply(
-                                ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
-                            )
-                            return True
                         await self._stop_reply(
                             ctx, "没有有效的 HENU KIT 待确认操作，请重新发起。"
-                        )
-                        return True
-                    if not self._valid_c2c_provenance(ctx, sender, source_time):
-                        await self._stop_reply(
-                            ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
                         )
                         return True
                     activation_not_before = await self._activation_not_before(bot)
@@ -393,12 +400,40 @@ class KitBindingCoordinator:
                             ctx, "待确认操作已失效或不在原私聊，请重新发起。"
                         )
                         return True
-                    if text == "确认" and await self._other_pending(
+                    quote_ref = None
+                    if pending["command"] == "start":
+                        quote_ref, quote_valid = self._quote_ref_idx(ctx, source_id)
+                        if not quote_valid:
+                            await self._stop_reply(
+                                ctx,
+                                "无法验证 QQ 引用消息，本次未执行。请引用最新的目标账号提示回复“确认”。",
+                            )
+                            return True
+                        if quote_ref is not None:
+                            receipt_ref = self._stored_receipt_ref_idx(pending)
+                            if (
+                                text != "确认"
+                                or not self._exact_quoted_confirmation(ctx, source_id)
+                                or receipt_ref is None
+                                or not hmac.compare_digest(quote_ref, receipt_ref)
+                            ):
+                                await self._stop_reply(
+                                    ctx,
+                                    "引用的不是本次提示，本次未执行。请引用最新的目标账号提示回复“确认”。",
+                                )
+                                return True
+                    elif self._quote_present(ctx, source_id):
+                        await self._stop_reply(
+                            ctx,
+                            "解绑请直接发送“确认”，不要引用其他消息；本次未执行。",
+                        )
+                        return True
+                    elif text == "确认" and await self._other_pending(
                         sender, conversation, ctx.query_id
                     ):
                         await self._stop_reply(
                             ctx,
-                            "同时有其他操作待确认。本次未执行，请回复“确认HENU KIT绑定”或“确认HENU KIT解绑”选择当前操作。",
+                            "同时有其他操作待确认。本次未执行，请回复“确认HENU KIT解绑”选择当前操作。",
                         )
                         return True
                     if ("解绑" in text) != (
@@ -411,7 +446,14 @@ class KitBindingCoordinator:
                     ctx.prevent_default()
                     ctx.prevent_postorder()
                     await self._confirm(
-                        ctx, settings, sender, key, pending, source_id, source_time
+                        ctx,
+                        settings,
+                        sender,
+                        key,
+                        pending,
+                        source_id,
+                        source_time,
+                        quote_ref,
                     )
                     return True
                 ctx.prevent_default()
@@ -468,10 +510,19 @@ class KitBindingCoordinator:
                     )
                     await self._save(key, pending)
                 if action == "unlink":
-                    await self._reply(
+                    reply_result = await self._reply(
                         ctx,
                         "解绑后，Bot 后续操作不再使用此 HENU KIT 账号。请在下一条私聊回复“确认”（五分钟内有效）。",
                     )
+                    pending["confirmation_receipt"] = self._reply_receipt(
+                        reply_result, require_ref_idx=False
+                    )
+                    await self._save(key, pending)
+                    if pending["confirmation_receipt"] is None:
+                        await self._reply(
+                            ctx,
+                            "提示消息的发送时间无法确认，本次无法完成解绑，请重新发起。",
+                        )
                     return True
                 result = await asyncio.to_thread(
                     kit_request,
@@ -492,7 +543,7 @@ class KitBindingCoordinator:
                     + settings["portal_url"]
                     + "/bind/qq#"
                     + token
-                    + "\n网页授权后，我会提示目标账号，请核对后回复“确认”。若没有收到提示，也可回复“确认”查询进度。",
+                    + "\n网页授权后，我会提示目标账号。请核对后引用那条提示回复“确认”。若没有收到提示，可单独发送“确认”查询进度。",
                 )
                 previous = self.watchers.get(key)
                 if previous and not previous.done():
@@ -545,17 +596,24 @@ class KitBindingCoordinator:
                         {"subject": sender, "token": pending["link_token"]},
                     )
                     if result.get("state") == "authorized":
-                        await self._reply(
+                        reply_result = await self._reply(
                             ctx,
                             "即将绑定 HENU KIT："
                             + self._name(result)
-                            + "。请核对，确认是本人账号后回复“确认”。",
+                            + "。请核对，确认是本人账号后引用这条提示回复“确认”。",
                         )
                         pending["previewed"] = True
-                        pending["previewed_at"] = time.time()
                         pending["preview_query_id"] = ctx.query_id
                         pending["preview_source_id"] = pending["created_source_id"]
+                        pending["confirmation_receipt"] = self._reply_receipt(
+                            reply_result
+                        )
                         await self._save(key, pending)
+                        if pending["confirmation_receipt"] is None:
+                            await self._reply(
+                                ctx,
+                                "提示消息的引用信息无法确认，本次无法完成绑定，请重新发起。",
+                            )
                         return
         except asyncio.CancelledError:
             raise
@@ -567,8 +625,38 @@ class KitBindingCoordinator:
             if self.watchers.get(key) is asyncio.current_task():
                 self.watchers.pop(key, None)
 
-    async def _confirm(self, ctx, settings, sender, key, pending, source_id, source_time):
+    async def _confirm(
+        self, ctx, settings, sender, key, pending, source_id, source_time, quote_ref
+    ):
         action = pending["command"]
+        if (
+            action == "start"
+            and pending.get("previewed")
+            and self._stored_receipt_ref_idx(pending) is None
+        ):
+            await self._reply(
+                ctx,
+                "目标账号提示的引用信息无法确认，本次未执行，请重新发送“绑定 HENU KIT”。",
+            )
+            return
+        if action == "unlink" or quote_ref is not None:
+            receipt_time = self._stored_receipt_time(pending)
+            if receipt_time is None:
+                await self._reply(
+                    ctx,
+                    "提示消息的发送时间无法确认，本次未执行，请重新发起操作。",
+                )
+                return
+            if source_time <= receipt_time:
+                await self._reply(
+                    ctx,
+                    (
+                        "请在收到提示后再回复一条新的“确认”消息；本次无法核实消息先后，未执行。"
+                        if action == "unlink"
+                        else "请在收到目标账号提示后再引用它回复一条新的“确认”消息；本次无法核实消息先后，未执行。"
+                    ),
+                )
+                return
         payload = {"subject": sender}
         if action == "start":
             payload["token"] = pending.get("link_token", "")
@@ -580,31 +668,59 @@ class KitBindingCoordinator:
                 return
             if result.get("state") not in {"authorized", "confirmed"}:
                 raise KitError()
-            if not pending.get("previewed"):
-                await self._reply(
+            if not pending.get("previewed") or quote_ref is None:
+                # Invalidate an earlier prompt before sending a replacement.
+                # A failed send or storage write must not leave its quote usable.
+                previous_ref_idx = self._stored_receipt_ref_idx(pending)
+                pending["confirmation_receipt"] = None
+                if previous_ref_idx is None:
+                    await self._save(key, pending)
+                else:
+                    # Retain only an encrypted tombstone until a distinct new
+                    # QQ reference is durably saved. A repeated reference or
+                    # failed save must not permit a third preview to revive it.
+                    await self._save(
+                        key,
+                        {
+                            "terminal": True,
+                            "bot": pending["bot"],
+                            "conversation": pending["conversation"],
+                            "expires_at": pending["expires_at"],
+                        },
+                    )
+                reply_result = await self._reply(
                     ctx,
                     "即将绑定 HENU KIT："
                     + self._name(result)
-                    + "。请核对，确认是本人账号后再回复“确认”。",
+                    + "。请核对，确认是本人账号后引用这条提示回复“确认”。",
                 )
                 pending["previewed"] = True
-                pending["previewed_at"] = time.time()
                 pending["preview_query_id"] = ctx.query_id
                 pending["preview_source_id"] = source_id
-                await self._save(key, pending)
+                pending["confirmation_receipt"] = self._reply_receipt(reply_result)
+                repeated_ref_idx = (
+                    previous_ref_idx is not None
+                    and pending["confirmation_receipt"] is not None
+                    and hmac.compare_digest(
+                        previous_ref_idx,
+                        pending["confirmation_receipt"]["ref_idx"],
+                    )
+                )
+                if repeated_ref_idx:
+                    await self._reply(
+                        ctx,
+                        "目标账号提示的引用标识重复，本次无法完成绑定，请重新发起。",
+                    )
+                    return
+                if previous_ref_idx is None or pending["confirmation_receipt"] is not None:
+                    await self._save(key, pending)
+                if pending["confirmation_receipt"] is None:
+                    await self._reply(
+                        ctx,
+                        "提示消息的引用信息无法确认，本次无法完成绑定，请重新发起。",
+                    )
                 return
             if pending.get("preview_query_id") == ctx.query_id:
-                return
-            previewed_at = pending.get("previewed_at")
-            if not isinstance(previewed_at, (int, float)) or not math.isfinite(
-                previewed_at
-            ):
-                await self._reply(ctx, "目标账号预览已失效，请重新发起绑定。")
-                return
-            if source_time <= previewed_at or source_time > time.time():
-                await self._reply(
-                    ctx, "请在看到目标账号提示后发送一条新的“确认”消息，本次未执行。"
-                )
                 return
             result = await asyncio.to_thread(kit_request, settings, "confirm", payload)
             message = (
@@ -650,14 +766,188 @@ class KitBindingCoordinator:
         return False
 
     @staticmethod
-    def _valid_c2c_provenance(ctx, sender, source_time):
+    def _reply_receipt(reply_result, *, require_ref_idx=True):
+        if not isinstance(reply_result, dict):
+            return None
+        receipt = reply_result.get("qq_c2c_receipt")
+        if not isinstance(receipt, dict):
+            return None
+        message_id = receipt.get("id")
+        raw_timestamp = receipt.get("timestamp")
+        ref_idx = receipt.get("ref_idx")
+        if (
+            not isinstance(message_id, str)
+            or not message_id.strip()
+            or len(message_id) > 256
+            or (require_ref_idx and not KitBindingCoordinator._valid_ref_idx(ref_idx))
+            or not isinstance(raw_timestamp, str)
+            or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})",
+                raw_timestamp,
+            )
+        ):
+            return None
+        try:
+            timestamp = datetime.datetime.fromisoformat(
+                raw_timestamp.replace("Z", "+00:00")
+            ).timestamp()
+        except (OverflowError, ValueError):
+            return None
+        now = time.time()
+        if (
+            not math.isfinite(timestamp)
+            or timestamp < now - 300
+            or timestamp > now + 30
+        ):
+            return None
+        stored = {"id": message_id, "timestamp": timestamp}
+        if KitBindingCoordinator._valid_ref_idx(ref_idx):
+            stored["ref_idx"] = ref_idx
+        return stored
+
+    @staticmethod
+    def _stored_receipt_time(pending):
+        receipt = pending.get("confirmation_receipt")
+        if not isinstance(receipt, dict):
+            return None
+        message_id = receipt.get("id")
+        timestamp = receipt.get("timestamp")
+        started_at = pending.get("created_source_time")
+        if (
+            not isinstance(message_id, str)
+            or not message_id.strip()
+            or len(message_id) > 256
+            or isinstance(timestamp, bool)
+            or not isinstance(timestamp, (int, float))
+            or not math.isfinite(timestamp)
+            or isinstance(started_at, bool)
+            or not isinstance(started_at, (int, float))
+            or not math.isfinite(started_at)
+            or timestamp < started_at
+        ):
+            return None
+        return float(timestamp)
+
+    @staticmethod
+    def _stored_receipt_ref_idx(pending):
+        if KitBindingCoordinator._stored_receipt_time(pending) is None:
+            return None
+        ref_idx = pending["confirmation_receipt"].get("ref_idx")
+        return ref_idx if KitBindingCoordinator._valid_ref_idx(ref_idx) else None
+
+    @staticmethod
+    def _valid_ref_idx(value):
+        return (
+            isinstance(value, str)
+            and 1 <= len(value) <= 256
+            and all(33 <= ord(char) <= 126 for char in value)
+        )
+
+    @staticmethod
+    def _quote_ref_idx(ctx, source_id):
+        metadata = KitBindingCoordinator._verified_c2c_metadata(ctx, source_id)
+        if metadata is None:
+            return None, False
+        if metadata.get("qq_quote_present") is True and "qq_quote_ref_idx" not in metadata:
+            return None, False
+        return metadata.get("qq_quote_ref_idx"), True
+
+    @staticmethod
+    def _quote_present(ctx, source_id):
+        metadata = KitBindingCoordinator._verified_c2c_metadata(ctx, source_id)
+        return metadata is not None and metadata.get("qq_quote_present") is True
+
+    async def _consume_orphan_quote(self, ctx):
+        sender = str(getattr(ctx.event, "sender_id", "") or "")
+        source_id, source_time = await self._source_details(ctx)
+        if self._valid_c2c_provenance(
+            ctx, sender, source_id, source_time
+        ) and self._quote_present(ctx, source_id):
+            await self._stop_reply(ctx, "引用的绑定操作已失效，请重新发起。")
+            return True
+        return False
+
+    @staticmethod
+    def _verified_c2c_metadata(ctx, source_id):
+        event = getattr(ctx.event, "message_event", None)
+        metadata = (
+            event.get("source_platform_object")
+            if isinstance(event, dict)
+            else getattr(event, "source_platform_object", None)
+        )
+        if not isinstance(metadata, dict) or set(metadata) not in (
+            {"t", "d_id", "qq_websocket_verified"},
+            {"t", "d_id", "qq_websocket_verified", "qq_quote_present"},
+            {
+                "t",
+                "d_id",
+                "qq_websocket_verified",
+                "qq_quote_present",
+                "qq_quote_ref_idx",
+            },
+        ):
+            return None
+        if (
+            metadata.get("t") != "C2C_MESSAGE_CREATE"
+            or metadata.get("d_id") != source_id
+            or metadata.get("qq_websocket_verified") is not True
+            or (
+                "qq_quote_present" in metadata
+                and metadata["qq_quote_present"] is not True
+            )
+            or (
+                "qq_quote_ref_idx" in metadata
+                and not KitBindingCoordinator._valid_ref_idx(
+                    metadata["qq_quote_ref_idx"]
+                )
+            )
+        ):
+            return None
+        return metadata
+
+    @staticmethod
+    def _exact_quoted_confirmation(ctx, source_id):
+        chain = getattr(ctx.event, "message_chain", None)
+        components = getattr(chain, "root", chain)
+        if not isinstance(components, (list, tuple)) or len(components) != 2:
+            return False
+        source, plain = components
+        source_kind = (
+            source.get("type")
+            if isinstance(source, dict)
+            else getattr(source, "type", None)
+        )
+        plain_kind = (
+            plain.get("type")
+            if isinstance(plain, dict)
+            else getattr(plain, "type", None)
+        )
+        source_value = (
+            source.get("id")
+            if isinstance(source, dict)
+            else getattr(source, "id", None)
+        )
+        plain_text = (
+            plain.get("text")
+            if isinstance(plain, dict)
+            else getattr(plain, "text", None)
+        )
+        return (
+            source_kind == "Source"
+            and plain_kind == "Plain"
+            and str(source_value) == source_id
+            and plain_text == "确认"
+        )
+
+    @staticmethod
+    def _valid_c2c_provenance(ctx, sender, source_id, source_time):
         event = getattr(ctx.event, "message_event", None)
         source = event.get("sender") if isinstance(event, dict) else getattr(event, "sender", None)
         if isinstance(source, dict):
-            source_id = source.get("id")
+            sender_id = source.get("id")
             nickname = source.get("nickname")
         else:
-            source_id = getattr(source, "id", None)
+            sender_id = getattr(source, "id", None)
             nickname = getattr(source, "nickname", None)
         event_time = event.get("time") if isinstance(event, dict) else getattr(event, "time", None)
         if isinstance(event_time, datetime.datetime):
@@ -665,8 +955,11 @@ class KitBindingCoordinator:
         if isinstance(event_time, bool) or not isinstance(event_time, (int, float)):
             return False
         return (
-            nickname == "C2C_MESSAGE_CREATE"
-            and str(source_id) == sender
+            bool(source_id)
+            and KitBindingCoordinator._verified_c2c_metadata(ctx, source_id)
+            is not None
+            and nickname == "C2C_MESSAGE_CREATE"
+            and str(sender_id) == sender
             and source_time is not None
             and math.isfinite(event_time)
             and float(event_time) == source_time
@@ -745,7 +1038,7 @@ class KitBindingCoordinator:
 
     @staticmethod
     async def _reply(ctx, text):
-        await ctx.reply(MessageChain([Plain(text=text)]))
+        return await ctx.reply(MessageChain([Plain(text=text)]))
 
     async def _stop_reply(self, ctx, text):
         ctx.prevent_default()

@@ -1,0 +1,49 @@
+--- a/langbot_plugin/api/entities/builtin/platform/events.py
++++ b/langbot_plugin/api/entities/builtin/platform/events.py
+@@ -91,12 +91,45 @@
+     """消息内容。"""
+ 
+     def model_dump(self, **kwargs):
+-        return {
++        result = {
+             "type": self.type,
+             "sender": self.sender.model_dump(),
+             "message_chain": self.message_chain.model_dump(),
+             "time": self.time,
+         }
++        # Preserve only authenticated QQ WebSocket C2C provenance across
++        # successive plugin serializations.
++        source = self.source_platform_object
++        required = {"t", "d_id", "qq_websocket_verified"}
++        quote_fields = required | {"qq_quote_present"}
++        if isinstance(source, dict) and set(source) in (required, quote_fields, quote_fields | {"qq_quote_ref_idx"}):
++            message_id = source["d_id"]
++            if (
++                source["t"] == "C2C_MESSAGE_CREATE"
++                and source["qq_websocket_verified"] is True
++                and isinstance(message_id, str)
++                and 0 < len(message_id) <= 256
++                and all(33 <= ord(character) <= 126 for character in message_id)
++            ):
++                marker = {
++                    "t": "C2C_MESSAGE_CREATE",
++                    "d_id": message_id,
++                    "qq_websocket_verified": True,
++                }
++                if "qq_quote_present" in source:
++                    if source["qq_quote_present"] is not True:
++                        return result
++                    marker["qq_quote_present"] = True
++                    if "qq_quote_ref_idx" in source:
++                        ref_idx = source["qq_quote_ref_idx"]
++                        if (
++                            isinstance(ref_idx, str)
++                            and 0 < len(ref_idx) <= 256
++                            and all(33 <= ord(character) <= 126 for character in ref_idx)
++                        ):
++                            marker["qq_quote_ref_idx"] = ref_idx
++                result["source_platform_object"] = marker
++        return result
+ 
+ 
+ class GroupMessage(MessageEvent):

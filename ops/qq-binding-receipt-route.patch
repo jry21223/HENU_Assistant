@@ -1,0 +1,331 @@
+--- a/libs/qq_official_api/api.py
++++ b/libs/qq_official_api/api.py
+@@ -1,5 +1,6 @@
+ import re
+ import time
++import datetime
+ import asyncio
+ import collections
+ from quart import request
+@@ -14,6 +15,110 @@
+ 
+ 
+ QQ_SELECT_ACTION_PREFIX = '__langbot_select__:'
++
++
++def normalize_qq_c2c_send_receipt(value: Any) -> Optional[dict[str, str]]:
++    """Return only a QQ C2C message ID, send time, and quote index."""
++    if not isinstance(value, dict):
++        return None
++    message_id = value.get('id')
++    timestamp = value.get('timestamp')
++    ext_info = value.get('ext_info')
++    if ext_info is not None and not isinstance(ext_info, dict):
++        return None
++    direct_ref_present = 'ref_idx' in value
++    nested_ref_present = isinstance(ext_info, dict) and 'ref_idx' in ext_info
++    has_ref_idx = direct_ref_present or nested_ref_present
++    nested_ref_idx = ext_info.get('ref_idx') if isinstance(ext_info, dict) else None
++    direct_ref_idx = value.get('ref_idx')
++    def valid_ref_idx(ref_idx: Any) -> bool:
++        return (
++            isinstance(ref_idx, str)
++            and 0 < len(ref_idx) <= 256
++            and all(33 <= ord(character) <= 126 for character in ref_idx)
++        )
++
++    if direct_ref_present and not valid_ref_idx(direct_ref_idx):
++        return None
++    if nested_ref_present and not valid_ref_idx(nested_ref_idx):
++        return None
++    if direct_ref_present and nested_ref_present and direct_ref_idx != nested_ref_idx:
++        return None
++    ref_idx = direct_ref_idx if direct_ref_present else nested_ref_idx
++    if not isinstance(message_id, str):
++        return None
++    if not (0 < len(message_id) <= 256) or message_id != message_id.strip() or not message_id.isprintable():
++        return None
++    if not isinstance(timestamp, str) or len(timestamp) > 64:
++        return None
++    if not re.fullmatch(
++        r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})',
++        timestamp,
++    ):
++        return None
++    try:
++        if datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00')).utcoffset() is None:
++            return None
++    except ValueError:
++        return None
++    receipt = {'id': message_id, 'timestamp': timestamp}
++    if has_ref_idx:
++        receipt['ref_idx'] = ref_idx
++    return receipt
++
++
++def extract_qq_c2c_quote_ref_idx(event_type: Any, data: Any) -> Optional[str]:
++    """Keep one unambiguous QQ server quote index from a C2C type-103 event."""
++    if event_type != 'C2C_MESSAGE_CREATE' or not isinstance(data, dict):
++        return None
++    if type(data.get('message_type')) is not int or data['message_type'] != 103:
++        return None
++
++    def valid_ref_idx(value: Any) -> bool:
++        return (
++            isinstance(value, str)
++            and 0 < len(value) <= 256
++            and all(33 <= ord(character) <= 126 for character in value)
++        )
++
++    scene = data.get('message_scene')
++    if scene is not None and not isinstance(scene, dict):
++        return None
++    ext = scene.get('ext') if isinstance(scene, dict) else None
++    if ext is not None and (not isinstance(ext, list) or len(ext) > 32):
++        return None
++    ext_indices: dict[str, str] = {}
++    for entry in ext or []:
++        if not isinstance(entry, str) or len(entry) > 512:
++            return None
++        for name in ('ref_msg_idx', 'msg_idx'):
++            prefix = name + '='
++            if entry.startswith(prefix):
++                value = entry[len(prefix):]
++                if name in ext_indices or not valid_ref_idx(value):
++                    return None
++                ext_indices[name] = value
++                break
++
++    elements = data.get('msg_elements')
++    if elements is not None and (not isinstance(elements, list) or len(elements) > 32):
++        return None
++    element_index = None
++    for element in elements or []:
++        if not isinstance(element, dict):
++            return None
++        if 'msg_idx' in element:
++            value = element['msg_idx']
++            if element_index is not None or not valid_ref_idx(value):
++                return None
++            element_index = value
++
++    indices = [*ext_indices.values()]
++    if element_index is not None:
++        indices.append(element_index)
++    if not indices or any(index != indices[0] for index in indices[1:]):
++        return None
++    return indices[0]
+ 
+ 
+ def get_select_field_options(form_data: dict) -> tuple[str, list[str]]:
+@@ -316,7 +421,7 @@
+             for handler in self._message_handlers[msg_type]:
+                 await handler(event)
+ 
+-    async def get_message(self, msg: dict) -> Dict[str, Any]:
++    async def get_message(self, msg: dict, trusted_websocket: bool = False) -> Dict[str, Any]:
+         """获取消息"""
+         d = msg.get('d', {})
+         if not isinstance(d, dict):
+@@ -335,6 +440,15 @@
+             'member_openid': d.get('author', {}).get('openid', {}),
+             'group_openid': d.get('group_openid', {}),
+         }
++        # Only the authenticated gateway path may assert C2C provenance.
++        # The callback/webhook path invokes this method with the default False.
++        if trusted_websocket is True and msg.get('t') == 'C2C_MESSAGE_CREATE':
++            message_data['qq_websocket_verified'] = True
++            if type(d.get('message_type')) is int and d['message_type'] == 103:
++                message_data['qq_quote_present'] = True
++                quote_ref_idx = extract_qq_c2c_quote_ref_idx(msg.get('t'), d)
++                if quote_ref_idx is not None:
++                    message_data['qq_quote_ref_idx'] = quote_ref_idx
+         attachments = d.get('attachments', [])
+         image_attachments = [attachment['url'] for attachment in attachments if await self.is_image(attachment)]
+         image_attachments_type = [
+@@ -404,12 +518,16 @@
+             if event_id:
+                 data['event_id'] = event_id
+             response = await client.post(url, headers=headers, json=data)
+-            response_data = response.json()
+             if response.status_code == 200:
+-                return
++                try:
++                    response_data = response.json()
++                except ValueError:
++                    return None
++                return normalize_qq_c2c_send_receipt(response_data)
+             else:
+-                await self.logger.error(f'Failed to send private message: {response_data}')
+-                raise ValueError(response)
++                # Provider error bodies may echo the private binding link.
++                await self.logger.error(f'Failed to send private message: HTTP {response.status_code}')
++                raise ValueError(f'Failed to send private message: HTTP {response.status_code}')
+ 
+     async def send_group_text_msg(
+         self,
+--- a/pkg/platform/sources/qqofficial.py
++++ b/pkg/platform/sources/qqofficial.py
+@@ -17,6 +17,7 @@
+     build_keyboard_from_form,
+     build_keyboard_from_select_field,
+     resolve_select_button_action,
++    normalize_qq_c2c_send_receipt,
+ )
+ from langbot.libs.qq_official_api.qqofficialevent import QQOfficialEvent
+ from ...utils import image
+@@ -35,6 +36,47 @@
+         return False
+     # Check if it looks like base64 (only valid chars, reasonable length)
+     return bool(re.fullmatch(r'[A-Za-z0-9+/=\s]{20,}', value))
++
++
++class QQFriendMessage(platform_events.FriendMessage):
++    """Carry only verified WebSocket C2C provenance across the first SDK boundary."""
++
++    def model_dump(self, **kwargs):
++        result = super().model_dump(**kwargs)
++        result.pop('source_platform_object', None)
++        source = self.source_platform_object
++        if not isinstance(source, dict) or source.get('t') != 'C2C_MESSAGE_CREATE':
++            return result
++        if source.get('qq_websocket_verified') is not True:
++            return result
++        message_id = source.get('d_id')
++        if not isinstance(message_id, str) or not (0 < len(message_id) <= 256):
++            return result
++        if not all(33 <= ord(character) <= 126 for character in message_id):
++            return result
++        if not self.message_chain or type(self.message_chain[0]) is not platform_message.Source:
++            return result
++        if self.message_chain[0].id != message_id:
++            return result
++        marker = {
++            't': 'C2C_MESSAGE_CREATE',
++            'd_id': message_id,
++            'qq_websocket_verified': True,
++        }
++        if 'qq_quote_present' in source:
++            if source['qq_quote_present'] is not True:
++                return result
++            marker['qq_quote_present'] = True
++            if 'qq_quote_ref_idx' in source:
++                ref_idx = source['qq_quote_ref_idx']
++                if (
++                    isinstance(ref_idx, str)
++                    and 0 < len(ref_idx) <= 256
++                    and all(33 <= ord(character) <= 126 for character in ref_idx)
++                ):
++                    marker['qq_quote_ref_idx'] = ref_idx
++        result['source_platform_object'] = marker
++        return result
+ 
+ 
+ class QQOfficialMessageConverter(abstract_platform_adapter.AbstractMessageConverter):
+@@ -137,7 +179,8 @@
+                 nickname=event.t,
+                 remark='',
+             )
+-            return platform_events.FriendMessage(
++            friend_message_type = QQFriendMessage if isinstance(event, dict) and event.get('qq_websocket_verified') is True else platform_events.FriendMessage
++            return friend_message_type(
+                 sender=friend,
+                 message_chain=yiri_chain,
+                 time=int(source_time.timestamp()),
+@@ -272,6 +315,14 @@
+             return
+ 
+         content_list = await QQOfficialMessageConverter.yiri2target(message)
++        single_plain_c2c = (
++            qq_official_event.t == 'C2C_MESSAGE_CREATE'
++            and len(message) == 1
++            and type(message[0]) is platform_message.Plain
++            and len(content_list) == 1
++            and content_list[0].get('type') == 'text'
++        )
++        qq_c2c_receipt = None
+ 
+         # 确定 target_type 和 target_id
+         target_type = None
+@@ -310,11 +361,13 @@
+ 
+             if content_type == 'text':
+                 if target_type == 'c2c':
+-                    await self.bot.send_private_text_msg(
++                    sent = await self.bot.send_private_text_msg(
+                         target_id,
+                         content['content'],
+                         qq_official_event.d_id,
+                     )
++                    if single_plain_c2c:
++                        qq_c2c_receipt = normalize_qq_c2c_send_receipt(sent)
+                 elif target_type == 'group':
+                     await self.bot.send_group_text_msg(
+                         target_id,
+@@ -360,6 +413,9 @@
+                         msg_id=qq_official_event.d_id,
+                     )
+ 
++        if qq_c2c_receipt is not None:
++            return {'qq_c2c_receipt': qq_c2c_receipt}
++
+     async def send_message(self, target_type: str, target_id: str, message: platform_message.MessageChain):
+         pass
+ 
+@@ -399,6 +455,8 @@
+         Returns:
+             响应数据
+         """
++        if self.enable_webhook is not True:
++            return {'error': 'Webhook disabled for this Bot'}, 403
+         return await self.bot.handle_unified_webhook(request)
+ 
+     async def run_async(self):
+@@ -438,7 +496,7 @@
+             await self.logger.info(f'Processing message event: {event_type}')
+             # 构造与 webhook 模式相同的 payload 结构
+             payload = {'t': event_type, 'd': event_data}
+-            message_data = await self.bot.get_message(payload)
++            message_data = await self.bot.get_message(payload, trusted_websocket=True)
+             if message_data:
+                 event = QQOfficialEvent.from_payload(message_data)
+                 await self.bot._handle_message(event)
+--- a/pkg/plugin/handler.py
++++ b/pkg/plugin/handler.py
+@@ -18,6 +18,7 @@
+ import langbot_plugin.api.entities.builtin.platform.message as platform_message
+ import langbot_plugin.api.entities.builtin.provider.message as provider_message
+ import langbot_plugin.api.entities.builtin.resource.tool as resource_tool
++from langbot.libs.qq_official_api.api import normalize_qq_c2c_send_receipt
+ 
+ from ..entity.persistence import plugin as persistence_plugin
+ from ..entity.persistence import bstorage as persistence_bstorage
+@@ -162,13 +163,25 @@
+ 
+             message_chain_obj = platform_message.MessageChain.model_validate(message_chain)
+ 
+-            self.ap.logger.debug(f'Reply message: {message_chain_obj.model_dump(serialize_as_any=False)}')
+-
+-            await query.adapter.reply_message(
++            reply_result = await query.adapter.reply_message(
+                 query.message_event,
+                 message_chain_obj,
+                 quote_origin,
+             )
++
++            qq_source = getattr(query.message_event, 'source_platform_object', None)
++            if (
++                getattr(qq_source, 't', None) == 'C2C_MESSAGE_CREATE'
++                and len(message_chain_obj) == 1
++                and type(message_chain_obj[0]) is platform_message.Plain
++                and isinstance(reply_result, dict)
++                and set(reply_result) == {'qq_c2c_receipt'}
++            ):
++                receipt = normalize_qq_c2c_send_receipt(reply_result['qq_c2c_receipt'])
++                if receipt is not None:
++                    return handler.ActionResponse.success(
++                        data={'qq_c2c_receipt': receipt},
++                    )
+ 
+             return handler.ActionResponse.success(
+                 data={},
