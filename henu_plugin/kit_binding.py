@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import json
+import math
 import re
 import time
+import unicodedata
 import uuid
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
@@ -32,6 +35,18 @@ EXPLICIT_CONFIRM = {
     "确认HENU KIT解绑",
     "确认 HENU KIT 解绑",
 }
+USED_SOURCE_SCHEMA = "henu.kit-binding-used-sources.v2"
+MAX_SOURCE_AGE_SECONDS = 120
+MAX_SOURCE_FUTURE_SECONDS = 0
+MAX_QQ_BOT_CLOCK_SKEW_SECONDS = 30
+USED_SOURCE_RETENTION_SECONDS = 300
+MAX_USED_SOURCES = 4096
+ACTIVATION_DELAY_SECONDS = 120
+ACTIVATION_SCHEMA = "henu.kit-binding-activation.v1"
+
+
+class UsedSourceLedgerFull(RuntimeError):
+    pass
 
 
 class KitBindingCoordinator:
@@ -56,6 +71,115 @@ class KitBindingCoordinator:
             key, encrypt_value(json.dumps(value)).encode()
         )
 
+    @staticmethod
+    def _scope_key(bot, sender):
+        return "kit-binding:" + hashlib.sha256((bot + ":" + sender).encode()).hexdigest()
+
+    async def _activation_not_before(self, bot):
+        activation_key = "kit-binding-activation:" + hashlib.sha256(bot.encode()).hexdigest()
+        activation = await self._read(activation_key)
+        if activation is None:
+            activation = {
+                "schema": ACTIVATION_SCHEMA,
+                "not_before": time.time() + ACTIVATION_DELAY_SECONDS,
+            }
+            await self._save(activation_key, activation)
+        if (
+            not isinstance(activation, dict)
+            or activation.get("schema") != ACTIVATION_SCHEMA
+            or not isinstance(activation.get("not_before"), (int, float))
+            or not math.isfinite(activation["not_before"])
+        ):
+            raise ValueError("invalid KIT binding activation record")
+        return activation["not_before"]
+
+    async def _used_source(self, key, sender, source_id):
+        """Retain recent Sources; the trusted QQ time check rejects older replay."""
+        unknown_key = "kit-binding-used-unknown:" + hashlib.sha256(sender.encode()).hexdigest()
+        known_key = (
+            "kit-binding-used:" + key.removeprefix("kit-binding:")
+            if key
+            else None
+        )
+        now = time.time()
+        digest = hashlib.sha256(source_id.encode()).hexdigest()
+        ledgers = {}
+        for marker_key in (unknown_key, known_key):
+            if not marker_key:
+                continue
+            ledger = await self._read(marker_key)
+            if ledger is None:
+                ledger = {"schema": USED_SOURCE_SCHEMA, "entries": {}}
+            if (
+                not isinstance(ledger, dict)
+                or ledger.get("schema") != USED_SOURCE_SCHEMA
+                or not isinstance(ledger.get("entries"), dict)
+            ):
+                raise ValueError("invalid KIT confirmation source ledger")
+            entries = ledger["entries"]
+            for stored_digest, stored_at in list(entries.items()):
+                if not isinstance(stored_at, (int, float)) or not math.isfinite(stored_at):
+                    raise ValueError("invalid KIT confirmation source time")
+                if stored_at < now - USED_SOURCE_RETENTION_SECONDS:
+                    del entries[stored_digest]
+            if digest in entries:
+                return True
+            ledgers[marker_key] = ledger
+        target = known_key or unknown_key
+        ledger = ledgers[target]
+        if len(ledger["entries"]) >= MAX_USED_SOURCES:
+            raise UsedSourceLedgerFull()
+        ledger["entries"][digest] = now
+        await self._save(target, ledger)
+        return False
+
+    async def _remember_fallback_confirmation(self, ctx, bot):
+        """Record a plain confirmation before allowing another flow to handle it."""
+        sender = str(getattr(ctx.event, "sender_id", "") or "")
+        conversation = conversation_context(ctx.event)
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sender)
+            or conversation["launcher_type"] != "person"
+            or not conversation["launcher_id"]
+        ):
+            return False
+        source_id = await self._source_id(ctx)
+        if not source_id:
+            return False
+        key = self._scope_key(bot, sender) if bot else None
+        lock_key = key or "kit-binding-unknown:" + hashlib.sha256(sender.encode()).hexdigest()
+        lock = self.locks.setdefault(lock_key, asyncio.Lock())
+        async with lock:
+            return await self._used_source(key, sender, source_id)
+
+    async def _has_active_pending_for_sender(self, sender, conversation):
+        """Find KIT ownership before falling through to another Bot's handler."""
+        getter = getattr(self.listener.plugin, "get_plugin_storage_keys", None)
+        if not callable(getter):
+            raise RuntimeError("KIT pending storage cannot be enumerated")
+        keys = await getter()
+        if keys is None:
+            raise RuntimeError("KIT pending storage keys unavailable")
+        for key in keys:
+            if not isinstance(key, str) or not re.fullmatch(r"kit-binding:[0-9a-f]{64}", key):
+                continue
+            pending = await self._read(key)
+            if not pending:
+                continue
+            if not isinstance(pending, dict):
+                raise ValueError("invalid KIT pending record")
+            candidate_bot = pending.get("bot")
+            if not isinstance(candidate_bot, str) or not candidate_bot:
+                raise ValueError("KIT pending Bot identity unavailable")
+            expected = self._scope_key(candidate_bot, sender)
+            if (
+                key == expected
+                and pending.get("conversation") == conversation
+                and pending.get("expires_at", 0) > time.time()
+            ):
+                return True
+        return False
+
     async def handle(self, ctx, *, is_group):
         text = (
             str(
@@ -70,19 +194,73 @@ class KitBindingCoordinator:
         if not action and not confirming:
             return False
         # Do not interfere with existing plain confirmation when KIT is absent.
+        bot = ""
         try:
+            if confirming and not is_group:
+                bot = await ctx.get_bot_uuid()
             settings = kit_settings()
-            bot = await ctx.get_bot_uuid() if settings else ""
+            if settings and not bot:
+                bot = await ctx.get_bot_uuid()
         except Exception:
+            if confirming and not is_group:
+                try:
+                    if await self._remember_fallback_confirmation(ctx, bot):
+                        ctx.prevent_default()
+                        ctx.prevent_postorder()
+                        return True
+                except Exception:
+                    await self._stop_reply(
+                        ctx, "HENU KIT 确认记录暂时不可用，请稍后重试。"
+                    )
+                    return True
             if text == "确认":
-                return False
+                if is_group:
+                    return False
+                try:
+                    sender = str(getattr(ctx.event, "sender_id", "") or "")
+                    conversation = conversation_context(ctx.event)
+                    if not await self._has_active_pending_for_sender(
+                        sender, conversation
+                    ):
+                        return False
+                except Exception:
+                    # An uncertain ownership check must not fall through to a
+                    # different confirmation handler.
+                    pass
             await self._stop_reply(ctx, "HENU KIT 绑定服务暂时不可用，请联系维护者。")
             return True
         if is_group or not settings or bot != settings["bot_uuid"]:
+            if confirming and not is_group:
+                try:
+                    if await self._remember_fallback_confirmation(ctx, bot):
+                        ctx.prevent_default()
+                        ctx.prevent_postorder()
+                        return True
+                except Exception:
+                    await self._stop_reply(
+                        ctx, "HENU KIT 确认记录暂时不可用，请稍后重试。"
+                    )
+                    return True
             if text == "确认":
-                return False
+                if is_group:
+                    return False
+                try:
+                    sender = str(getattr(ctx.event, "sender_id", "") or "")
+                    conversation = conversation_context(ctx.event)
+                    if not await self._has_active_pending_for_sender(
+                        sender, conversation
+                    ):
+                        return False
+                except Exception:
+                    await self._stop_reply(
+                        ctx, "HENU KIT 确认记录暂时不可用，请稍后重试。"
+                    )
+                    return True
             await self._stop_reply(
-                ctx, "请在指定的 HENU Bot QQ 私聊中操作；如仍不可用，请联系维护者。"
+                ctx,
+                "HENU KIT 绑定服务暂时不可用，请联系维护者。"
+                if not settings
+                else "请在指定的 HENU Bot QQ 私聊中操作；如仍不可用，请联系维护者。",
             )
             return True
         sender = str(getattr(ctx.event, "sender_id", "") or "")
@@ -94,29 +272,102 @@ class KitBindingCoordinator:
         ):
             await self._stop_reply(ctx, "无法确认当前 QQ 身份，本次未执行。")
             return True
-        key = "kit-binding:" + hashlib.sha256((bot + ":" + sender).encode()).hexdigest()
+        key = self._scope_key(bot, sender)
         lock = self.locks.setdefault(key, asyncio.Lock())
         if lock.locked():
             await self._stop_reply(ctx, "绑定操作正在处理中，请等待结果。")
             return True
         async with lock:
             try:
+                source_id, source_time = await self._source_details(ctx)
+                if not confirming and not self._valid_c2c_provenance(
+                    ctx, sender, source_time
+                ):
+                    await self._stop_reply(
+                        ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
+                    )
+                    return True
                 pending = await self._read(key)
                 if pending and pending.get("expires_at", 0) <= time.time():
-                    await self.listener.plugin.set_plugin_storage(key, b"")
+                    if not confirming:
+                        await self.listener.plugin.set_plugin_storage(key, b"")
                     pending = None
                 if confirming:
                     if not pending:
                         if text == "确认":
+                            if await self._has_active_pending_for_sender(
+                                sender, conversation
+                            ):
+                                await self._stop_reply(
+                                    ctx,
+                                    "另一个 HENU Bot 中仍有待确认操作，请回到原私聊处理。",
+                                )
+                                return True
+                            if (
+                                source_id
+                                and self._valid_c2c_provenance(ctx, sender, source_time)
+                                and await self._used_source(key, sender, source_id)
+                            ):
+                                ctx.prevent_default()
+                                ctx.prevent_postorder()
+                                return True
                             return False
+                        if not self._valid_c2c_provenance(ctx, sender, source_time):
+                            await self._stop_reply(
+                                ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
+                            )
+                            return True
                         await self._stop_reply(
                             ctx, "没有有效的 HENU KIT 待确认操作，请重新发起。"
                         )
                         return True
-                    source_id = await self._source_id(ctx)
+                    if not self._valid_c2c_provenance(ctx, sender, source_time):
+                        await self._stop_reply(
+                            ctx, "无法验证 QQ 消息来源，本次未执行，请在官方 QQ 私聊重新发送。"
+                        )
+                        return True
+                    activation_not_before = await self._activation_not_before(bot)
+                    if source_id and await self._used_source(key, sender, source_id):
+                        ctx.prevent_default()
+                        ctx.prevent_postorder()
+                        return True
+                    if time.time() <= activation_not_before:
+                        await self._stop_reply(
+                            ctx, "HENU KIT 绑定服务正在启用，请稍后重新发起操作。"
+                        )
+                        return True
+                    if source_time is None:
+                        await self._stop_reply(
+                            ctx, "无法验证 QQ 消息时间，本次未执行，请重新发送消息。"
+                        )
+                        return True
+                    if source_time <= activation_not_before:
+                        await self._stop_reply(
+                            ctx, "这条 QQ 消息早于绑定服务启用时间，请重新发送消息。"
+                        )
+                        return True
                     if not source_id or not pending.get("created_source_id"):
                         await self._stop_reply(
                             ctx, "无法验证原消息标识，请重新发起绑定。"
+                        )
+                        return True
+                    created_source_time = pending.get("created_source_time")
+                    if (
+                        not self._source_fresh(source_time)
+                        or not isinstance(created_source_time, (int, float))
+                        or not math.isfinite(created_source_time)
+                    ):
+                        await self._stop_reply(
+                            ctx, "无法验证 QQ 消息时间或消息已过期，请重新发起操作。"
+                        )
+                        return True
+                    if (
+                        source_time <= created_source_time
+                        or source_time
+                        < pending.get("created_at", 0) - MAX_QQ_BOT_CLOCK_SKEW_SECONDS
+                    ):
+                        await self._stop_reply(
+                            ctx, "请在发起操作后发送一条新的“确认”消息，本次未执行。"
                         )
                         return True
                     if source_id in {
@@ -159,10 +410,13 @@ class KitBindingCoordinator:
                         return True
                     ctx.prevent_default()
                     ctx.prevent_postorder()
-                    await self._confirm(ctx, settings, sender, key, pending, source_id)
+                    await self._confirm(
+                        ctx, settings, sender, key, pending, source_id, source_time
+                    )
                     return True
                 ctx.prevent_default()
                 ctx.prevent_postorder()
+                activation_not_before = await self._activation_not_before(bot)
                 if action == "status":
                     result = await asyncio.to_thread(
                         kit_request, settings, "status", {"subject": sender}
@@ -174,11 +428,26 @@ class KitBindingCoordinator:
                         else "尚未绑定 HENU KIT。请发送“绑定 HENU KIT”。",
                     )
                     return True
-                # QQ's source message identity, not LangBot's resettable query counter.
-                source_id = await self._source_id(ctx)
-                if not source_id:
+                if time.time() <= activation_not_before:
                     await self._reply(
-                        ctx, "无法验证原消息标识，本次未发起绑定，请联系维护者。"
+                        ctx, "HENU KIT 绑定服务正在启用，请两分钟后重新发送操作。"
+                    )
+                    return True
+                # QQ's source message identity, not LangBot's resettable query counter.
+                if not source_id or not self._source_fresh(source_time):
+                    await self._reply(
+                        ctx,
+                        "无法验证 QQ 消息标识或时间，本次未发起操作，请重新发送消息。",
+                    )
+                    return True
+                if source_time <= activation_not_before:
+                    await self._reply(
+                        ctx, "这条 QQ 消息早于绑定服务启用时间，请重新发送操作。"
+                    )
+                    return True
+                if await self._used_source(key, sender, source_id):
+                    await self._reply(
+                        ctx, "这条 QQ 消息已处理，请发送一条新消息重新发起操作。"
                     )
                     return True
                 request_id = str(
@@ -195,6 +464,7 @@ class KitBindingCoordinator:
                         bot=bot,
                         request_id=request_id,
                         created_source_id=source_id,
+                        created_source_time=source_time,
                     )
                     await self._save(key, pending)
                 if action == "unlink":
@@ -229,6 +499,10 @@ class KitBindingCoordinator:
                     previous.cancel()
                 self.watchers[key] = asyncio.create_task(
                     self._watch(ctx, settings, sender, key, request_id)
+                )
+            except UsedSourceLedgerFull:
+                await self._stop_reply(
+                    ctx, "确认消息过于频繁，本次未执行，请稍后重试。"
                 )
             except KitError as exc:
                 messages = {
@@ -278,6 +552,7 @@ class KitBindingCoordinator:
                             + "。请核对，确认是本人账号后回复“确认”。",
                         )
                         pending["previewed"] = True
+                        pending["previewed_at"] = time.time()
                         pending["preview_query_id"] = ctx.query_id
                         pending["preview_source_id"] = pending["created_source_id"]
                         await self._save(key, pending)
@@ -292,7 +567,7 @@ class KitBindingCoordinator:
             if self.watchers.get(key) is asyncio.current_task():
                 self.watchers.pop(key, None)
 
-    async def _confirm(self, ctx, settings, sender, key, pending, source_id):
+    async def _confirm(self, ctx, settings, sender, key, pending, source_id, source_time):
         action = pending["command"]
         payload = {"subject": sender}
         if action == "start":
@@ -313,11 +588,23 @@ class KitBindingCoordinator:
                     + "。请核对，确认是本人账号后再回复“确认”。",
                 )
                 pending["previewed"] = True
+                pending["previewed_at"] = time.time()
                 pending["preview_query_id"] = ctx.query_id
                 pending["preview_source_id"] = source_id
                 await self._save(key, pending)
                 return
             if pending.get("preview_query_id") == ctx.query_id:
+                return
+            previewed_at = pending.get("previewed_at")
+            if not isinstance(previewed_at, (int, float)) or not math.isfinite(
+                previewed_at
+            ):
+                await self._reply(ctx, "目标账号预览已失效，请重新发起绑定。")
+                return
+            if source_time <= previewed_at or source_time > time.time():
+                await self._reply(
+                    ctx, "请在看到目标账号提示后发送一条新的“确认”消息，本次未执行。"
+                )
                 return
             result = await asyncio.to_thread(kit_request, settings, "confirm", payload)
             message = (
@@ -363,16 +650,50 @@ class KitBindingCoordinator:
         return False
 
     @staticmethod
-    async def _source_id(ctx):
+    def _valid_c2c_provenance(ctx, sender, source_time):
+        event = getattr(ctx.event, "message_event", None)
+        source = event.get("sender") if isinstance(event, dict) else getattr(event, "sender", None)
+        if isinstance(source, dict):
+            source_id = source.get("id")
+            nickname = source.get("nickname")
+        else:
+            source_id = getattr(source, "id", None)
+            nickname = getattr(source, "nickname", None)
+        event_time = event.get("time") if isinstance(event, dict) else getattr(event, "time", None)
+        if isinstance(event_time, datetime.datetime):
+            event_time = event_time.timestamp()
+        if isinstance(event_time, bool) or not isinstance(event_time, (int, float)):
+            return False
+        return (
+            nickname == "C2C_MESSAGE_CREATE"
+            and str(source_id) == sender
+            and source_time is not None
+            and math.isfinite(event_time)
+            and float(event_time) == source_time
+        )
+
+    @staticmethod
+    def _source_fresh(source_time):
+        if source_time is None:
+            return False
+        now = time.time()
+        return (
+            now - MAX_SOURCE_AGE_SECONDS
+            <= source_time
+            <= now + MAX_SOURCE_FUTURE_SECONDS
+        )
+
+    @staticmethod
+    async def _source_details(ctx):
         chain = getattr(ctx.event, "message_chain", None)
         if chain is None:
             try:
                 chain = await ctx.get_query_var("message_chain")
             except Exception:
-                return ""
+                return "", None
         components = getattr(chain, "root", chain)
         if not isinstance(components, (list, tuple)):
-            return ""
+            return "", None
         for item in components:
             kind = (
                 item.get("type")
@@ -385,17 +706,42 @@ class KitBindingCoordinator:
                     if isinstance(item, dict)
                     else getattr(item, "id", "")
                 )
-                return str(identity) if identity and len(str(identity)) <= 256 else ""
-        return ""
+                if not identity or len(str(identity)) > 256:
+                    return "", None
+                raw_time = (
+                    item.get("time", item.get("timestamp"))
+                    if isinstance(item, dict)
+                    else getattr(item, "time", None)
+                )
+                if isinstance(raw_time, datetime.datetime):
+                    source_time = raw_time.timestamp()
+                elif isinstance(raw_time, (int, float)) and not isinstance(raw_time, bool):
+                    source_time = float(raw_time)
+                else:
+                    source_time = None
+                if source_time is not None and not math.isfinite(source_time):
+                    source_time = None
+                return str(identity), source_time
+        return "", None
+
+    @staticmethod
+    async def _source_id(ctx):
+        source_id, _ = await KitBindingCoordinator._source_details(ctx)
+        return source_id
 
     @staticmethod
     def _name(result):
         name = result.get("display_name")
-        return (
-            str(name).replace("\n", " ").replace("\r", " ")[:120]
+        cleaned = (
+            "".join(
+                char
+                for char in str(name)
+                if unicodedata.category(char) not in {"Cc", "Cf"}
+            ).strip()[:120]
             if name
-            else "当前账号"
+            else ""
         )
+        return cleaned or "当前账号"
 
     @staticmethod
     async def _reply(ctx, text):
