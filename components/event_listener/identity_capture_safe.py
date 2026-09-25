@@ -11,6 +11,7 @@ from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
+from henu_plugin.kit_binding import KitBindingCoordinator
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -41,15 +42,20 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         await super().initialize()
         self._yuketang_login = YuketangLoginCoordinator(self)
         self._confirmation_shortcut = ConfirmationShortcut(self)
+        self._kit_binding = KitBindingCoordinator(self)
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if await self._kit_binding.handle(ctx, is_group=False):
+                return
             if await self._confirmation_shortcut.handle(ctx):
                 return
             await self._yuketang_login.handle(ctx, is_group=False)
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if await self._kit_binding.handle(ctx, is_group=True):
+                return
             if await self._confirmation_shortcut.handle(ctx):
                 return
             await self._yuketang_login.handle(ctx, is_group=True)
@@ -196,6 +202,9 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         *,
         is_group: bool,
     ) -> None:
+        kit_binding = getattr(self, '_kit_binding', None)
+        if kit_binding is not None and await kit_binding.handle(ctx, is_group=is_group):
+            return
         if await self._confirmation_shortcut.handle(ctx):
             return
         if await self._yuketang_login.handle(ctx, is_group=is_group):
