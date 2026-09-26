@@ -57,15 +57,25 @@ class KitBindingCoordinator:
         self.locks = {}
         self.watchers = {}
 
-    async def _read(self, key):
+    async def _get_optional_storage(self, key):
         try:
-            raw = await self.listener.plugin.get_plugin_storage(key)
-        except KeyError:
-            return None
-        except ActionCallError as exc:
-            if str(exc) != f"Storage with key {key} not found":
+            return await self.listener.plugin.get_plugin_storage(key)
+        except KeyError as exc:
+            if exc.args != (key,):
                 raise
             return None
+        except ActionCallError as exc:
+            missing = f"Storage with key {key} not found"
+            # SDK 0.4.13 prefixes at forwarding; 0.1.1b1 also wraps both calls.
+            known_missing = (
+                "ActionCallError: " * count + missing for count in (0, 1, 3)
+            )
+            if str(exc) not in known_missing:
+                raise
+            return None
+
+    async def _read(self, key):
+        raw = await self._get_optional_storage(key)
         if not raw:
             return None
         if isinstance(raw, bytes):
@@ -748,14 +758,7 @@ class KitBindingCoordinator:
             (f"user:{sender}:yuketang_pending_credentials", True),
             (f"user:{sanitized}:pending_operation", False),
         ):
-            try:
-                raw = await self.listener.plugin.get_plugin_storage(key)
-            except KeyError:
-                continue
-            except ActionCallError as exc:
-                if str(exc) != f"Storage with key {key} not found":
-                    raise
-                continue
+            raw = await self._get_optional_storage(key)
             if not raw:
                 continue
             if isinstance(raw, bytes):
