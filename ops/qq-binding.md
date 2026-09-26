@@ -146,6 +146,15 @@ live plugin contains additional account and snapshot-storage hotfixes. Overlay
 only the reviewed new modules/listener hooks onto the actual live snapshot,
 test both old and new flows, then deploy through a separate release gate.
 
+First-use storage checks must include the full plugin-to-runtime-to-main RPC
+path. Main returns a missing-key error. Runtime SDK 0.4.13 prefixes it once
+with `ActionCallError: `; the legacy development SDK 0.1.1b1 also wraps both
+calls, producing three prefixes. The binding coordinator accepts only those
+two observed forms or the direct error, with an exact match for the requested
+key. Other storage failures remain blocking. Run
+`python -m pytest -q tests/test_kit_binding_storage_rpc.py` against the release
+SDK to cover that path, including encrypted writes and unlink confirmation.
+
 Binding tests passing locally do not prove real QQ delivery. Verify the link,
 website consent, original-QQ preview and confirmation, status, and unlink with
 consenting test accounts before enabling Food submission. Food's existing
