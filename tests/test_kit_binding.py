@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langbot_plugin.entities.io.errors import ActionCallError
 
 from henu_mcp.core.secure_storage import decrypt_value, encrypt_value
 from henu_plugin.confirmation import create_pending_operation
@@ -362,8 +363,14 @@ def test_quoted_binding_requires_exact_confirm_message(monkeypatch, tamper):
 def test_unlink_plain_confirm_needs_only_send_time_receipt(monkeypatch):
     from tests.test_confirmation_shortcut import Plugin
 
+    class LangBotPlugin(Plugin):
+        async def get_plugin_storage(self, key):
+            if key not in self.storage:
+                raise ActionCallError(f"Storage with key {key} not found")
+            return self.storage[key]
+
     async def run():
-        plugin = Plugin()
+        plugin = LangBotPlugin()
         flow = KitBindingCoordinator(SimpleNamespace(plugin=plugin))
         monkeypatch.setattr(
             "henu_plugin.kit_binding.kit_settings",
@@ -393,6 +400,45 @@ def test_unlink_plain_confirm_needs_only_send_time_receipt(monkeypatch):
             kit_event("确认", 2, "source-confirm"), is_group=False
         )
         assert calls == ["unlink"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Storage backend unavailable",
+        "Storage with key user:different:pending_operation not found",
+    ],
+)
+def test_unlink_confirmation_stops_on_other_storage_errors(monkeypatch, error):
+    from tests.test_confirmation_shortcut import Plugin
+
+    class LangBotPlugin(Plugin):
+        async def get_plugin_storage(self, key):
+            if key.startswith("user:"):
+                raise ActionCallError(error)
+            if key not in self.storage:
+                raise ActionCallError(f"Storage with key {key} not found")
+            return self.storage[key]
+
+    async def run():
+        plugin = LangBotPlugin()
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=plugin))
+        monkeypatch.setattr(
+            "henu_plugin.kit_binding.kit_settings",
+            lambda: {"bot_uuid": "bot", "portal_url": "https://kit.test"},
+        )
+        remote = Mock(return_value={"bound": False})
+        monkeypatch.setattr("henu_plugin.kit_binding.kit_request", remote)
+
+        assert await flow.handle(
+            kit_event("解绑 HENU KIT", 1, "source-unlink"), is_group=False
+        )
+        request = kit_event("确认", 2, "source-confirm")
+        assert await flow.handle(request, is_group=False)
+        remote.assert_not_called()
+        assert "暂时无法读取或保存" in str(request.reply.call_args)
 
     asyncio.run(run())
 
@@ -1859,6 +1905,72 @@ def test_activation_storage_uncertainty_never_starts_binding(monkeypatch, failur
             plugin.set_plugin_storage = fail_activation_save
 
         request = kit_event("绑定 HENU KIT", 1, "source-start")
+        assert await flow.handle(request, is_group=False)
+        remote.assert_not_called()
+        assert "暂时无法读取或保存" in str(request.reply.call_args)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("command", "action", "reply_text"),
+    [
+        ("HENU KIT 状态", "status", "尚未绑定 HENU KIT"),
+        ("绑定 HENU KIT", "start", "请打开链接登录 HENU KIT"),
+    ],
+)
+def test_first_kit_command_accepts_langbot_missing_storage_action_error(
+    monkeypatch, command, action, reply_text
+):
+    from tests.test_confirmation_shortcut import Plugin
+
+    class LangBotPlugin(Plugin):
+        async def get_plugin_storage(self, key):
+            if key not in self.storage:
+                raise ActionCallError(f"Storage with key {key} not found")
+            return self.storage[key]
+
+    async def run():
+        plugin = LangBotPlugin()
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=plugin))
+        monkeypatch.setattr(
+            "henu_plugin.kit_binding.kit_settings",
+            lambda: {"bot_uuid": "bot", "portal_url": "https://kit.test"},
+        )
+        remote = Mock(return_value={"bound": False, "token": "a" * 43})
+        monkeypatch.setattr("henu_plugin.kit_binding.kit_request", remote)
+        request = kit_event(command, 1, "first-source")
+
+        assert await flow.handle(request, is_group=False)
+        assert remote.call_count == 1
+        assert remote.call_args.args[1] == action
+        assert reply_text in str(request.reply.call_args)
+        for watcher in flow.watchers.values():
+            watcher.cancel()
+        if flow.watchers:
+            await asyncio.gather(*flow.watchers.values(), return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_other_langbot_storage_action_error_still_blocks_binding(monkeypatch):
+    from tests.test_confirmation_shortcut import Plugin
+
+    class BrokenPlugin(Plugin):
+        async def get_plugin_storage(self, key):
+            raise ActionCallError("Storage backend unavailable")
+
+    async def run():
+        plugin = BrokenPlugin()
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=plugin))
+        monkeypatch.setattr(
+            "henu_plugin.kit_binding.kit_settings",
+            lambda: {"bot_uuid": "bot", "portal_url": "https://kit.test"},
+        )
+        remote = Mock()
+        monkeypatch.setattr("henu_plugin.kit_binding.kit_request", remote)
+        request = kit_event("绑定 HENU KIT", 1, "first-source")
+
         assert await flow.handle(request, is_group=False)
         remote.assert_not_called()
         assert "暂时无法读取或保存" in str(request.reply.call_args)

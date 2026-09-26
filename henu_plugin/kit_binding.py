@@ -14,6 +14,7 @@ import unicodedata
 import uuid
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+from langbot_plugin.entities.io.errors import ActionCallError
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
 from henu_plugin.confirmation import (
     create_pending_operation,
@@ -60,6 +61,10 @@ class KitBindingCoordinator:
         try:
             raw = await self.listener.plugin.get_plugin_storage(key)
         except KeyError:
+            return None
+        except ActionCallError as exc:
+            if str(exc) != f"Storage with key {key} not found":
+                raise
             return None
         if not raw:
             return None
@@ -746,6 +751,10 @@ class KitBindingCoordinator:
             try:
                 raw = await self.listener.plugin.get_plugin_storage(key)
             except KeyError:
+                continue
+            except ActionCallError as exc:
+                if str(exc) != f"Storage with key {key} not found":
+                    raise
                 continue
             if not raw:
                 continue
