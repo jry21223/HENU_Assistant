@@ -15,10 +15,15 @@ and the configured Bot UUID. Request deduplication uses the QQ Source message
 ID, not the process-local query counter.
 
 The plugin `.env` (0600, never committed) needs six values:
-`HENU_KIT_CORE_URL`, `HENU_KIT_PORTAL_URL` (HTTPS origins),
+`HENU_KIT_CORE_URL`, `HENU_KIT_PORTAL_URL`,
 `HENU_KIT_CLIENT_ID`, `HENU_KIT_KEY_ID`, `HENU_KIT_SECRET`,
 `HENU_KIT_BOT_UUID`. Provision the independent service credential in Core before
 activating. The corresponding app/client mapping is owned by Core.
+The production Core URL is `https://henukit.cn/account-auth`; the host proxy
+removes `/account-auth` before forwarding, so the service signature covers
+`/api/v1/qq-bindings/{action}`. Portal URL is the HTTPS origin
+`https://henukit.cn`. The client allows that exact production Core proxy URL
+or a pathless HTTPS origin; it rejects the proxy path on other hosts or ports.
 
 Apply `qq-binding-reply-route.patch` to the exact existing custom LangBot
 image, then `qq-binding-source-time.patch`, then
