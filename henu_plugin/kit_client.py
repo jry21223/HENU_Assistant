@@ -39,8 +39,16 @@ def kit_settings():
         return None
     if not all(settings.values()) or len(settings["secret"]) < 32:
         raise ValueError("incomplete KIT configuration")
+    # Production routes Core through /account-auth and strips that prefix
+    # before forwarding. The request signature still covers Core's path.
     for key in ("core_url", "portal_url"):
         parsed = urlsplit(settings[key])
+        is_origin = parsed.path in ("", "/")
+        is_core_proxy = (
+            key == "core_url"
+            and parsed.netloc == "henukit.cn"
+            and parsed.path in ("/account-auth", "/account-auth/")
+        )
         if (
             parsed.scheme != "https"
             or not parsed.hostname
@@ -48,9 +56,11 @@ def kit_settings():
             or parsed.password
             or parsed.query
             or parsed.fragment
-            or parsed.path not in ("", "/")
+            or "?" in settings[key]
+            or "#" in settings[key]
+            or not (is_origin or is_core_proxy)
         ):
-            raise ValueError("KIT requires an HTTPS origin")
+            raise ValueError("KIT requires an approved HTTPS endpoint")
         settings[key] = settings[key].rstrip("/")
     return settings
 
