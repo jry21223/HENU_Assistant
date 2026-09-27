@@ -104,6 +104,9 @@ async def storage_api(monkeypatch, tmp_path, read_error=None, *, malformed_succe
     [
         ("HENU KIT 状态", "status", "尚未绑定 HENU KIT"),
         ("绑定 HENU KIT", "start", "请打开链接登录 HENU KIT"),
+        ("绑定Kit", "start", "请打开链接登录 HENU KIT"),
+        ("绑定kit", "start", "请打开链接登录 HENU KIT"),
+        ("绑定KIT", "start", "请打开链接登录 HENU KIT"),
     ],
 )
 def test_first_command_through_real_storage_rpc(

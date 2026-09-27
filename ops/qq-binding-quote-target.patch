@@ -1,0 +1,7 @@
+--- a/libs/qq_official_api/api.py
++++ b/libs/qq_official_api/api.py
+@@ -116 +116,3 @@
+-    indices = [*ext_indices.values()]
++    # message_scene.msg_idx identifies this inbound message, not its quote.
++    # Only ref_msg_idx and quoted msg_elements refer to the target message.
++    indices = [ext_indices['ref_msg_idx']] if 'ref_msg_idx' in ext_indices else []

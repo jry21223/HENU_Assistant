@@ -487,7 +487,7 @@ def test_binding_ref_idx_missing_from_send_receipt_fails_closed(monkeypatch):
         plain = kit_event("确认", 4, "source-third-plain")
         assert await flow.handle(plain, is_group=False)
         assert calls == ["start", "pending"]
-        assert "重新发送“绑定 HENU KIT”" in str(plain.reply.call_args)
+        assert "重新发送“绑定Kit”" in str(plain.reply.call_args)
 
     asyncio.run(run())
 
@@ -543,7 +543,7 @@ def test_reused_ref_idx_on_reissued_account_preview_fails_closed(monkeypatch):
         before = calls[:]
         third_plain = kit_event("确认", 4, "source-third-plain")
         assert await flow.handle(third_plain, is_group=False)
-        assert "重新发送“绑定 HENU KIT”" in str(third_plain.reply.call_args)
+        assert "重新发送“绑定Kit”" in str(third_plain.reply.call_args)
         assert calls == before
         assert await flow.handle(
             kit_event("确认", 5, "source-confirm", quote_ref_idx="ref-bot-2"),

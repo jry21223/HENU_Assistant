@@ -24,12 +24,13 @@ from henu_plugin.confirmation import (
 from henu_plugin.kit_client import kit_settings, kit_request, KitError
 
 COMMANDS = {
-    "绑定 HENU KIT": "start",
-    "绑定HENU KIT": "start",
-    "HENU KIT 状态": "status",
-    "HENU KIT状态": "status",
-    "解绑 HENU KIT": "unlink",
-    "解绑HENU KIT": "unlink",
+    "绑定kit": "start",
+    "绑定 henu kit": "start",
+    "绑定henu kit": "start",
+    "henu kit 状态": "status",
+    "henu kit状态": "status",
+    "解绑 henu kit": "unlink",
+    "解绑henu kit": "unlink",
 }
 EXPLICIT_CONFIRM = {
     "确认HENU KIT绑定",
@@ -207,7 +208,7 @@ class KitBindingCoordinator:
             .strip()
             .rstrip("。！!")
         )
-        action = COMMANDS.get(text)
+        action = COMMANDS.get(text.casefold())
         confirming = text == "确认" or text in EXPLICIT_CONFIRM
         if not action and not confirming:
             return False
@@ -317,7 +318,7 @@ class KitBindingCoordinator:
                 if confirming and pending and pending.get("terminal") is True:
                     await self._stop_reply(
                         ctx,
-                        "目标账号提示已失效，请重新发送“绑定 HENU KIT”。",
+                        "目标账号提示已失效，请重新发送“绑定Kit”。",
                     )
                     return True
                 if confirming:
@@ -482,7 +483,7 @@ class KitBindingCoordinator:
                         ctx,
                         ("已绑定 HENU KIT：" + self._name(result))
                         if result.get("bound")
-                        else "尚未绑定 HENU KIT。请发送“绑定 HENU KIT”。",
+                        else "尚未绑定 HENU KIT。请发送“绑定Kit”。",
                     )
                     return True
                 if time.time() <= activation_not_before:
@@ -573,7 +574,7 @@ class KitBindingCoordinator:
             except KitError as exc:
                 messages = {
                     "ALREADY_BOUND": "账号已有绑定，请先发送“HENU KIT 状态”查看，解绑后再换绑。",
-                    "LINK_EXPIRED": "绑定链接已过期，请重新发送“绑定 HENU KIT”。",
+                    "LINK_EXPIRED": "绑定链接已过期，请重新发送“绑定Kit”。",
                     "APPROVAL_EXPIRED": "网页登录已失效，请重新发起绑定。",
                     "RATE_LIMITED": "操作过于频繁，请稍后重试。",
                 }
@@ -651,7 +652,7 @@ class KitBindingCoordinator:
         ):
             await self._reply(
                 ctx,
-                "目标账号提示的引用信息无法确认，本次未执行，请重新发送“绑定 HENU KIT”。",
+                "目标账号提示的引用信息无法确认，本次未执行，请重新发送“绑定Kit”。",
             )
             return
         if action == "unlink" or quote_ref is not None:
