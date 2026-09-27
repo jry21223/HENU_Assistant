@@ -250,7 +250,9 @@ async def verify_quote_extraction(path: Path) -> None:
     def quote_data(**changes: Any) -> dict[str, Any]:
         data: dict[str, Any] = {
             "message_type": 103,
-            "message_scene": {"ext": [f"ref_msg_idx={ref_idx}"]},
+            "message_scene": {
+                "ext": [f"ref_msg_idx={ref_idx}", "msg_idx=INBOUND_MESSAGE_INDEX"]
+            },
             "msg_elements": [{"msg_idx": ref_idx}],
         }
         data.update(changes)
@@ -258,7 +260,7 @@ async def verify_quote_extraction(path: Path) -> None:
 
     require(
         extract("C2C_MESSAGE_CREATE", quote_data()) == ref_idx,
-        "valid C2C type-103 quote was lost",
+        "quoted target was confused with the new C2C message index",
     )
     require(
         extract("C2C_MESSAGE_CREATE", quote_data(message_scene={"ext": []})) == ref_idx,
@@ -276,7 +278,14 @@ async def verify_quote_extraction(path: Path) -> None:
             ),
         )
         == ref_idx,
-        "matching ext aliases were lost",
+        "explicit quoted target was lost when current and target indices match",
+    )
+    require(
+        extract(
+            "C2C_MESSAGE_CREATE",
+            quote_data(message_scene={"ext": ["msg_idx=INBOUND_MESSAGE_INDEX"]}),
+        ) == ref_idx,
+        "quoted element was confused with the new message index",
     )
     for scene, data in (
         ("DIRECT_MESSAGE_CREATE", quote_data()),
@@ -287,7 +296,7 @@ async def verify_quote_extraction(path: Path) -> None:
         (
             "C2C_MESSAGE_CREATE",
             quote_data(
-                message_scene={"ext": [f"ref_msg_idx={ref_idx}", "msg_idx=conflict"]}
+                message_scene={"ext": [f"msg_idx={ref_idx}"]}, msg_elements=[]
             ),
         ),
         (

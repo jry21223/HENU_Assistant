@@ -4,7 +4,10 @@ Requires the Platform Core/Gateway/Portal binding release from
 `jry21223/HENU-Kit-DEV#522`. This plugin does not establish platform accounts or
 reuse school/雨课堂 passwords.
 
-Private commands: `绑定 HENU KIT`, `HENU KIT 状态`, `解绑 HENU KIT`.
+Private commands: `绑定Kit`, `HENU KIT 状态`, `解绑 HENU KIT`.
+Command names ignore English letter case; the existing `绑定 HENU KIT` and
+`绑定HENU KIT` forms remain accepted. User-facing start/retry instructions use
+`绑定Kit`.
 Binding confirmation uses `确认` while quoting the Bot's target-account
 preview message. A plain `确认` without that quote repeats the binding preview
 and does not bind. Unlink uses the existing plain `确认` flow; when another
@@ -27,8 +30,9 @@ or a pathless HTTPS origin; it rejects the proxy path on other hosts or ports.
 
 Apply `qq-binding-reply-route.patch` to the exact existing custom LangBot
 image, then `qq-binding-source-time.patch`, then
-`qq-binding-receipt-route.patch` in a derived image from the exact running
-LangBot main image. The source-time patch preserves the official
+`qq-binding-receipt-route.patch`, then `qq-binding-quote-target.patch` in a
+derived image from the exact running LangBot main image. The source-time
+patch preserves the official
 QQ C2C event timestamp in `Source.time`; without it a delayed replay appears
 new. The receipt patch carries only a validated QQ C2C text-send `id`,
 RFC3339 `timestamp`, and `ext_info.ref_idx` through the adapter and
@@ -57,9 +61,14 @@ require the WebSocket marker for every KIT command and confirmation, then
 match the configured
 WebSocket Bot UUID, C2C sender, and Source ID. For a C2C `message_type=103`
 quote from that path, the patch reads
-`message_scene.ext` (`ref_msg_idx=` or `msg_idx=`) and
-`msg_elements[*].msg_idx`, accepts only one consistent printable index, and
+`message_scene.ext` (`ref_msg_idx=`) and `msg_elements[*].msg_idx`, accepts only
+one consistent printable target index, and
 serializes only that optional quote index in addition to the marker. The
+separate `message_scene.ext` value `msg_idx=` identifies the **new inbound
+message**, not the quoted message; it cannot authorize a quote or conflict
+with a different target index. This distinction follows the
+[official QQ Node SDK's C2C parser](https://github.com/tencent-connect/qqbot-nodejs/blob/ca55d9c395b582b7fcfad0ec27209c35dd04e0b3/src/protocol/gateway/event-dispatcher.ts#L108).
+Conflicting `ref_msg_idx` and quoted-element indices still fail closed. The
 `qq_quote_present` flag never authorizes a bind; it prevents a malformed
 quoted `确认` from falling through to another plain-confirmation handler.
 Conflicting, duplicate, oversized, malformed, and non-C2C quote metadata is
@@ -83,6 +92,9 @@ apply with zero fuzz, in the order above, and run
 `python3 ops/verify-qq-source-time.py <patched-qqofficial.py>` and
 `python3 ops/verify-qq-receipt-route.py <patched-api.py> <patched-qqofficial.py> <patched-handler.py>`
 before building the derived image. The verifiers use no QQ account or network.
+The receipt verifier includes distinct inbound and quoted-target indices, and
+rejects an event carrying only the inbound index. The pre-correction parser
+fails this regression.
 Extract the unpatched main-image SDK `site-packages/langbot_plugin` tree and
 verify its `events.py` SHA-256 matches the exact base value below. Run
 `python3 ops/verify-qq-sdk-quote.py --main-first-hop <main-sdk-root> <patched-qqofficial.py>`
@@ -127,6 +139,14 @@ After the receipt patch, API, adapter, and handler SHA-256 values are
 `023333192a18abcd5d43063f524c79dfa905274f18e2ff148339974f07dfd633`,
 `b6e8334353a1a5514e6e3287c036b52f9b9c2a8eb9e28a0f6f8b8a011abaa1a7`,
 and `f9739313793234bd097836fb489ca8ab8473730fef640534ec9ab4ebd2b68c87`.
+The quote-target correction applies with zero fuzz on top of that API source.
+It changes only `libs/qq_official_api/api.py`, to SHA-256
+`a94c2d1a18e4d4139bb354f8100b41789f51628b65a7275a8dd600359fc57310`.
+For an incremental rollout from the already derived main image
+`sha256:3c159167a20fe70ef162cf081395d7c654afd9fc6840db0e0232c331aed3a031`,
+verify its API source hash is the pre-correction value above and apply only
+`qq-binding-quote-target.patch`. Build a new derived image outside production,
+preserve the running image as rollback, and replace only that API source file.
 The plugin runtime base is
 `local/langbot-plugin-runtime:v4.10.6-henu-deps-20260920.1` with image ID
 `sha256:ea0113b63d3a3acdad9e44565db7f938bc03442f09bfe070fdbcb73335992b69`.
