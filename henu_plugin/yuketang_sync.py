@@ -5,6 +5,7 @@ import asyncio
 
 from henu_plugin import bridge_client, yuketang_config
 from henu_plugin.storage_adapter import PluginStorageAdapter
+from henu_plugin.membership import MembershipError, require_yuketang_execution
 
 
 async def sync_after_commit(plugin, storage_key: str, result) -> None:
@@ -20,6 +21,8 @@ async def sync_after_commit(plugin, storage_key: str, result) -> None:
         # updates therefore push the latest committed config, never an old one.
         paths = await adapter.load_all()
         config = yuketang_config.load_config(paths.yuketang_config_file)
+        if config.get('enabled'):
+            require_yuketang_execution()
         if logout_required and config.get('enabled'):
             raise RuntimeError('A later operation changed the stop configuration')
         if bridge_client.bridge_settings() is not None:
@@ -29,6 +32,8 @@ async def sync_after_commit(plugin, storage_key: str, result) -> None:
             if logout_required:
                 remote = await asyncio.to_thread(bridge_client.logout, openid)
                 status = 'logged_out' if remote.get('ok') is True and not logout_uncertain else 'logout_pending'
+    except MembershipError:
+        status = 'membership_blocked'
     except Exception:
         # Persistence succeeded; a bridge failure is not a failed local write.
         status = 'pending'
@@ -45,6 +50,11 @@ async def sync_after_commit(plugin, storage_key: str, result) -> None:
             '本地停用已保存，但远端退出尚未确认或前一次登录仍未结束，不能保证登录态已清除。'
             '请稍后查询 yuketang status 并重试 yuketang logout。'
         )
+        return
+    if status == 'membership_blocked':
+        result['success'] = False
+        result['reply_text'] = ('雨课堂启用配置未同步：当前执行端尚未完成会员资格约束升级；'
+                                '本次未恢复执行。存量远端是否已停止尚未确认，可停用或退出并查询状态。')
         return
     note = ('本地已保存，桥端已接收最新配置；实际运行状态请查询 yuketang status。'
             if status == 'synced' else

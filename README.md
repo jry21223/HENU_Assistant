@@ -4,7 +4,7 @@
 
 Langbot 插件形态。对外主要是统一 CLI 工具 `henu_cli`，并按 **QQ 发送者** 隔离账号数据。
 
-版本见 `manifest.yaml`（当前 **2.0.4**）。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
+版本见 `manifest.yaml`（当前 **2.0.6**）。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
 
 > **命令方言**：本插件使用空格风格 CLI（`schedule now`、`library seats`、`--student-id`）。  
 > Agent Skill / MCP 使用下划线子命令（`schedule_query`、`library_query`、`--student_id`）。**不要互相粘贴。**
@@ -59,8 +59,8 @@ cp -n .env.example .env            # 已有 .env 时请勿覆盖
 
 ```bash
 # tag 必须与 manifest.yaml 的 version 一致
-git tag v2.0.4
-git push origin v2.0.4
+git tag v2.0.6
+git push origin v2.0.6
 ```
 
 ---
@@ -91,10 +91,8 @@ library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD 
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 yuketang status
-yuketang lesson set --auto-enter on --auto-answer on --llm on --subjective off --enter-delay 30
-yuketang lesson whitelist add <课程名>
-yuketang exam set --master on
-确认
+yuketang disable
+yuketang logout
 ```
 
 ### 敏感命令（仅私聊直发）
@@ -104,30 +102,26 @@ yuketang exam set --master on
 ```text
 account set --student-id <学号> --password '<密码>'
 calibration set --data '<请求体>' --cookie '<Cookie>'
-yuketang exam set --x-access-token '<考试系统令牌>'
-yuketang account set --account <手机号> --password '<密码>'
 确认
-yuketang login
-yuketang logout
 ```
 
-事件监听器会在进模型前拦截这些命令；密码、Cookie、校准请求体、考试令牌与登录动作不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**此外私聊中的自然语言短语“登录雨课堂 / 帮我重新登录一下雨课堂 / 退出登录雨课堂”等（整句、指名雨课堂）会在进模型前直接执行对应登录/退出动作。
+事件监听器会在进模型前拦截这些命令；密码、Cookie、校准请求体、考试令牌与登录动作不会进入模型消息或历史。**群聊中的敏感命令会被拒绝。**雨课堂自然语言指令也在模型前拦截：当前“登录雨课堂 / 帮我重新登录一下雨课堂”返回执行端未就绪，不发实际登录；“退出登录雨课堂”保留退出路径，但远端是否已停止需单独核实。不要将拦截或本地停用当作执行成功。
 
 ### 雨课堂（yuketang）配置
 
-绑定前请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码；不要使用学校 IDS 密码。私聊发送绑定命令并按提示确认后，插件会后台验证并回复结果。
+当前 B 执行端尚未完成逐动作会员约束升级与验收，新的雨课堂凭据绑定、Token 设置、登录、启用和配置修改都失败关闭，返回不可用提示，不验证新凭据或启动新登录。`yuketang status`、`yuketang disable`、`yuketang logout` 仍可操作；远端停止状态需另行确认。以下配置语义是兼容历史行为说明，须在 B 源码升级和配套验收完成后才可恢复使用。届时绑定应使用雨课堂手机号和雨课堂密码，不能使用学校 IDS 密码。
 
-按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课堂侧自动进班、自动答题、大模型**默认开**（`--auto-enter off` / `--auto-answer off` / `--llm off` 关闭；`--auto-enter off` 后开课不进班不答题，考试监听不受影响）。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。`yuketang logout` 退出登录：清除守护进程侧 cookie 并停用监听（绑定与配置保留，自动续期不会把登录续回来；恢复用 `yuketang enable` + `yuketang login`）。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
+按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课堂侧自动进班、自动答题、大模型**默认开**（`--auto-enter off` / `--auto-answer off` / `--llm off` 关闭；`--auto-enter off` 后开课不进班不答题，考试监听不受影响）。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。旧实现中 `yuketang logout` 清除守护进程侧 cookie 并停用监听，绑定与配置保留；当前仍允许退出请求，但是否清除远端会话或停止任务须看桥端实际回执及执行器状态。数据存于该 QQ 的个人 Storage，不能据此推断 B 正在重读或已经执行。
 
 #### 守护进程桥（可选）
 
 雨课堂守护进程可部署在另一台服务器（B）。在插件根目录 `.env` 配置 `HENU_BRIDGE_URL` / `HENU_BRIDGE_SECRET`；支持环境变量覆盖，但不要假定插件子进程继承容器环境。仅允许 HTTPS，额外使用 AES-256-GCM 信封，禁止重定向，客户端拒绝窗口内重复响应。桥端是可信的凭据接收方，不是对其隐藏密码的存储服务。
 
-账号密码与 Token 在 Storage 中加密保存；敏感绑定先生成加密的待确认操作，用户在下一条私聊直接回复 `确认` 后才保存并传递凭据，账号绑定确认后启动密码登录。登录先回执、后台等待并回复最终结果，不在用户 Storage 事务内长轮询。没有证据时不会声称自动续期成功；停用不是解绑或凭据删除。
+历史绑定与后台登录流程采用加密 Storage、本人后续私聊确认和异步回执，不在用户 Storage 事务内长轮询。这些新绑定和登录行为仅在 B 升级并通过验收后可重新开放；当前入口返回执行端不可用，不产生凭据验证或登录成功。已有凭据仍加密保存，停用不等于解绑或凭据删除。
 
-启用、域名、课堂/考试设置及课程范围修改由用户在下一条消息直接回复 `确认`，整体 `yuketang disable` 直接处理。功能面向所有用户开放，总开关仍默认关闭；课堂自动进班、自动答题、大模型子开关默认开启，存量显式 off 保持不变。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 重试同步；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
+启用、域名、课堂/考试设置及课程范围修改由用户在下一条消息直接回复 `确认`，整体 `yuketang disable` 直接处理。雨课堂自动化属于 KIT 终身会员权益。当前执行端源码和逐动作会员约束尚未验收，新启用、配置修改和登录均失败关闭；`daemon_wired=true` 不代表会员门已接入。状态、整体停用和退出仍可操作，存量远端执行是否停止须单独确认。总开关仍默认关闭；课堂自动进班、自动答题、大模型子开关默认开启，存量显式 off 保持不变。先提交 LangBot Storage，再读取已提交的最新配置推桥；分别报告本地保存、等待同步和桥端接收，桥端接收不等于任务已经执行。断线后下一次 `yuketang status` 可重试停用配置同步；启用快照不会推送到旧桥；关闭未同步时明确提示远端可能仍在运行。`daemon_wired=false` 时提示桥端执行器未接入。
 
-私聊可直接说“登录雨课堂”“帮我重新登录一下雨课堂”“退出登录雨课堂”；重新登录会强制验证，普通登录在有效 Cookie 剩余超过一小时的时候复用。账号密码变更确认后强制验证新凭据，不复用旧账号 Cookie。退出不删除绑定，并先持久化停用后通知桥端；存在进行中的登录时等待，结果不明时不宣称已完成退出。请求前的加密在途记录在重启后仍有效；若网络丢失响应而无法确认会话，需要维护者核实桥端后处理，不能盲目重试。
+历史执行器升级并验收后，可恢复自然语言登录、重新登录、Cookie 复用及凭据变更验证；当前这些新登录请求均返回不可用。退出路径仍可使用，不删除绑定，并先持久化停用再通知桥端；存在历史进行中登录时等待，结果不明不宣称退出完成。请求前的加密在途记录在重启后仍有效；若网络丢失响应而无法确认会话，需要维护者核实桥端，不能盲目重试。
 
 正式验收需要真实用户私聊绑定、收到最终结果、状态查询、配置确认及停止同步。仅 HTTP 200 或桥鉴权通过不构成完整验收。请求级响应关联与跨重启重放保护需桥端配套，当前不单方面更改 v1 协议。
 
@@ -217,3 +211,42 @@ tests/
 ## License
 
 [MIT](LICENSE)
+
+
+## 青木：U校园 / U校园 AI 版 / 学习通
+
+新增按 QQ 隔离的平台账号、查课、确认下单、订单进度和补刷。交互沿用雨课堂：用户私聊直接绑定，密码在进入模型前拦截并加密保存；用户下一条回复“确认”才执行写操作。查课和下单会将绑定的平台凭据发送给青木供应商，绑定预览会提示这一用途。
+
+```text
+help qingmu
+qingmu platforms
+qingmu account set --platform ucampus --account <本人账号> --password '<平台密码>' --school '河南大学'
+qingmu courses --platform ucampus
+qingmu order add --platform ucampus --course 1
+qingmu orders
+qingmu order status --id <本地订单号>
+qingmu order retry --id <本地订单号>
+```
+
+平台参数也支持 `ucampus_ai`、`chaoxing`，中文“青木”为命令别名。“确认青木绑定”和“确认青木操作”可在多个待办时消歧。`orders` 显示本地回执，`order status` 才查询上游；受理不等于完成。结果未知或保存回执失败时禁止自动重试。改密暂未支持。
+
+供应商配置、待核实契约与上线验证步骤见 [青木接入说明](docs/qingmu-integration.md)。需绑定 KIT 并通过实时终身会员校验才能查课、提交订单和补刷。会员服务费用已包含，由站方承担，无需另付费或扣积分；既有订单查询和删除绑定继续可用。接口、服务编号、响应字段缺失时不会发请求；供应商写操作默认关闭。当前验证使用模拟供应商，没有证明真实账号、价格、扣费和履约可用。
+
+会员授权契约、两仓配套发布与雨课堂执行端边界见 [会员权益部署说明](docs/membership-benefits.md)。
+
+
+## 图书馆一次性定时预约
+
+终身会员绑定 KIT 和学校账号后，可在本人私聊发送：
+
+```text
+library schedule add --run-at 'YYYY-MM-DDT07:00:00+08:00' --location 金明馆北区 --seat-no 201 --date YYYY-MM-DD --time 08:00 --end-time 10:00
+确认定时预约
+library schedule list
+library schedule status --id <任务号>
+library schedule cancel --id <任务号>
+```
+
+将示例日期换成实际未来日期。`--run-at` 是提交预约的东八区时刻（未来 30 天内）；`--date` 与 `--time`/`--end-time` 是座位使用日期和时段，两者分别设置。预览不执行学校预约；下一条本人私聊确认后持久保存。会员费用已包含，到期重新核实会员和原学校账号，最多提交一次。已过执行时刻 90 秒标记错过；提交中断或无法确认学校回执标记结果未知，重启不会重单。状态和取消不要求会员仍有效；取消预览用 `library schedule cancel --id awaiting`。
+
+任务 worker 由插件启动并持久恢复。部署须保持稳定 `HENU_MASTER_KEY`，同一 Storage 命名空间只运行一个插件实例；热重载必须先调用并等待旧实例 `shutdown()`。详情见 [定时预约说明](docs/library-schedule.md)。真实学校预约尚未验收。

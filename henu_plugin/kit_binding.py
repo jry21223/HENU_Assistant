@@ -14,7 +14,6 @@ import unicodedata
 import uuid
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
-from langbot_plugin.entities.io.errors import ActionCallError
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
 from henu_plugin.confirmation import (
     create_pending_operation,
@@ -59,21 +58,8 @@ class KitBindingCoordinator:
         self.watchers = {}
 
     async def _get_optional_storage(self, key):
-        try:
-            return await self.listener.plugin.get_plugin_storage(key)
-        except KeyError as exc:
-            if exc.args != (key,):
-                raise
-            return None
-        except ActionCallError as exc:
-            missing = f"Storage with key {key} not found"
-            # SDK 0.4.13 prefixes at forwarding; 0.1.1b1 also wraps both calls.
-            known_missing = (
-                "ActionCallError: " * count + missing for count in (0, 1, 3)
-            )
-            if str(exc) not in known_missing:
-                raise
-            return None
+        from henu_plugin.storage_reads import read_optional_storage
+        return await read_optional_storage(self.listener.plugin, key)
 
     async def _read(self, key):
         raw = await self._get_optional_storage(key)
@@ -754,6 +740,12 @@ class KitBindingCoordinator:
         await self._reply(ctx, message)
 
     async def _other_pending(self, sender, conversation, query_id):
+        from henu_plugin.library_schedule import get_scheduler
+        if await get_scheduler(self.listener.plugin).valid_pending(sender, conversation, query_id):
+            return True
+        from henu_plugin.qingmu_flow import get_coordinator
+        if await get_coordinator(self.listener.plugin).valid_pending(sender, conversation, query_id):
+            return True
         sanitized = re.sub(r"[^0-9A-Za-z._-]+", "_", sender).strip("._-")
         for key, encrypted in (
             (f"user:{sender}:yuketang_pending_credentials", True),

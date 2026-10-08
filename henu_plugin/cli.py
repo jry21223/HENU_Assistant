@@ -132,6 +132,9 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_empty_classroom(raw, argv)
     if head in {"resource", "资源", "registry"}:
         return _parse_resource(raw, argv)
+    if head in {"qingmu", "青木"}:
+        from henu_plugin.qingmu_cli import parse_command
+        return parse_command(raw, argv)
     if head in {"yuketang", "雨课堂"}:
         return _parse_yuketang(raw, argv)
 
@@ -163,6 +166,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "resource search 十号楼101",
                 "yunfz leave list",
                 "yunfz signin list",
+                "qingmu status",
                 "yuketang status",
                 "yuketang lesson set --auto-answer on --llm on",
                 "status",
@@ -278,6 +282,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized == "library_schedule":
+        from henu_plugin.library_schedule_cli import HELP
+        return {"topic":"library_schedule", "summary":"一次性图书馆定时预约", "commands":HELP[:4], "examples":[], "tips":HELP[4:]}
+
     if normalized == "library":
         return {
             "topic": normalized,
@@ -288,6 +296,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
                 "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
+                "library schedule add --run-at <东八区ISO时刻> --location <区域> --seat-no <座位> --date YYYY-MM-DD --time HH:MM --end-time HH:MM",
+                "library schedule list",
+                "library schedule status --id <任务号>",
+                "library schedule cancel --id <任务号>",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
@@ -429,6 +441,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized in {"qingmu", "青木"}:
+        from henu_plugin.qingmu_cli import help_payload
+        return help_payload()
+
     if normalized == "yuketang":
         return {
             "topic": normalized,
@@ -457,13 +473,14 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "yuketang lesson start-time set --course 未央.机器学习 --slots \"1=08:00,2=13:30\"",
             ],
             "tips": [
+                "雨课堂属于 KIT 终身会员权益；当前执行端尚未完成逐动作会员约束升级，新启用、配置修改及登录暂不可用，状态、停用和退出保持可用。",
                 "开关是总闸（对该 QQ 的全部课程生效），黑白名单决定范围；黑名单优先于白名单，课程名完全匹配。",
                 "--auto-enter 关闭后开课不再进班/答题，考试监听不受影响；自动进班/自动答题/大模型默认开。",
                 "exam 白名单为空等于考试功能整体关闭（与 lesson 相反）。",
                 "课件 PDF / PPT 进度 / 试卷文件推送已整体停用，ppt/si/paper 不可配置。",
                 "--enter-delay 是“开班后等多久进班”（秒）；start-time 是“钟表几点前不进”，两者独立。",
                 "--x-access-token 属敏感值，必须由用户在私聊中直接发送整条命令，模型不得构造或复述。",
-                "请先在雨课堂设置密码，使用雨课堂绑定手机号和该密码，而不是学校 IDS 密码。再私聊 `yuketang account set` 并按提示确认，插件将后台验证并回复结果；已有绑定可私聊 `yuketang login`。群聊凭据会被拒绝，密码不会交给模型。",
+                "请先在雨课堂设置密码，使用雨课堂绑定手机号和该密码，而不是学校 IDS 密码。执行端升级验收后才恢复私聊绑定和验证；当前不得据此启动新执行。群聊凭据会被拒绝，密码不会交给模型。",
             ],
         }
 
@@ -619,6 +636,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["yunfz leave detail --leave-id <ID>", "yunfz leave statistics"]
     if resolved_tool in {"yunfz_signin_query", "yunfz_checksleep_query", "yunfz_activity_query", "yunfz_collection_query"}:
         return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list", "yunfz activity list"]
+    if resolved_tool.startswith("qingmu_"):
+        return ["qingmu status", "qingmu platforms", "help qingmu"]
     if resolved_tool == "yuketang_status":
         return ["yuketang config show", "yuketang lesson set --auto-answer on", "help yuketang"]
     if resolved_tool == "yuketang_config_show":
@@ -956,6 +975,9 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _help_spec(raw, argv, "library")
 
     sub = argv[1].lower()
+    if sub == "schedule":
+        from henu_plugin.library_schedule_cli import parse
+        return parse(raw, argv)
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "library")
 

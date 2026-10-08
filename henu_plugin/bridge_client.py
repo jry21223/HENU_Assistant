@@ -116,6 +116,11 @@ def _open(secret: str, path: str, body: bytes) -> dict[str, Any]:
 
 
 def call(path: str, payload: dict[str, Any], timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+    # Protocol v1 cannot establish executor-side per-action membership checks.
+    # Keep all new starts/enabled snapshots closed, including direct callers.
+    if (path in {'/v1/login/start', '/v1/login/password'}
+            or (path == '/v1/config' and payload.get('config', {}).get('enabled') is not False)):
+        raise BridgeError('雨课堂执行端未完成会员资格约束升级，拒绝新执行')
     settings = bridge_settings()
     if settings is None:
         raise BridgeError("桥未配置（HENU_BRIDGE_URL / HENU_BRIDGE_SECRET）")

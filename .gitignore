@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -41,9 +43,15 @@ Thumbs.db
 
 # Project specific
 .worktrees/
-*.json
-!campus_core/config/
-!campus_core/config/*.json
+# Runtime JSON is ignored at known locations; lbp does not honor ! negations.
+henu_*.json
+*cookie*.json
+*token*.json
+*profile*.json
+yuketang_config.json
+xiqueer_period_time_request.json
+course_selection_monitor_*.json
+seminar_signin_tasks.json
 output/
 logs/
 data/

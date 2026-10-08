@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import shlex
+import re
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
-from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.cli import inspect_cli_command
+from henu_plugin.qingmu_cli import is_qingmu_command
+from henu_plugin.membership import MembershipError, require_yuketang_entry, yuketang_needs_benefit
 from henu_plugin.confirmation import (
     conversation_context,
     WRITE_TOOL_NAMES,
@@ -40,6 +43,28 @@ class HenuCli(BaseHenuTool):
         if not raw_command:
             return await super().call(params, session, query_id)
 
+        from henu_plugin.library_schedule_cli import is_schedule_command
+        if is_schedule_command(raw_command):
+            from henu_plugin.library_schedule import get_scheduler
+            sender = str(identity_hint.get('sender_id') or session.sender_id or '').strip()
+            # The Tool may preview/read/cancel; confirmation tokens are never accepted here.
+            result = await get_scheduler(self.plugin).execute(raw_command, sender, conversation_context(session), query_id)
+            self._prepare_delivery_result(result)
+            return result
+
+        if is_qingmu_command(raw_command):
+            from henu_plugin.qingmu_flow import get_coordinator
+            # Passwords (including malformed commands) can never be supplied by the model.
+            if (inspect_cli_command(raw_command).resolved_tool == 'qingmu_account_set'
+                    or re.search(r'--(?:password|passwd)(?:=|\s|$)', raw_command, re.I)):
+                return {"success": False, "error_code": "direct_private_command_required",
+                        "msg": "请在本人私聊直接发送青木绑定命令，模型不能传递密码。"}
+            sender = str(identity_hint.get('sender_id') or session.sender_id or '').strip()
+            result = await get_coordinator(self.plugin).execute(raw_command, sender,
+                conversation_context(session), query_id)
+            self._prepare_delivery_result(result)
+            return result
+
         storage_key = _resolve_storage_key(session, identity_hint)
         if self._is_confirmation_command(raw_command):
             return await self._execute_confirmation(
@@ -70,6 +95,10 @@ class HenuCli(BaseHenuTool):
                 "reply_text": "请在私聊中直接发送绑定或校准命令；插件会在调用模型前处理，不会把密码或 Cookie 发给模型。",
             }
 
+        membership_error = await self._yuketang_entry_error(spec, session, identity_hint)
+        if membership_error:
+            return membership_error
+
         stopping_yuketang = spec.resolved_tool == 'yuketang_set_enabled' and spec.params.get('enabled') == 'off'
         if spec.resolved_tool in WRITE_TOOL_NAMES and not stopping_yuketang:
             parameter_error = self._write_parameter_error(spec)
@@ -99,6 +128,16 @@ class HenuCli(BaseHenuTool):
 
         result = await super().call({"command": clean_command}, session, query_id)
         return self._mark_storage_commit_state(result)
+
+    @staticmethod
+    async def _yuketang_entry_error(spec, session, identity_hint):
+        if yuketang_needs_benefit(spec.resolved_tool, spec.params):
+            subject = str(identity_hint.get('sender_id') or session.sender_id or '').strip()
+            try:
+                await require_yuketang_entry(subject)
+            except MembershipError as exc:
+                return exc.public_result()
+        return None
 
     @staticmethod
     def _write_parameter_error(spec: Any) -> str:
@@ -252,6 +291,10 @@ class HenuCli(BaseHenuTool):
                 "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
             }
 
+        identity_hint = await self._load_identity_hint(query_id)
+        membership_error = await self._yuketang_entry_error(spec, session, identity_hint)
+        if membership_error:
+            return membership_error
         result = await super().call({"command": canonical_command}, session, query_id)
         result = self._mark_storage_commit_state(result)
         if isinstance(result, dict) and (

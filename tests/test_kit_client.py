@@ -77,7 +77,7 @@ def test_kit_request_signs_body_and_rejects_redirects(monkeypatch, core_url, exp
     def post(url, **kwargs):
         assert url == expected_url
         assert kwargs["allow_redirects"] is False
-        assert kwargs["timeout"] == (3, 8)
+        assert kwargs["timeout"] == (3, 1)
         assert kwargs["auth"] == ("henu-bot-test", "x" * 32)
         assert json.loads(kwargs["data"]) == {"subject": "alice"}
         headers = kwargs["headers"]

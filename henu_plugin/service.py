@@ -40,6 +40,7 @@ from henu_plugin.storage_adapter import (
 )
 from henu_plugin import yuketang_config
 from henu_plugin import bridge_client
+from henu_plugin.membership import MembershipError, require_yuketang_execution
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -1014,8 +1015,13 @@ class HenuPluginService:
         return yuketang_config.load_config(self._yuketang_config_path())
 
     def _yuketang_apply(
-        self, applier: Callable[[dict[str, Any]], dict[str, Any]]
+        self, applier: Callable[[dict[str, Any]], dict[str, Any]], *, stopping: bool = False
     ) -> dict[str, Any]:
+        if not stopping:
+            try:
+                require_yuketang_execution()
+            except MembershipError as exc:
+                return exc.public_result()
         config_file = self._yuketang_config_path()
         config = yuketang_config.load_config(config_file)
         result = applier(config)
@@ -1026,9 +1032,13 @@ class HenuPluginService:
         return result
 
     def _yuketang_status(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._bridge_merge_status(
+        result = self._bridge_merge_status(
             yuketang_config.build_status_result(self._yuketang_read())
         )
+        result['reply_text'] = str(result.get('reply_text') or result.get('msg') or '') + (
+            '\n会员自动化执行端尚未完成升级，本插件拒绝新的启用/登录及启用状态同步；'
+            '存量远端执行尚未核实，可停用或退出并查询结果。')
+        return result
 
     def _yuketang_config_show(self, params: dict[str, Any]) -> dict[str, Any]:
         return yuketang_config.build_config_show_result(
@@ -1037,7 +1047,8 @@ class HenuPluginService:
 
     def _yuketang_set_enabled(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._yuketang_apply(
-            lambda config: yuketang_config.apply_enabled(config, params.get("enabled"))
+            lambda config: yuketang_config.apply_enabled(config, params.get("enabled")),
+            stopping=not _bool(params.get("enabled"), True),
         )
 
     def _yuketang_domain_set(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -1090,6 +1101,10 @@ class HenuPluginService:
 
     def _yuketang_login(self, params: dict[str, Any]) -> dict[str, Any]:
         """仅启动登录。监听器在 Storage 事务结束后异步等待结果。"""
+        try:
+            require_yuketang_execution()
+        except MembershipError as exc:
+            return exc.public_result()
         openid = self._current_openid()
         config = yuketang_config.load_config(self._yuketang_config_path())
         account = _text(config.get("credentials", {}).get("account"))
@@ -1139,7 +1154,7 @@ class HenuPluginService:
 
     def _yuketang_logout(self, params: dict[str, Any]) -> dict[str, Any]:
         """Persist stop first; the transaction owner contacts the bridge later."""
-        result = self._yuketang_apply(yuketang_config.apply_logout)
+        result = self._yuketang_apply(yuketang_config.apply_logout, stopping=True)
         if result.get('success'):
             result['_yuketang_logout_required'] = True
             result['_yuketang_logout_uncertain'] = bool(params.get('login_inflight_unknown'))
