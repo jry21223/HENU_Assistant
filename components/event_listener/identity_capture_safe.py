@@ -33,6 +33,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
     _YUKETANG_TOKEN_FLAG = "--x-access-token"
     _SENSITIVE_TOOLS = {
         "setup_account",
+        "qingmu_account_set",
         "set_calibration_source",
         "yuketang_set_token",
         "yuketang_account_set",

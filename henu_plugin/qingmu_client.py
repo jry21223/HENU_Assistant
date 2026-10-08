@@ -52,7 +52,9 @@ class Settings:
         field = 'retry_success_code' if retry else 'order_id_field'
         if not self.orders_enabled or not isinstance(service.get('billing'), str) or not service['billing'].strip() or len(service['billing']) > 160 or any(ord(c) < 32 for c in service['billing']):
             raise QingmuError('orders_not_configured')
-        if field not in self.contract or not str(self.contract[field]).strip():
+        if not isinstance(service.get('name'), str) or not service['name'].strip() or len(service['name']) > 160 or any(ord(c) < 32 for c in service['name']):
+            raise QingmuError('service_name_not_configured')
+        if field not in self.contract or not isinstance(self.contract[field], (str, int)) or isinstance(self.contract[field], bool) or not str(self.contract[field]).strip():
             raise QingmuError('contract_not_configured')
 
 
@@ -99,6 +101,13 @@ def settings_from_env():
     for field in ('get_success_code', 'course_id_field', 'course_name_field'):
         if not isinstance(contract.get(field), (str, int)) or isinstance(contract[field], bool) or not str(contract[field]).strip():
             raise QingmuError('contract_not_configured')
+    for field in ('course_id_field', 'course_name_field', 'order_id_field'):
+        if field in contract and (not isinstance(contract[field], str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', contract[field])):
+            raise QingmuError('invalid_provider_config')
+    for field in ('add_rejection_codes', 'retry_rejection_codes'):
+        codes = contract.get(field, [])
+        if not isinstance(codes, list) or len(codes) > 16 or any(not isinstance(v, (str, int)) or isinstance(v, bool) or len(str(v)) > 16 for v in codes):
+            raise QingmuError('invalid_provider_config')
     ca = setting('QINGMU_CA_BUNDLE')
     if ca and not Path(ca).is_file():
         raise QingmuError('invalid_ca_bundle')
@@ -136,20 +145,23 @@ class QingmuClient:
         if not isinstance(result, dict) or not isinstance(result.get('code'), (str, int)) or isinstance(result['code'], bool):
             raise QingmuError('invalid_response')
         if str(result['code']) != str(success_code):
+            field = 'add_rejection_codes' if action == 'add' else 'retry_rejection_codes'
+            if action in {'add', 'budan'} and str(result['code']) not in {str(v) for v in self.settings.contract.get(field, [])}:
+                raise QingmuError('unrecognized_response_code')
             raise QingmuError('supplier_rejected')
         return result
 
     def safe_text(self, value, account=None):
         if not isinstance(value, (str, int, float)) or isinstance(value, bool):
             return ''
-        text = re.sub(r'[\x00-\x1f\x7f]', '', str(value))[:160]
+        text = str(value)
         secret_values = [self.settings.uid, self.settings.key]
         if account:
             secret_values += [account['account'], account['password']]
         for secret in sorted(secret_values, key=len, reverse=True):
             if secret:
                 text = text.replace(secret, '[已隐藏]')
-        return text
+        return re.sub(r'[\x00-\x1f\x7f]', '', text)[:160]
 
     def courses(self, platform, account):
         response = self._request('get', {'platform': self.settings.service(platform)['id'],

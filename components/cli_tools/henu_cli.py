@@ -7,6 +7,7 @@ from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.qingmu_cli import is_qingmu_command
 from henu_plugin.confirmation import (
     conversation_context,
     WRITE_TOOL_NAMES,
@@ -41,10 +42,11 @@ class HenuCli(BaseHenuTool):
         if not raw_command:
             return await super().call(params, session, query_id)
 
-        if re.match(r'^(qingmu|青木)(?:\s|$)', raw_command, re.I):
+        if is_qingmu_command(raw_command):
             from henu_plugin.qingmu_flow import get_coordinator
             # Passwords (including malformed commands) can never be supplied by the model.
-            if re.search(r'--(?:password|passwd)(?:=|\s|$)', raw_command, re.I):
+            if (inspect_cli_command(raw_command).resolved_tool == 'qingmu_account_set'
+                    or re.search(r'--(?:password|passwd)(?:=|\s|$)', raw_command, re.I)):
                 return {"success": False, "error_code": "direct_private_command_required",
                         "msg": "请在本人私聊直接发送青木绑定命令，模型不能传递密码。"}
             sender = str(identity_hint.get('sender_id') or session.sender_id or '').strip()

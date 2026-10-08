@@ -14,7 +14,7 @@ def configured(monkeypatch):
     monkeypatch.setenv('QINGMU_KEY', 'vendor-secret')
     monkeypatch.setenv('QINGMU_REQUEST_ENCODING', 'form')
     monkeypatch.setenv('QINGMU_PLATFORM_MAP', json.dumps({
-        'ucampus': {'id': 'verified-service-77', 'billing': '测试计费说明，不代表现行报价'}}))
+        'ucampus': {'id': 'verified-service-77', 'name': 'U校园整本（测试服务）', 'billing': '测试计费说明，不代表现行报价'}}))
     monkeypatch.setenv('QINGMU_CONTRACT_JSON', json.dumps({
         'get_success_code': '1', 'course_id_field': 'id', 'course_name_field': 'name',
         'order_id_field': 'order_id', 'retry_success_code': '1'}))
@@ -113,3 +113,21 @@ def test_plugin_dotenv_and_environment_override_are_supported(configured, monkey
     assert settings_from_env().uid == 'file-user'
     monkeypatch.setenv('QINGMU_UID', 'environment-user')
     assert settings_from_env().uid == 'environment-user'
+
+
+def test_secret_redaction_happens_before_output_truncation(configured):
+    client = QingmuClient(configured)
+    account = {'account':'student-a','password':'StudentSecret!'}
+    assert 'Stude' not in client.safe_text('x' * 155 + 'StudentSecret!', account)
+    assert 'vendo' not in client.safe_text('x' * 155 + 'vendor-secret')
+
+
+def test_undocumented_paid_rejection_code_remains_unknown(configured, monkeypatch):
+    def send(session, request, **kwargs):
+        response = requests.Response()
+        response.status_code = 200
+        response.raw = io.BytesIO(b'{"code":9,"msg":"vendor-secret"}')
+        return response
+    monkeypatch.setattr(requests.Session,'send',send)
+    with pytest.raises(QingmuError,match='unrecognized_response_code'):
+        QingmuClient(configured).place_order('ucampus', {'account':'a','password':'b','school':'c'}, {'kcid':'22','name':'英语'})

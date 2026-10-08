@@ -24,8 +24,8 @@
 | `QINGMU_UID` / `QINGMU_KEY` | 供应商对接凭据，与学生账号密码分开 |
 | `QINGMU_CA_BUNDLE` | 可选、经独立核验的 CA 文件绝对路径；默认使用系统信任链，不能关闭校验 |
 | `QINGMU_REQUEST_ENCODING` | 供应商确认的 `form` 或 `json`，不设置则停止请求 |
-| `QINGMU_PLATFORM_MAP` | JSON：平台别名到核实的服务 `id` 和 `billing` 说明；计费说明最多 160 字，不得包含控制字符 |
-| `QINGMU_CONTRACT_JSON` | JSON：供应商确认的查课成功码、课程字段、订单回执字段、补刷成功码 |
+| `QINGMU_PLATFORM_MAP` | JSON：平台别名到核实的服务 `id`、`name`（具体服务类型）和 `billing` 说明；计费说明最多 160 字，不得包含控制字符 |
+| `QINGMU_CONTRACT_JSON` | JSON：供应商确认的查课成功码、课程字段、订单回执字段、补刷成功码及可选的已核实拒绝码白名单 |
 | `QINGMU_ENABLE_ORDERS` | 默认 `0`；核实契约、服务和计费后才设为 `1` |
 
 以下是结构模板，空值故意不能工作；必须由供应商核实后填入，不能直接把附件里的商品 ID 复制成服务 `platform`：
@@ -36,8 +36,8 @@ QINGMU_UID=
 QINGMU_KEY=
 QINGMU_CA_BUNDLE=
 QINGMU_REQUEST_ENCODING=
-QINGMU_PLATFORM_MAP='{"ucampus":{"id":"","billing":""},"ucampus_ai":{"id":"","billing":""},"chaoxing":{"id":"","billing":""}}'
-QINGMU_CONTRACT_JSON='{"get_success_code":"","course_id_field":"","course_name_field":"","order_id_field":"","retry_success_code":""}'
+QINGMU_PLATFORM_MAP='{"ucampus":{"id":"","name":"","billing":""},"ucampus_ai":{"id":"","name":"","billing":""},"chaoxing":{"id":"","name":"","billing":""}}'
+QINGMU_CONTRACT_JSON='{"get_success_code":"","course_id_field":"","course_name_field":"","order_id_field":"","retry_success_code":"","add_rejection_codes":[],"retry_rejection_codes":[]}'
 QINGMU_ENABLE_ORDERS=0
 ```
 
@@ -47,7 +47,7 @@ QINGMU_ENABLE_ORDERS=0
 
 ## 结果未知与重复提交
 
-每个 QQ 的账号、查课缓存、待确认操作和订单放在独立的加密 Storage 记录里。确认与“提交中”屏障在同一次保存中落盘；保存失败不会请求供应商。相同账号、服务与课程的已受理/提交中/未知订单阻止重单；明确拒绝的订单可以重新发起预览。
+每个 QQ 的账号、查课缓存、待确认操作和订单放在独立的加密 Storage 记录里。确认与“提交中”屏障在同一次保存中落盘；保存失败不会请求供应商。相同账号、服务与课程的已受理/提交中/未知订单阻止重单。只有命中运营者核实的 action 拒绝码白名单（`add_rejection_codes` / `retry_rejection_codes`）才标为明确拒绝并允许重新预览；白名单默认空，其他非成功码均为未知，不能推断未扣费。
 
 HTTP 不重试、不重定向，限制响应字节数、读取时间与用户等待时间。超时不能证明供应商没有受理，后台工作线程也可能稍后得到结果；未知记录必须由维护者通过供应商记录核对，不能删除屏障后自动重试。上游受理但回执保存失败时返回 `external_committed=true,storage_persisted=false`；持久记录仍保留“提交中”屏障。
 

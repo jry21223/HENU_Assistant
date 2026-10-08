@@ -14,7 +14,7 @@ from langbot_plugin.api.entities.builtin.platform.message import MessageChain, P
 from henu_mcp.core.secure_storage import decrypt_value, encrypt_value
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import conversation_context, create_pending_operation, validate_pending_operation
-from henu_plugin.qingmu_cli import PLATFORMS, help_payload
+from henu_plugin.qingmu_cli import PLATFORMS, help_payload, is_qingmu_command
 from henu_plugin.storage_reads import read_optional_storage
 from henu_plugin.qingmu_client import QingmuClient, QingmuError, settings_from_env
 
@@ -92,7 +92,7 @@ class QingmuCoordinator:
 
     async def handle(self, ctx, *, is_group, command=None):
         text = command if command is not None else str(getattr(ctx.event, 'text_message', '') or getattr(ctx.event, 'message_chain', '')).strip()
-        if not re.match(r'^(qingmu|青木)(?:\s|$)', text, re.I):
+        if not is_qingmu_command(text):
             return False
         # Intercept the entire namespace, including malformed password commands, before LLM/history.
         ctx.prevent_default()
@@ -166,7 +166,7 @@ class QingmuCoordinator:
                     except QingmuError:
                         settings = None
                     platforms = [{'platform': name, 'name': label, 'bound': name in state['accounts'],
-                        'configured': bool(settings and name in settings.platforms)} for name, label in PLATFORMS.items()]
+                        'configured': bool(settings and self._configured(settings, name))} for name, label in PLATFORMS.items()]
                     text = '\n'.join(f"{p['name']} ({p['platform']})：{'已绑定' if p['bound'] else '未绑定'}，{'服务已配置' if p['configured'] else '服务未配置'}" for p in platforms)
                     return reply_result(text + '\n绑定保存不等于上游登录验证成功。', platforms=platforms,
                         orders_enabled=bool(settings and settings.orders_enabled))
@@ -203,6 +203,14 @@ class QingmuCoordinator:
         state['pending'] = None
         await self._save(sender, state)
         return reply_result('青木平台绑定已保存。请执行 qingmu courses --platform ' + platform + ' 验证查课；尚未验证上游账号。')
+
+    @staticmethod
+    def _configured(settings, platform):
+        try:
+            settings.service(platform)
+            return True
+        except QingmuError:
+            return False
 
     @staticmethod
     async def _network(function, *args):
@@ -290,9 +298,10 @@ class QingmuCoordinator:
         state['pending'] = pending
         await self._save(sender, state)
         billing = client.safe_text(settings.service(platform)['billing'])
+        service_name = client.safe_text(settings.service(platform)['name'])
         label = '付费下单' if tool == 'qingmu_order_add' else '申请补刷'
         school = '\n学校：' + client.safe_text(account['school'], account) if tool == 'qingmu_order_add' else ''
-        return reply_result(f"将为 {PLATFORMS[platform]} 的课程“{job['course']['name']}”{label}。{school}\n计费说明：{billing}\n请核对后在下一条私聊回复“确认”（五分钟内有效）。",
+        return reply_result(f"将为 {PLATFORMS[platform]} 的课程“{job['course']['name']}”{label}。{school}\n服务：{service_name}\n计费说明：{billing}\n请核对后在下一条私聊回复“确认”（五分钟内有效）。",
             success=False, confirmation_required=True)
 
     async def _commit_order(self, state, sender, pending):

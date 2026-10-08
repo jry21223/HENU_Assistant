@@ -1,11 +1,25 @@
 """Space CLI and public help for the Qingmu platform integration."""
 from __future__ import annotations
 
+import shlex
+
 from henu_plugin.cli import CliCommandSpec
 
 PLATFORMS = {'ucampus': 'U校园', 'ucampus_ai': 'U校园 AI 版', 'chaoxing': '学习通'}
 ALIASES = {'u校园': 'ucampus', '优校园': 'ucampus', 'u校园ai版': 'ucampus_ai',
            'u校园ai': 'ucampus_ai', '学习通': 'chaoxing'}
+
+
+def is_qingmu_command(text):
+    """Use the CLI's quoting rules, even when a later credential argument is malformed."""
+    lexer = shlex.shlex(text, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    try:
+        head = next(lexer, '').lower()
+    except ValueError:
+        head = text.split(maxsplit=1)[0].replace("'", '').replace('"', '').replace('\\', '').lower() if text else ''
+    return head in {'qingmu', '青木'}
 
 
 def help_payload():

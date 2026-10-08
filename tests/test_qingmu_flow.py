@@ -59,7 +59,7 @@ def test_private_binding_is_encrypted_confirmed_and_never_crosses_user_or_chat()
 def test_order_preview_confirmation_receipt_progress_and_unknown_outcome_fence(monkeypatch):
     from henu_plugin.qingmu_client import QingmuClient, Settings, QingmuError
     settings = Settings('https://supplier.test.invalid', 'vendor-user', 'vendor-secret', 'form',
-        {'ucampus': {'id': 'service-77', 'billing': '测试计费规则，确认后按供应商实际结算'}},
+        {'ucampus': {'id': 'service-77', 'name': 'U校园整本（测试服务）', 'billing': '测试计费规则，确认后按供应商实际结算'}},
         {'get_success_code': '1', 'course_id_field': 'id', 'course_name_field': 'name',
          'order_id_field': 'id', 'retry_success_code': '1'}, True)
     monkeypatch.setattr('henu_plugin.qingmu_flow.settings_from_env', lambda: settings)
@@ -82,6 +82,7 @@ def test_order_preview_confirmation_receipt_progress_and_unknown_outcome_fence(m
         assert courses['courses'] == [{'no':1,'name':'大学英语'}]
         preview = await flow.execute('qingmu order add --platform ucampus --course 1', 'user-a', conversation, 4)
         assert preview['confirmation_required'] and '付费' in preview['reply_text']
+        assert '服务：U校园整本（测试服务）' in preview['reply_text']
         assert not add.called
         if unknown:
             add.side_effect = QingmuError('transport_or_response_error')
@@ -162,7 +163,7 @@ def test_explicit_binding_confirmation_does_not_accept_order_preview():
 def test_storage_failure_before_send_and_after_receipt_never_allows_retry(monkeypatch):
     from henu_plugin.qingmu_client import Settings, QingmuClient
     settings = Settings('https://supplier.test.invalid','vendor-user','vendor-secret','form',
-        {'ucampus':{'id':'77','billing':'测试计费说明'}},
+        {'ucampus':{'id':'77','name': 'U校园整本（测试服务）', 'name':'U校园整本（测试服务）','billing':'测试计费说明'}},
         {'get_success_code':'1','course_id_field':'id','course_name_field':'name','order_id_field':'id'},True)
     monkeypatch.setattr('henu_plugin.qingmu_flow.settings_from_env', lambda: settings)
     monkeypatch.setattr(QingmuClient,'courses',lambda *_:[{'kcid':'22','name':'大学英语'}])
@@ -239,4 +240,27 @@ def test_qingmu_confirmation_roundtrip_through_real_storage_rpc(monkeypatch, tmp
             await flow.tasks[101]
             status = await flow.execute('qingmu status','user-a',{'launcher_type':'person','launcher_id':'user-a'},102)
             assert status['platforms'][0]['bound']
+    asyncio.run(run())
+
+
+def test_shlex_command_and_option_spelling_cannot_bypass_private_intake_or_tool_guard():
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
+    async def run():
+        plugin = Plugin()
+        flow = QingmuCoordinator(plugin)
+        tool = HenuCliSafe()
+        tool.plugin = plugin
+        tool._load_identity_hint = AsyncMock(return_value={})
+        session = Session(sender_id='user-a',launcher_id='user-a',launcher_type=LauncherTypes('person'))
+        commands = [BIND.replace('qingmu', "'qingmu'",1), BIND.replace('qingmu',r'q\ingmu',1),
+                    BIND.replace('--password','--pass"word"')]
+        for number, command in enumerate(commands, 200):
+            request = ctx(command,query=number)
+            assert await flow.handle(request,is_group=False)
+            await flow.tasks[number]
+            assert request.prevent_default.called and request.prevent_postorder.called
+            result = await tool.call({'command':command},session,number+100)
+            assert result['error_code'] == 'direct_private_command_required'
+        assert all(b'StudentSecret!' not in raw for raw in plugin.storage.values())
     asyncio.run(run())
