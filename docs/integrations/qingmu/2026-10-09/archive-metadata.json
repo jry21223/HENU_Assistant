@@ -1,0 +1,29 @@
+{
+  "archived_on": "2026-10-09",
+  "timezone": "Asia/Shanghai",
+  "original_filename": "对接(1).md",
+  "source_bytes": 1217657,
+  "source_lines": 159094,
+  "source_sha256": "885f056a7fdd787418794ffbc16f005b03a6457e5bb611154609915c4c104644",
+  "sanitized_bytes": 1217641,
+  "sanitized_sha256": "8168e9e1e0433cd79560ff6022afd81ef656b1f1de0e800be228de5320429c6d",
+  "redactions": [
+    {
+      "line": 2,
+      "field": "integration_uid"
+    },
+    {
+      "line": 3,
+      "field": "integration_key"
+    },
+    {
+      "line": 80025,
+      "field": "url_query_user"
+    },
+    {
+      "line": 80025,
+      "field": "url_query_token"
+    }
+  ],
+  "live_business_api_called": false
+}

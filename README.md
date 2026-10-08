@@ -118,6 +118,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - [校园相关 API 汇总](docs/school-api-summary.md)
 - [选课接口记录](docs/course-selection-api.md)
 - [空教室 API](docs/henu_empty_classroom_api_doc.md)
+- [青木第三方课程订单 API 归档与调查（2026-10-09）](docs/integrations/qingmu/2026-10-09/README.md)
 
 ---
 
