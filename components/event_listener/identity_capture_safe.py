@@ -12,6 +12,7 @@ from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
+from henu_plugin.qingmu_flow import get_coordinator
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -43,12 +44,15 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         self._yuketang_login = YuketangLoginCoordinator(self)
         self._confirmation_shortcut = ConfirmationShortcut(self)
         self._kit_binding = KitBindingCoordinator(self)
+        self._qingmu = get_coordinator(self.plugin)
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
             if await self._kit_binding.handle(ctx, is_group=False):
                 return
             if await self._confirmation_shortcut.handle(ctx):
+                return
+            if await self._qingmu.handle(ctx, is_group=False):
                 return
             await self._yuketang_login.handle(ctx, is_group=False)
 
@@ -57,6 +61,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
             if await self._kit_binding.handle(ctx, is_group=True):
                 return
             if await self._confirmation_shortcut.handle(ctx):
+                return
+            if await self._qingmu.handle(ctx, is_group=True):
                 return
             await self._yuketang_login.handle(ctx, is_group=True)
 
@@ -206,6 +212,9 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         if kit_binding is not None and await kit_binding.handle(ctx, is_group=is_group):
             return
         if await self._confirmation_shortcut.handle(ctx):
+            return
+        qingmu = getattr(self, "_qingmu", None) or get_coordinator(self.plugin)
+        if await qingmu.handle(ctx, is_group=is_group):
             return
         if await self._yuketang_login.handle(ctx, is_group=is_group):
             return

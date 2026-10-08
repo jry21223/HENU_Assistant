@@ -12,7 +12,7 @@ from henu_mcp.core.secure_storage import decrypt_value
 from henu_plugin.confirmation import conversation_context, validate_pending_operation
 
 
-CONFIRM_WORDS = {'确认', '确认操作', '确认绑定', '确认雨课堂绑定'}
+CONFIRM_WORDS = {'确认青木操作', '确认青木绑定', '确认', '确认操作', '确认绑定', '确认雨课堂绑定'}
 
 
 class ConfirmationShortcut:
@@ -39,7 +39,7 @@ class ConfirmationShortcut:
             await self.reply(ctx, '无法确认当前身份，本次未执行。')
             return True
         is_group = conversation['launcher_type'] == 'group'
-        if is_group and text in {'确认绑定', '确认雨课堂绑定'}:
+        if is_group and text in {'确认绑定', '确认雨课堂绑定', '确认青木绑定', '确认青木操作'}:
             await self.reply(ctx, '账号凭据只能回到原私聊确认。')
             return True
         storage_key = re.sub(r'[^0-9A-Za-z._-]+', '_', sender).strip('._-')
@@ -49,15 +49,15 @@ class ConfirmationShortcut:
         if not is_group:
             records.append(('binding', f'user:{sender}:yuketang_pending_credentials', sender))
         try:
-            getter = getattr(plugin, 'get_plugin_storage_keys', None)
-            known = set(await getter()) if callable(getter) else None
+            if not is_group:
+                from henu_plugin.qingmu_flow import get_coordinator
+                qingmu = getattr(self.listener, '_qingmu', None) or get_coordinator(plugin)
+                pending = await qingmu.valid_pending(sender, conversation, ctx.query_id)
+                if pending:
+                    choices.append(('qingmu_binding' if pending.get('kind') == 'binding' else 'qingmu_operation', str(pending['token'])))
+            from henu_plugin.storage_reads import read_optional_storage
             for kind, key, identity in records:
-                if known is not None and key not in known:
-                    continue
-                try:
-                    raw = await plugin.get_plugin_storage(key)
-                except KeyError:
-                    continue
+                raw = await read_optional_storage(plugin, key)
                 if not raw:
                     continue
                 if isinstance(raw, bytes):
@@ -72,7 +72,10 @@ class ConfirmationShortcut:
         except Exception:
             await self.reply(ctx, '确认记录暂时无法读取，本次未执行；请稍后重试。')
             return True
-        if text == '确认操作':
+        if text in {'确认青木操作', '确认青木绑定'}:
+            kind = 'qingmu_binding' if text == '确认青木绑定' else 'qingmu_operation'
+            choices = [item for item in choices if item[0] == kind]
+        elif text == '确认操作':
             choices = [item for item in choices if item[0] == 'operation']
         elif text in {'确认绑定', '确认雨课堂绑定'}:
             choices = [item for item in choices if item[0] == 'binding']
@@ -80,9 +83,12 @@ class ConfirmationShortcut:
             await self.reply(ctx, '当前聊天没有有效的待确认操作，可能已过期或已执行，请重新发起。旧版令牌确认仍可使用。')
             return True
         if len(choices) > 1:
-            await self.reply(ctx, '同时有雨课堂凭据绑定和其他操作待确认。请回复“确认绑定”或“确认操作”，本次尚未执行。')
+            await self.reply(ctx, '同时有多个操作待确认。请选择“确认绑定”（雨课堂）、“确认操作”（校园）、“确认青木绑定”或“确认青木操作”；本次尚未执行。')
             return True
         kind, token = choices[0]
+        if kind in {'qingmu_binding', 'qingmu_operation'}:
+            await qingmu.handle(ctx, is_group=False, command='qingmu confirm ' + token)
+            return True
         if kind == 'binding':
             await self.listener._yuketang_login.handle(ctx, is_group=False, command='yuketang confirm ' + token)
             return True

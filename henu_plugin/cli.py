@@ -132,6 +132,9 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_empty_classroom(raw, argv)
     if head in {"resource", "资源", "registry"}:
         return _parse_resource(raw, argv)
+    if head in {"qingmu", "青木"}:
+        from henu_plugin.qingmu_cli import parse_command
+        return parse_command(raw, argv)
     if head in {"yuketang", "雨课堂"}:
         return _parse_yuketang(raw, argv)
 
@@ -163,6 +166,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "resource search 十号楼101",
                 "yunfz leave list",
                 "yunfz signin list",
+                "qingmu status",
                 "yuketang status",
                 "yuketang lesson set --auto-answer on --llm on",
                 "status",
@@ -429,6 +433,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized in {"qingmu", "青木"}:
+        from henu_plugin.qingmu_cli import help_payload
+        return help_payload()
+
     if normalized == "yuketang":
         return {
             "topic": normalized,
@@ -619,6 +627,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["yunfz leave detail --leave-id <ID>", "yunfz leave statistics"]
     if resolved_tool in {"yunfz_signin_query", "yunfz_checksleep_query", "yunfz_activity_query", "yunfz_collection_query"}:
         return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list", "yunfz activity list"]
+    if resolved_tool.startswith("qingmu_"):
+        return ["qingmu status", "qingmu platforms", "help qingmu"]
     if resolved_tool == "yuketang_status":
         return ["yuketang config show", "yuketang lesson set --auto-answer on", "help yuketang"]
     if resolved_tool == "yuketang_config_show":

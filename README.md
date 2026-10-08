@@ -217,3 +217,23 @@ tests/
 ## License
 
 [MIT](LICENSE)
+
+
+## 青木：U校园 / U校园 AI 版 / 学习通
+
+新增按 QQ 隔离的平台账号、查课、确认下单、订单进度和补刷。交互沿用雨课堂：用户私聊直接绑定，密码在进入模型前拦截并加密保存；用户下一条回复“确认”才执行写操作。
+
+```text
+help qingmu
+qingmu platforms
+qingmu account set --platform ucampus --account <本人账号> --password '<平台密码>' --school '河南大学'
+qingmu courses --platform ucampus
+qingmu order add --platform ucampus --course 1
+qingmu orders
+qingmu order status --id <本地订单号>
+qingmu order retry --id <本地订单号>
+```
+
+平台参数也支持 `ucampus_ai`、`chaoxing`，中文“青木”为命令别名。“确认青木绑定”和“确认青木操作”可在多个待办时消歧。`orders` 显示本地回执，`order status` 才查询上游；受理不等于完成。结果未知或保存回执失败时禁止自动重试。改密暂未支持。
+
+供应商配置、待核实契约与上线验证步骤见 [青木接入说明](docs/qingmu-integration.md)。接口、服务编号、响应字段缺失时不会发请求；付费功能默认关闭。当前验证使用模拟供应商，没有证明真实账号、价格、扣费和履约可用。
