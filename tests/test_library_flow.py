@@ -390,7 +390,8 @@ def test_real_school_submission_and_verification_chain(monkeypatch, code, verifi
 def test_changed_school_slot_and_blocked_replacement_invalidate_old_confirmation(
     monkeypatch,
 ):
-    import asyncio, json
+    import asyncio
+    import json
     from pathlib import Path
     from unittest.mock import Mock
     import mcp_server
@@ -452,7 +453,8 @@ def test_changed_school_slot_and_blocked_replacement_invalidate_old_confirmation
 
 @pytest.mark.parametrize("response", [None, {}, {"msg": "unknown"}])
 def test_unknown_school_result_is_reported_as_uncertain(monkeypatch, response):
-    import asyncio, json
+    import asyncio
+    import json
     from pathlib import Path
     import mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
@@ -525,7 +527,7 @@ def test_actual_write_payload_must_match_confirmed_plan(monkeypatch):
 
 @pytest.mark.parametrize("code,verified", [(0, True), (0, False), (9, False)])
 def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, verified):
-    import asyncio, json
+    import asyncio
     from pathlib import Path
     from types import SimpleNamespace
     import mcp_server
@@ -608,7 +610,8 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
 
 
 def test_changed_retry_constraints_create_a_new_confirmation(monkeypatch):
-    import asyncio, json
+    import asyncio
+    import json
     from pathlib import Path
     import mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe

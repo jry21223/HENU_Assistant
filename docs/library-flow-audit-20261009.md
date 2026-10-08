@@ -1,6 +1,6 @@
 # Library reservation flow audit — 2026-10-09
 
-Status: local implementation complete; independent review and packaging verification in progress. Test boundaries confirmed by the user. No school reservation, cancellation, sign-in, production configuration change, restart, or deployment was performed.
+Status: local implementation complete, independently reviewed and package-verified. Not published or deployed. Test boundaries confirmed by the user. No school reservation, cancellation, sign-in, production configuration change, restart, or deployment was performed.
 
 ## Evidence
 
@@ -73,3 +73,17 @@ Baseline checks at the unmodified Git head: 23 existing CLI, confirmation, short
 - The previously deployed retry-deadline and identity-consistency protections were reconciled into source while changing the same reservation boundary.
 
 The live school writes remain simulated in regression tests. Local verification does not mean the production Bot has been updated.
+
+
+## Final verification
+
+- LangBot full suite: 241 passed; MCP full suite: 136 passed; Agent Skill full suite: 33 passed. Total: 410 tests. Third-party deprecation warnings remain; no test was waived.
+- The library regression suite contains 24 cases, including the complete CLI → plain user confirmation → real reservation core → simulated school submission/verification chain. Success, school rejection, unknown output, and accepted submission without matching current appointment remain distinct.
+- The expected plan passes through service and MCP to the last school write boundary. The actual area, seat ID, date, segment, and times used in the outgoing payload must match the confirmed preview. Retry deadline/count/interval participate in confirmation equivalence.
+- Standards review: APPROVE, zero remaining blockers. The initial parser, unknown-result, plan-binding, and retry-constraint findings were repaired and re-reviewed.
+- Spec review: APPROVE, zero remaining findings. Replaced invalid requests revoke old pending operations; actual payload comparison and the complete test boundary are covered.
+- Shared `seat_reservation.py` is byte-identical in all three isolated trees. Both shared reservation wrapper functions have identical parsed Python definitions.
+- Lbp package built successfully. Both JSON seed resources are present and nonempty. Packaged changed source matches the worktree; archive paths and file types were checked. Importing the extracted package, loading static locations, and parsing operation-status succeeded.
+- Package SHA-256: `8d32927d85b66d8042790ecb0083cd40fb5692045647b0c01f0765900426e039`.
+
+The local package retains the published Git branch's 2.0.4 manifest. The earlier production read showed 2.1.0 and additional source drift. This package was not uploaded or installed. A production rollout must reconcile that live baseline and preserve its other hotfixes; local package validation does not justify replacing the complete live plugin tree.
