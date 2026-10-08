@@ -31,7 +31,7 @@ def help_payload():
                 'qingmu order status --id <本地订单号>', 'qingmu order retry --id <本地订单号>'],
             'examples': ['qingmu courses --platform ucampus', 'qingmu courses --platform chaoxing'],
             'tips': ['平台：ucampus / ucampus_ai / chaoxing；青木为命令别名。',
-                     '绑定必须本人私聊直发；密码不会交给模型。绑定、下单、补刷均需下一条私聊确认。',
+                     '绑定必须本人私聊直发；查课/下单会将凭据发送给供应商，不交给模型。绑定、下单、补刷均需下一条私聊确认。',
                      '查课序号仅对本人的最近查询有效；下单为付费操作，使用部署方核实的计费说明。',
                      'orders 查看本地回执；order status 查询上游进度。结果未知时不可重复提交。']}
 

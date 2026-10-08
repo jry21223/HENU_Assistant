@@ -5,7 +5,7 @@
 ## 用户使用
 
 1. 私聊发送 `help qingmu` / `qingmu platforms`，选择 `ucampus`、`ucampus_ai` 或 `chaoxing`。
-2. 私聊直发 `qingmu account set --platform ucampus --account <本人账号> --password '<平台密码>' --school '<学校>'`。不要把密码交给模型 Tool。收到预览后下一条回复“确认”或“确认青木绑定”。账号加密保存不代表已验证登录。
+2. 私聊直发 `qingmu account set --platform ucampus --account <本人账号> --password '<平台密码>' --school '<学校>'`。不要把密码交给模型 Tool。收到预览后下一条回复“确认”或“确认青木绑定”。账号加密保存不代表已验证登录。后续查课/下单会把绑定的平台账号密码发送给青木供应商；确认绑定前会明确提示此用途。
 3. `qingmu courses --platform ucampus` 查课，得到本 QQ 的课程列表和序号。五分钟内用 `qingmu order add --platform ucampus --course 1` 预览订单。
 4. 核对平台、课程和部署方核实的计费说明；下一条私聊回复“确认”或“确认青木操作”才请求付费下单。价格资料只是快照，不是现行结算承诺。
 5. `qingmu orders` 查看本地回执。`qingmu order status --id <本地订单号>` 查询该订单的上游进度；不接受其他账号或任意上游订单号。受理不等于课程完成。

@@ -176,7 +176,7 @@ class QingmuCoordinator:
                     state['pending'] = pending
                     await self._save(sender, state)
                     verb = '保存绑定' if spec.resolved_tool.endswith('_set') else '删除绑定（保留订单回执）'
-                    return reply_result(f"将为 {PLATFORMS[spec.params['platform']]} {verb}。账号密码加密保存，不代表登录验证完成。请在下一条私聊回复“确认”（五分钟内有效）。", success=False, confirmation_required=True)
+                    return reply_result(f"将为 {PLATFORMS[spec.params['platform']]} {verb}。账号密码加密保存；后续查课/下单会发送给青木供应商，不发送给模型。保存不代表登录验证完成。请在下一条私聊回复“确认”（五分钟内有效）。", success=False, confirmation_required=True)
                 return await self._operation(spec, state, sender, conversation, query_id)
         except QingmuError as exc:
             return reply_result('青木配置、接口或状态暂不可用；本次结果未确认。', success=False, error_code=exc.code)
