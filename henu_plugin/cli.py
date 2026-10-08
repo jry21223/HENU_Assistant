@@ -1019,6 +1019,8 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return CliCommandSpec(
             raw=raw,
             argv=argv,
+            resolved_tool=None,
+            params={},
             action="library operation-status",
             should_preload_runtime_context=False,
         )

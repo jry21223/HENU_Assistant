@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -41,9 +43,7 @@ Thumbs.db
 
 # Project specific
 .worktrees/
-*.json
-!campus_core/config/
-!campus_core/config/*.json
+/*.json
 output/
 logs/
 data/

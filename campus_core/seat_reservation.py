@@ -37,6 +37,8 @@ class SeatReservationMixin:
             )
         return {
             "fixed_segment": str(plan.get("reserve_type")) == "1",
+            "segment": plan.get("confirm_payload", {}).get("segment", ""),
+            "effective_day": plan["seat_query"].get("day", ""),
             "effective_start": plan["seat_query"].get("start_time", ""),
             "effective_end": plan["seat_query"].get("end_time", ""),
             "booking_window": {"start": start, "end": end, "open_now": open_now},

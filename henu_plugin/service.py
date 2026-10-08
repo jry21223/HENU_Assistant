@@ -470,6 +470,7 @@ class HenuPluginService:
             result = {
                 "success": False,
                 "msg": f"{spec.resolved_tool} 返回了非字典结果。",
+                "outcome_unknown": True,
             }
 
         result.setdefault("cli", {})
