@@ -282,6 +282,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized == "library_schedule":
+        from henu_plugin.library_schedule_cli import HELP
+        return {"topic":"library_schedule", "summary":"一次性图书馆定时预约", "commands":HELP[:4], "examples":[], "tips":HELP[4:]}
+
     if normalized == "library":
         return {
             "topic": normalized,
@@ -292,6 +296,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
                 "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
+                "library schedule add --run-at <东八区ISO时刻> --location <区域> --seat-no <座位> --date YYYY-MM-DD --time HH:MM --end-time HH:MM",
+                "library schedule list",
+                "library schedule status --id <任务号>",
+                "library schedule cancel --id <任务号>",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
@@ -967,6 +975,9 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _help_spec(raw, argv, "library")
 
     sub = argv[1].lower()
+    if sub == "schedule":
+        from henu_plugin.library_schedule_cli import parse
+        return parse(raw, argv)
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "library")
 

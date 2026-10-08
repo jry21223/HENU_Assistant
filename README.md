@@ -4,7 +4,7 @@
 
 Langbot 插件形态。对外主要是统一 CLI 工具 `henu_cli`，并按 **QQ 发送者** 隔离账号数据。
 
-版本见 `manifest.yaml`（当前 **2.0.4**）。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
+版本见 `manifest.yaml`（当前 **2.0.6**）。其它形态：[`main`](https://github.com/jry21223/HENU_Assistant) · [`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server) · [`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)
 
 > **命令方言**：本插件使用空格风格 CLI（`schedule now`、`library seats`、`--student-id`）。  
 > Agent Skill / MCP 使用下划线子命令（`schedule_query`、`library_query`、`--student_id`）。**不要互相粘贴。**
@@ -239,3 +239,20 @@ qingmu order retry --id <本地订单号>
 供应商配置、待核实契约与上线验证步骤见 [青木接入说明](docs/qingmu-integration.md)。需绑定 KIT 并通过实时终身会员校验才能查课、提交订单和补刷。会员服务费用已包含，由站方承担，无需另付费或扣积分；既有订单查询和删除绑定继续可用。接口、服务编号、响应字段缺失时不会发请求；供应商写操作默认关闭。当前验证使用模拟供应商，没有证明真实账号、价格、扣费和履约可用。
 
 会员授权契约、两仓配套发布与雨课堂执行端边界见 [会员权益部署说明](docs/membership-benefits.md)。
+
+
+## 图书馆一次性定时预约
+
+终身会员绑定 KIT 和学校账号后，可在本人私聊发送：
+
+```text
+library schedule add --run-at 'YYYY-MM-DDT07:00:00+08:00' --location 金明馆北区 --seat-no 201 --date YYYY-MM-DD --time 08:00 --end-time 10:00
+确认定时预约
+library schedule list
+library schedule status --id <任务号>
+library schedule cancel --id <任务号>
+```
+
+将示例日期换成实际未来日期。`--run-at` 是提交预约的东八区时刻（未来 30 天内）；`--date` 与 `--time`/`--end-time` 是座位使用日期和时段，两者分别设置。预览不执行学校预约；下一条本人私聊确认后持久保存。会员费用已包含，到期重新核实会员和原学校账号，最多提交一次。已过执行时刻 90 秒标记错过；提交中断或无法确认学校回执标记结果未知，重启不会重单。状态和取消不要求会员仍有效；取消预览用 `library schedule cancel --id awaiting`。
+
+任务 worker 由插件启动并持久恢复。部署须保持稳定 `HENU_MASTER_KEY`，同一 Storage 命名空间只运行一个插件实例；热重载必须先调用并等待旧实例 `shutdown()`。详情见 [定时预约说明](docs/library-schedule.md)。真实学校预约尚未验收。

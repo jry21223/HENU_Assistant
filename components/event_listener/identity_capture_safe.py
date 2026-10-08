@@ -13,6 +13,7 @@ from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
 from henu_plugin.qingmu_flow import get_coordinator
+from henu_plugin.library_schedule import get_scheduler
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -46,12 +47,15 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         self._confirmation_shortcut = ConfirmationShortcut(self)
         self._kit_binding = KitBindingCoordinator(self)
         self._qingmu = get_coordinator(self.plugin)
+        self._library_scheduler = get_scheduler(self.plugin)
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
             if await self._kit_binding.handle(ctx, is_group=False):
                 return
             if await self._confirmation_shortcut.handle(ctx):
+                return
+            if await self._library_scheduler.handle(ctx, is_group=False):
                 return
             if await self._qingmu.handle(ctx, is_group=False):
                 return
@@ -62,6 +66,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
             if await self._kit_binding.handle(ctx, is_group=True):
                 return
             if await self._confirmation_shortcut.handle(ctx):
+                return
+            if await self._library_scheduler.handle(ctx, is_group=True):
                 return
             if await self._qingmu.handle(ctx, is_group=True):
                 return
@@ -213,6 +219,9 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         if kit_binding is not None and await kit_binding.handle(ctx, is_group=is_group):
             return
         if await self._confirmation_shortcut.handle(ctx):
+            return
+        scheduler = getattr(self, "_library_scheduler", None) or get_scheduler(self.plugin)
+        if await scheduler.handle(ctx, is_group=is_group):
             return
         qingmu = getattr(self, "_qingmu", None) or get_coordinator(self.plugin)
         if await qingmu.handle(ctx, is_group=is_group):

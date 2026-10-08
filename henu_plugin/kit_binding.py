@@ -740,6 +740,9 @@ class KitBindingCoordinator:
         await self._reply(ctx, message)
 
     async def _other_pending(self, sender, conversation, query_id):
+        from henu_plugin.library_schedule import get_scheduler
+        if await get_scheduler(self.listener.plugin).valid_pending(sender, conversation, query_id):
+            return True
         from henu_plugin.qingmu_flow import get_coordinator
         if await get_coordinator(self.listener.plugin).valid_pending(sender, conversation, query_id):
             return True

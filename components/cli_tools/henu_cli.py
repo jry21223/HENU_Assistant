@@ -43,6 +43,15 @@ class HenuCli(BaseHenuTool):
         if not raw_command:
             return await super().call(params, session, query_id)
 
+        from henu_plugin.library_schedule_cli import is_schedule_command
+        if is_schedule_command(raw_command):
+            from henu_plugin.library_schedule import get_scheduler
+            sender = str(identity_hint.get('sender_id') or session.sender_id or '').strip()
+            # The Tool may preview/read/cancel; confirmation tokens are never accepted here.
+            result = await get_scheduler(self.plugin).execute(raw_command, sender, conversation_context(session), query_id)
+            self._prepare_delivery_result(result)
+            return result
+
         if is_qingmu_command(raw_command):
             from henu_plugin.qingmu_flow import get_coordinator
             # Passwords (including malformed commands) can never be supplied by the model.

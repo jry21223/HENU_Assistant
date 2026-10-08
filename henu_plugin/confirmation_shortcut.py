@@ -12,7 +12,7 @@ from henu_mcp.core.secure_storage import decrypt_value
 from henu_plugin.confirmation import conversation_context, validate_pending_operation
 
 
-CONFIRM_WORDS = {'确认青木操作', '确认青木绑定', '确认', '确认操作', '确认绑定', '确认雨课堂绑定'}
+CONFIRM_WORDS = {'确认青木操作', '确认青木绑定', '确认', '确认操作', '确认绑定', '确认雨课堂绑定', '确认定时预约'}
 
 
 class ConfirmationShortcut:
@@ -50,6 +50,11 @@ class ConfirmationShortcut:
             records.append(('binding', f'user:{sender}:yuketang_pending_credentials', sender))
         try:
             if not is_group:
+                from henu_plugin.library_schedule import get_scheduler
+                scheduler = get_scheduler(plugin)
+                pending = await scheduler.valid_pending(sender, conversation, ctx.query_id)
+                if pending:
+                    choices.append(('library_schedule', str(pending['token'])))
                 from henu_plugin.qingmu_flow import get_coordinator
                 qingmu = getattr(self.listener, '_qingmu', None) or get_coordinator(plugin)
                 pending = await qingmu.valid_pending(sender, conversation, ctx.query_id)
@@ -72,7 +77,9 @@ class ConfirmationShortcut:
         except Exception:
             await self.reply(ctx, '确认记录暂时无法读取，本次未执行；请稍后重试。')
             return True
-        if text in {'确认青木操作', '确认青木绑定'}:
+        if text == '确认定时预约':
+            choices = [item for item in choices if item[0] == 'library_schedule']
+        elif text in {'确认青木操作', '确认青木绑定'}:
             kind = 'qingmu_binding' if text == '确认青木绑定' else 'qingmu_operation'
             choices = [item for item in choices if item[0] == kind]
         elif text == '确认操作':
@@ -83,9 +90,12 @@ class ConfirmationShortcut:
             await self.reply(ctx, '当前聊天没有有效的待确认操作，可能已过期或已执行，请重新发起。旧版令牌确认仍可使用。')
             return True
         if len(choices) > 1:
-            await self.reply(ctx, '同时有多个操作待确认。请选择“确认绑定”（雨课堂）、“确认操作”（校园）、“确认青木绑定”或“确认青木操作”；本次尚未执行。')
+            await self.reply(ctx, '同时有多个操作待确认。请选择“确认绑定”（雨课堂）、“确认操作”（校园）、“确认青木绑定”、“确认青木操作”或“确认定时预约”；本次尚未执行。')
             return True
         kind, token = choices[0]
+        if kind == 'library_schedule':
+            await scheduler.handle(ctx, is_group=False, command='library schedule confirm', confirmation_token=token)
+            return True
         if kind in {'qingmu_binding', 'qingmu_operation'}:
             await qingmu.handle(ctx, is_group=False, command='qingmu confirm ' + token)
             return True
