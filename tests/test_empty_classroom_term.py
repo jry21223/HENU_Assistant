@@ -119,6 +119,9 @@ def test_sync_and_day_matrix_resolve_term_without_a_manual_code(monkeypatch):
     result = server_impl.empty_classroom_sync(campus_code="02", building_code="0007")
     assert result["success"] is True
     assert sync.call_args.kwargs["term_code"] == "2026,0"
+    missing = server_impl.empty_classroom_sync(campus_code="02")
+    assert missing["missing_params"] == ["building_code"]
+    assert missing["term_context"]["term_code"] == "2026,0"
     query = Mock(return_value=SimpleNamespace(total=0, rooms=[]))
     monkeypatch.setattr(server_impl, "query_free_classrooms", query)
     result = server_impl.empty_classroom_query(

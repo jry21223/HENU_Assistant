@@ -4207,6 +4207,9 @@ def empty_classroom_query(
     - "classrooms": 查询教室列表
     - "types": 查询教室类型列表
 
+    term_code 省略时自动读取并核对学校当前学期；显式学期优先。
+    day_of_week 省略时为今天；教学周须可靠获取或由用户指定，不按月份猜算。
+
     参数优先级（校区/楼房）：
     - campus_code/building_code 显式传入时优先
     - 否则使用 campus_text/building_text 通过资源 registry 解析
@@ -4563,12 +4566,6 @@ def empty_classroom_sync(
             "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
         }
 
-    if not campus_code or not building_code:
-        return {
-            "success": False,
-            "msg": "campus_code, building_code 为必填参数",
-        }
-
     client = _get_empty_classroom_client()
     if client is None:
         return {
@@ -4580,6 +4577,11 @@ def empty_classroom_sync(
     if not term_context.get("success"):
         return term_context
     term_code = term_context["term_code"]
+    missing = [key for key, value in {"campus_code": campus_code, "building_code": building_code}.items() if not str(value or "").strip()]
+    if missing:
+        return {"success": False, "error_code": "missing_params", "missing_params": missing, "term_context": term_context,
+            "msg": f"已确定学期 {term_code}；仍需提供：{', '.join(missing)}。学期无需再次填写。"}
+
 
     result = _sync_schedule_impl(
         client=client,
