@@ -118,6 +118,7 @@ def configure(monkeypatch, url, ca, encoding):
         'get_success_code':'1','course_id_field':'id','course_name_field':'name',
         'order_id_field':'order_id','retry_success_code':'1'}))
     monkeypatch.setenv('NO_PROXY', '127.0.0.1,localhost')
+    monkeypatch.setenv('no_proxy', '127.0.0.1,localhost')
 
 
 @pytest.mark.parametrize('platform', ['ucampus', 'ucampus_ai', 'chaoxing'])
