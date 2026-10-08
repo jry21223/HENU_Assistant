@@ -398,7 +398,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "summary": "空教室、教室占用、校区楼房与教室类型查询。",
             "commands": [
                 "empty_classroom query [--view free|day_matrix|occupancy|classrooms|types] [--term-code <学期>] [--week 1] [--day-of-week 1] [--period 1] [--campus-code <校区>] [--building-code <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity 80] [--keyword <关键词>] [--room-id <ID>] [--ttl-seconds 300] [--max-stale-seconds 86400]",
-                "empty_classroom sync --term-code <学期> --campus-code <校区> --building-code <楼房> [--type-code <类型>] [--force-refresh]",
+                "empty_classroom sync [--term-code <学期>] --campus-code <校区> --building-code <楼房> [--type-code <类型>] [--force-refresh]",
                 "empty_classroom campuses",
                 "empty_classroom buildings --campus-code <校区>",
             ],
@@ -408,6 +408,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "empty_classroom sync --term-code 2025,1 --campus-code 01 --building-code 0013",
             ],
             "tips": [
+                "学期省略时自动核实学校当前学期；显式学期优先，星期省略时查询今天。",
+                "教学周不能按月份猜算；工具只报告仍缺少的参数。未指定大节时可用 day_matrix 查询全天五个大节。",
                 "空教室数据来自教务系统缓存，真实使用前建议先 sync。",
                 "公共教室缓存可共享，不会保存账号或 Cookie。",
             ],

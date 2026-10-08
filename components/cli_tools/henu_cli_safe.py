@@ -240,6 +240,7 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
             )
+            parts.append("学期省略时工具会从学校核实当前学期；只询问 missing_params，不要再次要求手填已识别学期")
         if isinstance(result.get("locations"), list):
             parts.append(
                 "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
@@ -277,6 +278,9 @@ class HenuCliSafe(HenuCli):
         cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
         command = str(cli.get("command") or "").strip()
         lines = [str(result.get("msg") or f"空教室查询完成，共 {total} 个结果。").strip()]
+        term = result.get("term_context") or {}
+        if term.get("term_code"):
+            lines.append(f"学期：{term.get('term_name') or term['term_code']}（{term['term_code']}）。")
         if command:
             lines.append(f"命令: {command}")
 
@@ -291,7 +295,7 @@ class HenuCliSafe(HenuCli):
 
         if total and len(sample) > 6:
             lines.append(f"……还有 {len(sample) - 6} 个结果未展示。")
-        lines.append("如果需要更精确，请补充校区、楼房、周次、星期和大节。")
+        lines.append("如需进一步筛选，可指定楼房、容量或教室类型。")
         return "\n".join(lines)
 
     def _format_rooms_reply(self, result: dict[str, Any]) -> str:
