@@ -20,6 +20,16 @@ The published tool had a terms-list endpoint and an authenticated current-term r
 
 `EmptyClassroomClient.resolve_term`, `empty_classroom_query`, `empty_classroom_sync`, and `HenuCliSafe.call`. Fixtures replace authentication/room-query adapters; the term resolver and CLI-to-tool routing execute their actual code. The original missing-term test failed before the fix and passed afterward.
 
-Initial verification: nine regression cases cover current-term cross-checking with a future term first in the list, explicit historical terms, unauthenticated/missing/inconsistent context, remaining parameter gaps, sync, daily matrix, stopping before room queries on failure, and the actual CLI reply. Final full-suite and independent review results are recorded below when complete.
+Nine regression cases cover current-term cross-checking with a future term first in the list, explicit historical terms, unauthenticated/missing/inconsistent context, remaining parameter gaps, sync, daily matrix, stopping before room queries on failure, and the actual CLI reply.
+
+## Final verification
+
+- Full suites passed: LangBot 250, MCP 144, Agent Skill 41; total 435. Existing third-party warnings remain.
+- Independent specification and Python standards reviews approved the final change with no remaining findings. The sync missing-parameter finding was fixed and covered by a regression case.
+- The shared client source and the query/sync function contracts match across all three delivery trees.
+- The candidate package contains the current client, wrapper, and prompt bytes, both required JSON seed resources, and no absolute or traversal archive paths. A fresh extraction passed resolver and CLI import checks.
+- Candidate: `dist/jry21223-henu_assistant-2.0.4.lbpkg`; SHA-256 `82c4d6607de66ae291859db798fe3261bffd8f924f86ecca2d4745cb7835a95d`. This build supersedes the package recorded in the earlier library-flow audit.
+
+The real school probe verified current-term metadata only. Room-query regressions used fixtures; no real classroom availability result or booking success is claimed. Production currently has version drift from the published tree, so a future rollout must reconcile its existing changes before installing this candidate.
 
 This is a local source change. The production Bot has not been updated by this task.
