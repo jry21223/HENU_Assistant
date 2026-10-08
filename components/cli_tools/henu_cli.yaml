@@ -6,18 +6,51 @@ metadata:
     en_US: HenuCLI
     zh_Hans: 河大 CLI
   description:
-    en_US: "Unified CLI entry for HENU account, schedule, course, empty classroom, library, seminar, 河宝, yuketang, Qingmu platform orders, and calibration. Space-style commands only (schedule now), not agent-skill snake_case."
-    zh_Hans: "统一 CLI 入口：账号、课表、选课、空教室、图书馆、研讨室、河宝、雨课堂、青木平台订单与节次校准。仅使用空格风格命令（如 schedule now），不要使用 agent-skill 的下划线子命令。"
+    en_US: "Unified CLI entry for HENU campus commands, one-shot library scheduling, KIT member benefits and Qingmu platform orders. Service fees are included and paid by the operator. New yuketang actions remain unavailable until executor B is upgraded and accepted; status, disable and logout remain available. Space-style commands only (schedule now), not agent-skill snake_case."
+    zh_Hans: "统一 CLI 入口：校园功能、图书馆一次性定时预约、KIT会员权益和青木平台订单。会员服务费用包含、站方承担；雨课堂新操作等待B执行端升级验收，状态、停用和退出仍可操作。仅使用空格风格命令（如 schedule now），不要使用 agent-skill 的下划线子命令。"
 spec:
   parameters:
     type: object
     properties:
       command:
         type: string
-        description: CLI 命令，例如 qingmu status、qingmu courses --platform ucampus、help、account status、schedule now、library current、empty_classroom query、yuketang lesson set --auto-answer on、yuketang login；确认时用户下一条直接回复“确认”，由插件处理
+        description: CLI 命令，例如 help、account status、schedule now、library current、library schedule list、library schedule status --id <任务号>、qingmu status、qingmu courses --platform ucampus、empty_classroom query、yuketang status、yuketang disable、yuketang logout。校园即时写操作须本人下一条真实消息确认；订单及定时预约仅本人原私聊后续确认，定时预约回复“确认定时预约”，模型不得调用确认或传递令牌。
     required:
       - command
-  llm_prompt: "统一入口，只传 command。本插件命令是空格风格（schedule now / library seats / --student-id），禁止使用 agent-skill 的 schedule_query / library_query / --student_id。当前日期和时间只以本轮 [HENU_RUNTIME_CONTEXT_V2] 系统块为准，不得复用历史时间。账号密码、Cookie 和校准 data 必须由用户在私聊中直接发送，插件会在调用模型前拦截；不得通过 Tool 构造或转述这些敏感值。图书馆、研讨室的预约、签到、取消属于外部写操作：首次调用只会返回 confirmation_required，并提示用户下一条直接回复“确认”；必须等待用户发送下一条明确确认消息，模型不得代确认或构造令牌，必须由用户下一条原文“确认”触发插件。查询图书馆时先 locations，再使用返回的准确 location/area_id 查询 seats；不得猜测区域或座位；source=live_empty 时只如实说明为空。空教室用 empty_classroom query；河宝用 yunfz 相关子命令（若 help 列出）。引导雨课堂绑定或登录前，必须提醒用户先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码，不是学校 IDS 密码。雨课堂总开关默认关闭，课堂自动进班/自动答题/大模型子开关默认开启，显式 off 保持不变。--auto-enter off 停止课堂进班/答题，不影响考试。用户可私聊说登录雨课堂、重新登录雨课堂、退出登录雨课堂，插件直接处理；退出不删除绑定。雨课堂配置用 yuketang 命令族：lesson/exam 的开关是总闸，黑白名单决定作用范围（黑名单优先，课程名完全匹配）；exam 白名单为空等于考试功能整体关闭；ppt/si/paper 已整体停用不可配置；--x-access-token 属敏感值，必须由用户在私聊中单独直发 `yuketang exam set --x-access-token '<token>'`，模型不得构造、转述或拼进其他命令；`yuketang account set`（含密码）同样仅私聊直发、由插件拦截；`yuketang login` 同样仅私聊、由插件直接处理（账号密码登录，先回执再后台返回结果），群聊发送会被拒绝，模型不要替用户执行或催促。工具返回 reply_text 时优先复述 reply_text，不发送完整 JSON。日期示例统一使用 YYYY-MM-DD。所有真实写操作仅以 success=true 或 external_committed=true 为准；若 external_committed=true 且 storage_persisted=false，禁止重试，先反查当前记录。雨课堂凭据由插件加密保存候选并要求用户下一条私聊直接回复“确认”；模型不得代为确认。启用、配置和课程范围变更需用户下一条回复“确认”；整体 disable 直接执行。雨课堂 success 只代表本地操作成功，bridge=pending 不能声称远端已停止，synced 仅代表桥端接收；daemon_wired=false 时不得承诺任务执行。青木使用 qingmu 命令族，平台为 ucampus、ucampus_ai、chaoxing；所有账号和订单仅本人私聊。绑定密码不能通过 Tool，用户应私聊直接发送。先查课，再用返回序号预览下单，实际提交与补刷必须下一条用户确认，模型不得调用 qingmu confirm 或代确认。orders 是本地回执，order status 使用本地订单号查询上游。outcome=unknown 或 storage_persisted=false 时禁止重试；受理不等于课程完成。不要猜供应商服务编号、订单号、实际价格；接口未配置时如实说明。不确定参数时先 help 或 help <topic>。"
+  llm_prompt: >-
+    统一入口，只传 command。本插件命令为空格风格（schedule now / library seats / --student-id），
+    禁止使用 agent-skill 的 schedule_query / library_query / --student_id。
+    当前日期和时间只以本轮 [HENU_RUNTIME_CONTEXT_V2] 系统块为准，不得复用历史时间。
+    账号密码、Cookie、Token 和校准 data 必须由用户在私聊中直接发送，插件会在模型前拦截；
+    不得通过 Tool 构造、转述或传递这些敏感值。
+    图书馆、研讨室即时预约、签到、取消属于外部写操作：首次调用仅返回 confirmation_required；
+    必须等待本人下一条真实消息确认，由插件处理，模型不得代确认、构造令牌或调用 confirm。
+    图书馆查询先 locations，再用返回的准确 location/area_id 查询 seats，不得猜区域或座位；
+    source=live_empty 时如实说明为空。空教室用 empty_classroom query，河宝使用 help 列出的 yunfz 子命令。
+    图书馆定时预约使用 library schedule add/list/status/cancel，一次性任务，不是每日循环。
+    add 明确指定 --run-at 'YYYY-MM-DDTHH:MM:SS+08:00'、--location、--seat-no、--date、--time、--end-time；
+    --run-at 是未来30天内东八区提交预约时刻，--date/--time/--end-time 是座位使用日期与时段，两者分别确认，不得猜日期时间。
+    预览不提交学校预约；必须等待本人在原私聊下一条回复“确认定时预约”，模型不能调用确认或传递确认令牌。
+    list/status/cancel 仅查本人任务；取消未确认预览用 library schedule cancel --id awaiting。
+    pending 可取消；running/unknown/succeeded 不得重单，unknown 先查学校实际记录，missed 不自动补发。
+    定时预约创建确认和执行时都重新核实KIT终身会员与原学校账号；状态和取消不因会员失效而锁住。
+    会员包含雨课堂、U校园（含AI版）、学习通及图书馆定时预约权益，服务费用由站方承担，无需另付费或扣积分。
+    会员资格故障或非会员不得发起新业务操作，不得用本地boolean或历史资格代替权威检查。
+    当前雨课堂B执行端未完成逐动作会员约束升级与验收：新的绑定、Token设置、登录、启用、配置与范围修改均不可用，
+    返回不可用提示，不验证新凭据或发起实际登录；不得引导用户为这些未开放操作提供密码/Token，不得承诺后台登录或自动执行。
+    当前仅 yuketang status、yuketang disable、yuketang logout 保留；私聊自然语言新登录同样返回不可用。
+    雨课堂本地 success 只代表本地操作，bridge=pending 不证明远端已停止，synced 只代表桥端接收；
+    daemon_wired=true 不证明会员门已接入，daemon_wired=false 不得承诺执行。存量远端是否停止尚需核实。
+    B源码升级、逐动作资格门和真实执行器验收完成后才可重新开放新雨课堂操作，不把历史兼容流程当作当前能力。
+    青木使用 qingmu 命令族，平台为 ucampus、ucampus_ai、chaoxing；账号和订单只允许本人私聊。
+    绑定密码不能经由 Tool，用户本人私聊直接发送，插件拦截并加密保存。
+    先查课，再用返回序号预览下单；提交订单和补刷必须本人下一条真实确认，模型不得调用 qingmu confirm。
+    orders 是本地回执，order status 用本地订单号查询上游；受理不等于课程完成。
+    不展示供应商采购价/余额为会员应付，不猜服务编号、订单号、实际价格；接口未配置时如实说明。
+    工具返回 reply_text 时优先复述，不发送完整 JSON；日期占位示例使用 YYYY-MM-DD。
+    所有真实写操作仅以 success=true 或 external_committed=true 为准；
+    outcome=unknown 或 storage_persisted=false 时禁止重试，先反查学校/供应商记录。
+    不确定参数时先 help 或 help <topic>。
 execution:
   python:
     path: henu_cli_safe.py
