@@ -131,3 +131,10 @@ def test_undocumented_paid_rejection_code_remains_unknown(configured, monkeypatc
     monkeypatch.setattr(requests.Session,'send',send)
     with pytest.raises(QingmuError,match='unrecognized_response_code'):
         QingmuClient(configured).place_order('ucampus', {'account':'a','password':'b','school':'c'}, {'kcid':'22','name':'英语'})
+
+
+def test_cleaning_control_characters_cannot_reassemble_secrets(configured):
+    client = QingmuClient(configured)
+    account = {'account':'student-a','password':'StudentSecret!'}
+    assert 'StudentSecret!' not in client.safe_text('Student\nSecret!', account)
+    assert 'vendor-secret' not in client.safe_text('vendor-\x00secret')

@@ -158,10 +158,13 @@ class QingmuClient:
         secret_values = [self.settings.uid, self.settings.key]
         if account:
             secret_values += [account['account'], account['password']]
-        for secret in sorted(secret_values, key=len, reverse=True):
-            if secret:
-                text = text.replace(secret, '[已隐藏]')
-        return re.sub(r'[\x00-\x1f\x7f]', '', text)[:160]
+        for stage in ('raw', 'clean'):
+            if stage == 'clean':
+                text = re.sub(r'[\x00-\x1f\x7f]', '', text)
+            for secret in sorted(secret_values, key=len, reverse=True):
+                if secret:
+                    text = text.replace(secret, '[已隐藏]')
+        return text[:160]
 
     def courses(self, platform, account):
         response = self._request('get', {'platform': self.settings.service(platform)['id'],

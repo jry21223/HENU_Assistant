@@ -163,7 +163,7 @@ def test_explicit_binding_confirmation_does_not_accept_order_preview():
 def test_storage_failure_before_send_and_after_receipt_never_allows_retry(monkeypatch):
     from henu_plugin.qingmu_client import Settings, QingmuClient
     settings = Settings('https://supplier.test.invalid','vendor-user','vendor-secret','form',
-        {'ucampus':{'id':'77','name': 'U校园整本（测试服务）', 'name':'U校园整本（测试服务）','billing':'测试计费说明'}},
+        {'ucampus':{'id':'77','name':'U校园整本（测试服务）','billing':'测试计费说明'}},
         {'get_success_code':'1','course_id_field':'id','course_name_field':'name','order_id_field':'id'},True)
     monkeypatch.setattr('henu_plugin.qingmu_flow.settings_from_env', lambda: settings)
     monkeypatch.setattr(QingmuClient,'courses',lambda *_:[{'kcid':'22','name':'大学英语'}])
