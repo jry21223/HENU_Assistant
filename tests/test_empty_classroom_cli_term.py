@@ -40,7 +40,7 @@ def test_cli_query_without_manual_term_returns_school_term_and_rooms(monkeypatch
             launcher_type=LauncherTypes("person"),
         )
         result = await tool.call(
-            {"command": "empty_classroom query --campus-code 02 --week 5 --period 3"},
+            {"command": "empty classroom query --campus-code 02 --week 5 --period 3"},
             session,
             1,
         )

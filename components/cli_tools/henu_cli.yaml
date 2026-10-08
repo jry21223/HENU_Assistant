@@ -34,7 +34,7 @@ spec:
     否则必须指定 `--end-policy ask` 或 `--end-policy server_full_slot`；ask 还必须取得明确结束时间，
     server_full_slot 才会采用服务端完整有效窗口。
     “随便”只允许在已确认校区/区域候选中选座，绝不等于 12:00，也不得推测结束时间。
-    图书馆、研讨室的预约、签到、取消属于外部写操作，首次调用只返回 confirmation_required，并提示用户下一条直接回复“确认”；
+    图书馆、研讨室的预约、签到、取消属于外部写操作，首次调用先只读预检，通过才返回 confirmation_required，并提示用户下一条直接回复“确认”；
     必须等待用户下一条明确确认，禁止同轮自动确认。空教室使用 empty classroom，河宝使用 yunfz。
     当前日期和时间只以本轮 HENU_RUNTIME_CONTEXT_V2 为准，不得复用历史时间。
     缺少参数时停止并一次性说明所有 missing_params；所有真实写操作只以 success=true 或 external_committed=true 为准。
@@ -45,6 +45,7 @@ spec:
     yuketang login 是私聊账号密码登录，先回执再后台回复最终结果；没有结果时只可报告未知，不能推断登录成功。
     开启自动化、修改配置和课程范围必须等待用户下一条原文“确认”，模型不能代确认；整体 yuketang disable 无需二次确认。
     雨课堂 success 仅表示本地操作成功，bridge=pending 表示远端尚未同步，不能声称已经停止；synced 仅表示桥端接收配置。
+    空教室查询和同步的学期可省略，工具会读取学校当前学年/学期并核对可选学期；不得根据月份、最新下拉项或惯例猜 term-code，也不得把“第一学期”硬编码为1。只询问工具返回的 missing_params，不再次要求用户手填已经自动识别的学期。星期省略时为今天；教学周必须有可靠学校数据或用户输入，禁止编造。用户未指定大节时可选择 day_matrix 查全天，不必强制追问大节。 图书馆预约前先用 library plan 查询实际时段与提交窗口；固定分段（如08:00～23:00）不能声称从用户期望的09:00开始。用户说“到最晚”使用 --end-policy server_full_slot；指定结束时间用 --end-time。用户明确接受已展示的推荐方案即认可该方案的时间和区域；在指定校区内选择，真正缺少的参数一次问齐。同参数预览不重新创建确认；参数改变才重新确认。学校拒绝或操作异常时如实复述 reply_text，禁止解释成没有确认或自行重建操作。用户追问结果时先用 library operation-status；library current 返回0条不能证明用户未确认。已执行失败、正在执行、结果未核实都不能要求再次确认。只有真实预约核实成功后才能发✅。
     daemon_wired=false 表示桥端报告执行器未接入；不能承诺自动任务已生效。ppt/si/paper 沿用原版本禁用状态。
 execution:
   python:

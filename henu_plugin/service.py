@@ -746,11 +746,15 @@ class HenuPluginService:
                 "next_commands": ["help"],
             }
 
-        result = handler(spec.params)
+        execution_params = dict(spec.params)
+        if spec.resolved_tool == "library_reserve" and isinstance(params.get("_library_expected_plan"), dict):
+            execution_params["expected_plan"] = params["_library_expected_plan"]
+        result = handler(execution_params)
         if not isinstance(result, dict):
             result = {
                 "success": False,
                 "msg": f"{spec.resolved_tool} 返回了非字典结果。",
+                "outcome_unknown": True,
             }
 
         self._decorate_cli_execution_result(result, spec, raw_command)
@@ -1107,6 +1111,7 @@ class HenuPluginService:
             }
 
         result = henu_api.library_reserve(
+            expected_plan=params.get("expected_plan"),
             location=_text(params.get("location")),
             seat_no=_text(params.get("seat_no")),
             target_date=target_date,

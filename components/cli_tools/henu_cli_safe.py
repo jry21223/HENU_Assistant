@@ -201,6 +201,13 @@ class HenuCliSafe(HenuCli):
             lines.append("日期或开始时间未指定，以上使用系统默认值。")
         if semantics == "reservation_availability":
             lines.append("这是预约系统余位，不代表当前在馆空座。")
+        rules = result.get("reservation_rules") or {}
+        if rules.get("effective_start") and rules.get("effective_end"):
+            label = "学校固定整段" if rules.get("fixed_segment") else "实际可约时段"
+            lines.append(f"{label}：{rules['effective_start']}～{rules['effective_end']}。")
+        window = rules.get("booking_window") or {}
+        if window.get("start") and window.get("end"):
+            lines.append(f"学校开放提交时间：{window['start']}～{window['end']}；空位不代表现在可提交。")
         for seat in seats[:10]:
             seat_no = self._first_text(seat, "seat_no", "seatNo", "seat_number", "seatNumber", "name", "id")
             status = self._first_text(seat, "status", "status_text", "state", "state_text")
@@ -284,6 +291,7 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "空教室能力已支持；缺少必填参数时停止调用并直接复述 missing_params；使用 empty classroom 或 help empty classroom"
             )
+            parts.append("学期省略时工具会从学校核实当前学期；只询问 missing_params，不要再次要求手填已识别学期")
         if isinstance(result.get("locations"), list):
             parts.append(
                 "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
@@ -292,6 +300,7 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"
             )
+            parts.append("以 reservation_rules 的实际时段为准；固定时段不能改成用户期望的起止时间")
         if result.get("source") == "live_empty":
             parts.append("实时区域为空时不要编造区域、开放时间或替代方案")
         return "；".join(parts) + "。"
@@ -320,6 +329,9 @@ class HenuCliSafe(HenuCli):
         cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
         command = str(cli.get("command") or "").strip()
         lines = [str(result.get("msg") or f"空教室查询完成，共 {total} 个结果。").strip()]
+        term = result.get("term_context") or {}
+        if term.get("term_code"):
+            lines.append(f"学期：{term.get('term_name') or term['term_code']}（{term['term_code']}）。")
         if command:
             lines.append(f"命令: {command}")
 
@@ -334,7 +346,7 @@ class HenuCliSafe(HenuCli):
 
         if total and len(sample) > 6:
             lines.append(f"……还有 {len(sample) - 6} 个结果未展示。")
-        lines.append("如果需要更精确，请补充校区、楼房、周次、星期和大节。")
+        lines.append("如需进一步筛选，可指定楼房、容量或教室类型。")
         return "\n".join(lines)
 
     def _format_rooms_reply(self, result: dict[str, Any]) -> str:

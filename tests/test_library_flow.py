@@ -148,7 +148,7 @@ def test_closed_booking_window_is_explained_before_confirmation(monkeypatch):
     import asyncio
     from pathlib import Path
     from unittest.mock import Mock
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from langbot_plugin.api.entities.builtin.provider.session import (
@@ -207,7 +207,7 @@ def test_failed_submission_is_consumed_and_reported_without_another_confirmation
     from pathlib import Path
     from types import SimpleNamespace
     from unittest.mock import Mock
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from henu_plugin.confirmation_shortcut import ConfirmationShortcut
@@ -290,7 +290,7 @@ def test_concurrent_confirmations_submit_at_most_once(monkeypatch):
     import time
     from pathlib import Path
     from unittest.mock import Mock
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from langbot_plugin.api.entities.builtin.provider.session import (
@@ -394,7 +394,7 @@ def test_changed_school_slot_and_blocked_replacement_invalidate_old_confirmation
     import json
     from pathlib import Path
     from unittest.mock import Mock
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from langbot_plugin.api.entities.builtin.provider.session import (
@@ -456,7 +456,7 @@ def test_unknown_school_result_is_reported_as_uncertain(monkeypatch, response):
     import asyncio
     import json
     from pathlib import Path
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from langbot_plugin.api.entities.builtin.provider.session import (
@@ -530,7 +530,7 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
     import asyncio
     from pathlib import Path
     from types import SimpleNamespace
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from henu_plugin.confirmation_shortcut import ConfirmationShortcut
@@ -613,7 +613,7 @@ def test_changed_retry_constraints_create_a_new_confirmation(monkeypatch):
     import asyncio
     import json
     from pathlib import Path
-    import mcp_server
+    from henu_mcp import api as mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
     from langbot_plugin.api.entities.builtin.provider.session import (

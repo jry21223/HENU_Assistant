@@ -2482,6 +2482,7 @@ def _library_reserve_impl(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2527,6 +2528,7 @@ def _library_reserve_impl(
         retry_until=retry_deadline.isoformat() if retry_deadline is not None else "",
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
+        **({"expected_plan": expected_plan} if expected_plan is not None else {}),
     )
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):
@@ -3757,6 +3759,7 @@ def library_reserve(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -3802,6 +3805,7 @@ def library_reserve(
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
+        expected_plan=expected_plan,
     )
 
 
@@ -4572,6 +4576,9 @@ def empty_classroom_query(
     - "classrooms": 查询教室列表
     - "types": 查询教室类型列表
 
+    term_code 省略时自动读取并核对学校当前学期；显式学期优先。
+    day_of_week 省略时为今天；教学周须可靠获取或由用户指定，不按月份猜算。
+
     参数优先级（校区/楼房）：
     - campus_code/building_code 显式传入时优先
     - 否则使用 campus_text/building_text 通过资源 registry 解析
@@ -4611,6 +4618,25 @@ def empty_classroom_query(
     if view in ("terms", "campuses", "buildings", "classrooms", "types"):
         return _empty_classroom_meta_query(client, view, campus_code, building_code, type_code, keyword)
 
+    term_context: dict[str, Any] = {}
+    if view in {"free", "day_matrix", "occupancy"}:
+        term_context = client.resolve_term(term_code)
+        if not term_context.get("success"):
+            return term_context
+        term_code = term_context["term_code"]
+        if day_of_week == 0:
+            day_of_week = _now_dt().isoweekday()
+        required = {"week": week, "day_of_week": day_of_week}
+        if view != "day_matrix":
+            required["period"] = period
+        if view == "occupancy":
+            required["room_id"] = room_id
+        missing = [key for key, value in required.items() if not value or (isinstance(value, int) and value <= 0)]
+        if missing:
+            label = term_context.get("term_name") or term_code
+            return {"success": False, "error_code": "missing_params", "missing_params": missing, "term_context": term_context,
+                "msg": f"已确定学期 {label}（{term_code}）；仍需提供：{', '.join(missing)}。学期无需再次填写。"}
+
     # ── 需要登录态的 view ──
     if view == "free":
         if not term_code or week <= 0 or day_of_week <= 0 or period <= 0:
@@ -4636,6 +4662,7 @@ def empty_classroom_query(
             max_stale_seconds=max_stale_seconds,
         )
         data = result.to_dict()
+        data["term_context"] = term_context
         data["success"] = True
         data["msg"] = f"找到 {result.total} 间空闲教室"
         return data
@@ -4685,6 +4712,7 @@ def empty_classroom_query(
         return {
             "success": True,
             "msg": f"已查询 {len(periods_result)} 个大节",
+            "term_context": term_context,
             "data": {
                 "termCode": term_code,
                 "week": week,
@@ -4700,10 +4728,12 @@ def empty_classroom_query(
                 "success": False,
                 "msg": "view=occupancy 需要提供 term_code, room_id, week, day_of_week, period",
             }
-        return _empty_classroom_occupancy_query(
+        data = _empty_classroom_occupancy_query(
             client, term_code, room_id, week, day_of_week, period,
             campus_code, building_code, freshness, force_refresh, ttl_seconds, max_stale_seconds,
         )
+        data["term_context"] = term_context
+        return data
 
     return {"success": False, "msg": f"不支持的 view: {view}"}
 
@@ -4890,7 +4920,7 @@ def empty_classroom_sync(
     建议在查询空教室前先同步相关楼房数据。
 
     参数：
-    - term_code: 学期代码，如 "2025,1"（必填）
+    - term_code: 学期代码，如 "2025,1"；省略时读取学校当前学期
     - campus_code: 校区代码，如 "01"（必填）
     - building_code: 楼房代码，如 "0013"（必填）
     - type_code: 教室类型代码，空表示全部
@@ -4904,18 +4934,22 @@ def empty_classroom_sync(
             "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
         }
 
-    if not term_code or not campus_code or not building_code:
-        return {
-            "success": False,
-            "msg": "term_code, campus_code, building_code 均为必填参数",
-        }
-
     client = _get_empty_classroom_client()
     if client is None:
         return {
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
         }
+
+    term_context = client.resolve_term(term_code)
+    if not term_context.get("success"):
+        return term_context
+    term_code = term_context["term_code"]
+    missing = [key for key, value in {"campus_code": campus_code, "building_code": building_code}.items() if not str(value or "").strip()]
+    if missing:
+        return {"success": False, "error_code": "missing_params", "missing_params": missing, "term_context": term_context,
+            "msg": f"已确定学期 {term_code}；仍需提供：{', '.join(missing)}。学期无需再次填写。"}
+
 
     result = _sync_schedule_impl(
         client=client,
@@ -4927,6 +4961,7 @@ def empty_classroom_sync(
     )
 
     data = result.to_dict()
+    data["term_context"] = term_context
     data["success"] = result.sync_status in ("success", "skipped")
     data["msg"] = {
         "success": "同步成功",

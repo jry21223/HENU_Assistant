@@ -48,21 +48,14 @@ def test_empty_classroom_parser_forwards_rich_filters() -> None:
     assert spec.params["max_stale_seconds"] == 600
 
 
-def test_empty_classroom_accepts_space_dialect_and_reports_all_missing_parameters() -> None:
+def test_empty_classroom_accepts_space_dialect_and_defers_defaults_to_school_tool() -> None:
     spec = inspect_cli_command("empty classroom query")
-
-    assert spec.resolved_tool is None
-    assert spec.error == (
-        "空教室查询缺少参数：--term-code <学期>、--week <教学周>、"
-        "--day-of-week <星期1-7>、--period <大节1-5>。"
-    )
-    assert spec.help_topic == "empty_classroom"
-    assert spec.missing_params == (
-        "--term-code <学期>",
-        "--week <教学周>",
-        "--day-of-week <星期1-7>",
-        "--period <大节1-5>",
-    )
+    assert not spec.error
+    assert spec.resolved_tool == "empty_classroom_query"
+    assert spec.params["term_code"] == ""
+    assert spec.params["day_of_week"] == 0
+    assert spec.params["week"] == 0
+    assert spec.params["period"] == 0
 
 
 def test_empty_classroom_rejects_agent_snake_case_dialect() -> None:
@@ -304,7 +297,7 @@ def test_sensitive_cli_values_are_redacted_in_commands_and_params() -> None:
     assert "secret value" not in command
     assert "COOKIEVALUE" not in command
     assert "payload" not in command
-    assert command.count("<redacted>") == 3
+    assert command == "account set --student-id <redacted> --password <redacted>"
     assert redact_cli_params({"password": "secret", "cookie": "cookie", "data": "data", "area_id": "43"}) == {
         "password": "<redacted>",
         "cookie": "<redacted>",

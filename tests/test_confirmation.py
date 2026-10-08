@@ -107,6 +107,7 @@ class ConfirmationExecutionTests(unittest.IsolatedAsyncioTestCase):
             canonical_command=self.command,
             query_id=10,
         )
+        self.pending["conversation"] = {"launcher_type": "", "launcher_id": ""}
         self.plugin.storage[pending_storage_key(self.storage_key)] = json.dumps(
             self.pending
         ).encode("utf-8")
@@ -224,6 +225,7 @@ class ConfirmationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     action="取消研讨室预约",
                     parameter_summary="record_id=9",
                     query_id=12,
+                    conversation={"launcher_type": "", "launcher_id": ""},
                 )
             )
             await asyncio.sleep(0)
@@ -238,3 +240,39 @@ class ConfirmationExecutionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(latest["schema"], "henu.pending-operation.v1")
         self.assertEqual(latest["command"], "seminar cancel --record-id 9")
+
+
+def test_final_receipt_survives_repeated_cancellation() -> None:
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        saved = {}
+
+        class Storage:
+            async def set_plugin_storage(self, key, value):
+                started.set()
+                await release.wait()
+                saved[key] = json.loads(value)
+
+        tool = object.__new__(HenuCli)
+        tool.plugin = Storage()
+        task = asyncio.create_task(tool._store_receipt(
+            "qq-test", {"command": "library cancel --record-id 7"},
+            11, "failed", {"success": False, "msg": "school rejected"},
+        ))
+        await asyncio.wait_for(started.wait(), 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        receipt = saved[pending_storage_key("qq-test")]
+        assert receipt["status"] == "failed"
+        assert receipt["result"]["msg"] == "school rejected"
+
+    asyncio.run(run())

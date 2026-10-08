@@ -383,6 +383,9 @@ class BaseHenuTool(Tool):
             "locations_returned", "locations_truncated", "seats_total", "seats_returned",
             "seats_truncated", "fallback_locations", "fallback_locations_truncated",
             "schedule_summary",
+            "reservation_rules", "operation_state", "confirmation_required",
+            "outcome_unknown", "submit_success", "external_committed",
+            "term_context", "missing_params",
         )
         essential = {
             key: result[key]
