@@ -35,8 +35,8 @@ class HenuCliSafe(HenuCli):
         cli = result.get("cli")
         if isinstance(cli, dict) and cli.get("command"):
             cli["command"] = redact_cli_command(cli["command"])
-        self._attach_reply_text(result)
         self._attach_semantic_options(result)
+        self._attach_reply_text(result)
         self._attach_llm_hint(result)
         self._compact_large_payloads(result)
 
@@ -56,7 +56,6 @@ class HenuCliSafe(HenuCli):
             result.pop("locations_total", None)
             result.pop("locations_returned", None)
             result.pop("locations_truncated", None)
-            result["locations"] = locations[: self._MAX_LIST_ITEMS]
 
         seats = [item for item in (result.get("seats") or []) if isinstance(item, dict)]
         if seats:
@@ -73,7 +72,10 @@ class HenuCliSafe(HenuCli):
             result.pop("seats_total", None)
             result.pop("seats_returned", None)
             result.pop("seats_truncated", None)
-            result["seats"] = seats[: self._MAX_LIST_ITEMS]
+
+        schedule = result.get("schedule")
+        if isinstance(schedule, dict):
+            result["schedule_summary"] = self._build_schedule_summary(schedule)
 
     def _attach_reply_text(self, result: dict[str, Any]) -> None:
         if isinstance(result.get("reply_text"), str) and result["reply_text"].strip():
@@ -94,16 +96,27 @@ class HenuCliSafe(HenuCli):
                 return msg
         if self._is_empty_classroom_result(result):
             return self._format_empty_classroom_reply(result)
+        if "is_open" in result and (
+            result.get("status_code") in {"open", "closed", "unknown"}
+            or "time_range" in result
+        ):
+            return self._format_course_status_reply(result)
         if isinstance(result.get("locations"), list):
             return self._format_locations_reply(result)
         if isinstance(result.get("seats"), list):
             return self._format_seats_reply(result)
+        if isinstance(result.get("preferences"), dict):
+            return self._format_preferences_reply(result)
         if isinstance(result.get("rooms"), list):
             return self._format_rooms_reply(result)
         if isinstance(result.get("records"), list):
             return self._format_records_reply(result)
         if isinstance(result.get("tasks"), list):
             return self._format_tasks_reply(result)
+        if isinstance(result.get("current_courses"), list):
+            return self._format_current_schedule_reply(result)
+        if isinstance(result.get("schedule_summary"), list) or isinstance(result.get("schedule"), dict):
+            return self._format_week_schedule_reply(result)
         if isinstance(result.get("day_schedule"), list):
             return self._format_schedule_reply(result)
         for key in ("plans", "courses", "candidates", "items"):
@@ -117,6 +130,18 @@ class HenuCliSafe(HenuCli):
         if result.get("success") is False:
             return "操作失败，但工具没有返回具体错误信息。"
         return "操作完成。"
+
+    def _format_preferences_reply(self, result: dict[str, Any]) -> str:
+        preferences = result.get("preferences") or {}
+        location = str(preferences.get("library_location") or "").strip()
+        seat_no = str(preferences.get("library_seat_no") or "").strip()
+        return "\n".join(
+            [
+                str(result.get("msg") or "偏好读取完成。"),
+                f"图书馆默认区域: {location or '未设置'}",
+                f"图书馆默认座位: {seat_no or '未设置'}",
+            ]
+        )
 
     def _format_locations_reply(self, result: dict[str, Any]) -> str:
         locations = [item for item in (result.get("locations") or []) if isinstance(item, dict)]
@@ -161,18 +186,21 @@ class HenuCliSafe(HenuCli):
         if not isinstance(total, int):
             total = len(seats)
         available = result.get("available_count")
+        semantics = str(result.get("query_semantics") or "").strip()
+        date_text = str(result.get("date") or result.get("target_date") or "").strip()
+        time_window = str(result.get("time_window") or "").strip()
+        label = "图书馆预约余位" if semantics == "reservation_availability" else "图书馆座位查询"
+        scope = " ".join(value for value in (date_text, time_window) if value)
         lines = [
-            f"图书馆座位查询完成：{available}/{total} 个可用。"
+            f"{label}{'（' + scope + '）' if scope else ''}：{available}/{total} 个可用。"
             if isinstance(available, int)
-            else f"图书馆座位查询完成，共返回 {total} 个座位。"
+            else f"{label}{'（' + scope + '）' if scope else ''}，共返回 {total} 个座位。"
         ]
-        rules = result.get("reservation_rules") or {}
-        if rules.get("effective_start") and rules.get("effective_end"):
-            label = "学校固定整段" if rules.get("fixed_segment") else "实际可约时段"
-            lines.append(f"{label}：{rules['effective_start']}～{rules['effective_end']}。")
-        window = rules.get("booking_window") or {}
-        if window.get("start") and window.get("end"):
-            lines.append(f"学校开放提交时间：{window['start']}～{window['end']}；空位不代表现在可提交。")
+        defaulted = result.get("defaulted_fields")
+        if isinstance(defaulted, list) and defaulted:
+            lines.append("日期或开始时间未指定，以上使用系统默认值。")
+        if semantics == "reservation_availability":
+            lines.append("这是预约系统余位，不代表当前在馆空座。")
         for seat in seats[:10]:
             seat_no = self._first_text(seat, "seat_no", "seatNo", "seat_number", "seatNumber", "name", "id")
             status = self._first_text(seat, "status", "status_text", "state", "state_text")
@@ -186,6 +214,22 @@ class HenuCliSafe(HenuCli):
             "需要预约时，请使用返回的准确座位号调用 "
             "library reserve --location <区域> --seat-no <座位号>，并补充日期和时间。"
         )
+        return "\n".join(lines)
+
+    def _format_course_status_reply(self, result: dict[str, Any]) -> str:
+        is_open = result.get("is_open")
+        if is_open is True:
+            lines = ["选课入口当前开放。"]
+        elif is_open is False:
+            lines = ["选课入口当前未开放。"]
+        else:
+            lines = ["选课入口状态暂时无法确认。"]
+        message = str(result.get("message") or "").strip()
+        time_range = result.get("time_range") if isinstance(result.get("time_range"), dict) else {}
+        range_message = str(time_range.get("message") or "").strip()
+        for value in (message, range_message):
+            if value and value not in lines:
+                lines.append(value)
         return "\n".join(lines)
 
     def _format_generic_list_reply(self, result: dict[str, Any], key: str) -> str:
@@ -238,9 +282,8 @@ class HenuCliSafe(HenuCli):
 
         if self._is_empty_classroom_result(result) or self._text_mentions_empty_classroom(command, resolved_tool):
             parts.append(
-                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
+                "空教室能力已支持；缺少必填参数时停止调用并直接复述 missing_params；使用 empty classroom 或 help empty classroom"
             )
-            parts.append("学期省略时工具会从学校核实当前学期；只询问 missing_params，不要再次要求手填已识别学期")
         if isinstance(result.get("locations"), list):
             parts.append(
                 "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
@@ -249,7 +292,6 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"
             )
-            parts.append("以 reservation_rules 的实际时段为准；固定时段不能改成用户期望的起止时间")
         if result.get("source") == "live_empty":
             parts.append("实时区域为空时不要编造区域、开放时间或替代方案")
         return "；".join(parts) + "。"
@@ -266,7 +308,7 @@ class HenuCliSafe(HenuCli):
     @staticmethod
     def _text_mentions_empty_classroom(*values: str) -> bool:
         text = " ".join(str(value or "") for value in values).lower()
-        return any(marker in text for marker in ("empty_classroom", "空教室", "空闲教室"))
+        return any(marker in text for marker in ("empty_classroom", "empty classroom", "空教室", "空闲教室"))
 
     def _format_empty_classroom_reply(self, result: dict[str, Any]) -> str:
         rooms = [item for item in (result.get("rooms") or []) if isinstance(item, dict)]
@@ -278,9 +320,6 @@ class HenuCliSafe(HenuCli):
         cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
         command = str(cli.get("command") or "").strip()
         lines = [str(result.get("msg") or f"空教室查询完成，共 {total} 个结果。").strip()]
-        term = result.get("term_context") or {}
-        if term.get("term_code"):
-            lines.append(f"学期：{term.get('term_name') or term['term_code']}（{term['term_code']}）。")
         if command:
             lines.append(f"命令: {command}")
 
@@ -295,11 +334,19 @@ class HenuCliSafe(HenuCli):
 
         if total and len(sample) > 6:
             lines.append(f"……还有 {len(sample) - 6} 个结果未展示。")
-        lines.append("如需进一步筛选，可指定楼房、容量或教室类型。")
+        lines.append("如果需要更精确，请补充校区、楼房、周次、星期和大节。")
         return "\n".join(lines)
 
     def _format_rooms_reply(self, result: dict[str, Any]) -> str:
         rooms = [item for item in (result.get("rooms") or []) if isinstance(item, dict)]
+        if not rooms and result.get("empty_reason") == "no_matching_rooms":
+            applied = result.get("applied_filters") if isinstance(result.get("applied_filters"), dict) else {}
+            date_text = str(applied.get("date") or "").strip()
+            suffix = f"（日期：{date_text}）" if date_text else ""
+            return (
+                str(result.get("msg") or f"没有匹配当前条件的研讨室{suffix}").strip()
+                + "。这只表示当前筛选条件返回 0 项，不能据此判断具体开放或占用原因。"
+            )
         query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else {}
         date_text = str(query.get("date") or "").strip()
         page = str(query.get("page") or result.get("page") or "").strip()
@@ -372,6 +419,77 @@ class HenuCliSafe(HenuCli):
         if len(courses) > 6:
             lines.append(f"……还有 {len(courses) - 6} 项未展示。")
         return "\n".join(lines)
+
+    def _format_current_schedule_reply(self, result: dict[str, Any]) -> str:
+        current = [item for item in (result.get("current_courses") or []) if isinstance(item, dict)]
+        next_course = result.get("next_course") if isinstance(result.get("next_course"), dict) else None
+        lines = [str(result.get("msg") or "当前课程查询完成。").strip()]
+        if result.get("week_filter_applied") is False:
+            lines.append("说明：未验证教学周，以下结果仅按星期和节次时间匹配。")
+        for course in current:
+            lines.append("- 当前匹配：" + self._course_summary_text(course))
+        if not current and next_course:
+            lines.append("- 下一节：" + self._course_summary_text(next_course))
+        return "\n".join(lines)
+
+    def _format_week_schedule_reply(self, result: dict[str, Any]) -> str:
+        summary = result.get("schedule_summary")
+        if not isinstance(summary, list):
+            summary = self._build_schedule_summary(result.get("schedule") or {})
+        lines = [str(result.get("msg") or "完整周课表。").strip()]
+        for day in summary:
+            if not isinstance(day, dict):
+                continue
+            courses = [item for item in (day.get("courses") or []) if isinstance(item, dict)]
+            lines.append(f"{day.get('day', '未知日期')}（共 {day.get('total', len(courses))} 门）")
+            for course in courses:
+                lines.append("- " + self._course_summary_text(course))
+            if day.get("truncated"):
+                lines.append("- ……其余课程已省略，请查询指定日期。")
+        return "\n".join(lines)
+
+    def _build_schedule_summary(self, schedule: dict[str, Any]) -> list[dict[str, Any]]:
+        summary: list[dict[str, Any]] = []
+        for day, raw_courses in schedule.items():
+            courses = [item for item in (raw_courses or []) if isinstance(item, dict)]
+            compact_courses = []
+            for course in courses[:2]:
+                compact_courses.append(
+                    {
+                        "course": self._trim_text(
+                            self._first_text(course, "course", "name", "course_name")
+                            or "未命名课程",
+                            36,
+                        ),
+                        "time": self._trim_text(
+                            self._first_text(course, "time", "period", "clock_start"),
+                            24,
+                        ),
+                        "classroom": self._trim_text(
+                            self._first_text(course, "classroom", "place", "location"),
+                            32,
+                        ),
+                    }
+                )
+            summary.append(
+                {
+                    "day": self._trim_text(str(day), 16),
+                    "total": len(courses),
+                    "courses": compact_courses,
+                    "truncated": len(courses) > len(compact_courses),
+                }
+            )
+        return summary
+
+    def _course_summary_text(self, course: dict[str, Any]) -> str:
+        name = self._first_text(course, "course", "name", "course_name") or "未命名课程"
+        start = self._first_text(course, "clock_start")
+        end = self._first_text(course, "clock_end")
+        clock = f"{start}-{end}" if start and end else ""
+        period = self._first_text(course, "time", "period")
+        place = self._first_text(course, "classroom", "place", "location")
+        detail = " ".join(part for part in (clock or period, place) if part)
+        return f"{name}{'：' + detail if detail else ''}"
 
     def _compact_large_payloads(self, result: dict[str, Any]) -> None:
         for key in ("rooms", "data", "records", "tasks", "items", "plans", "day_schedule", "current_courses"):

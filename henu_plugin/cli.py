@@ -17,12 +17,8 @@ class CliCommandSpec:
     is_help: bool = False
     help_topic: str = ""
     error: str = ""
+    missing_params: tuple[str, ...] = ()
 
-
-_SENSITIVE_OPTION_PATTERN = re.compile(
-    r"(?i)(--(?:password|passwd|cookie|data|token|authorization|api[-_]?key|x[-_]?access[-_]?token)(?:=|\s+))"
-    r"(\"[^\"]*\"|'[^']*'|[^\s]+)"
-)
 
 _SENSITIVE_OPTION_NAMES = frozenset(
     {
@@ -39,14 +35,82 @@ _SENSITIVE_OPTION_NAMES = frozenset(
     }
 )
 
+_ACCOUNT_SET_FORMAT = (
+    "account set --student-id <统一身份认证学号> "
+    "--password '<统一身份认证密码>'"
+)
+
+
+def account_command_format_error(command: Any) -> str:
+    """Return a credential-safe correction for common pasted command mistakes."""
+    raw = str(command or "").strip()
+    normalized = re.sub(r"\s+", " ", raw).lower()
+    if not normalized:
+        return ""
+    if normalized.startswith("count set"):
+        return f"命令拼写应为 `account set`。正确格式：`{_ACCOUNT_SET_FORMAT}`。"
+    if re.match(r"^account\s+set--", normalized):
+        return (
+            "`set` 与第一个参数之间缺少空格。"
+            f"正确格式：`{_ACCOUNT_SET_FORMAT}`。"
+        )
+    if re.search(r"--student-id(?![\s=])", normalized):
+        return (
+            "`--student-id` 与学号之间缺少空格或 `=`。"
+            f"正确格式：`{_ACCOUNT_SET_FORMAT}`。"
+        )
+    if re.search(r"[^\s]--password(?:[\s=]|$)", normalized):
+        return (
+            "学号与 `--password` 之间缺少空格。"
+            f"正确格式：`{_ACCOUNT_SET_FORMAT}`。"
+        )
+    if normalized.startswith("account set") and "<" in raw and ">" in raw:
+        return (
+            "尖括号内容是格式说明，不要把 `<`、`>` 一起发送。"
+            f"正确格式：`{_ACCOUNT_SET_FORMAT}`。"
+        )
+    return ""
+
+
+def is_account_set_intent(command: Any) -> bool:
+    """Detect structured or free-form login attempts without exposing values."""
+    raw = str(command or "").strip()
+    normalized = re.sub(r"\s+", " ", raw).lower()
+    if not normalized:
+        return False
+    if normalized.startswith(("account set", "count set")):
+        return True
+    has_identifier = any(
+        marker in normalized
+        for marker in (
+            "学号",
+            "账号",
+            "用户名",
+            "username",
+            "user name",
+            "student-id",
+            "student_id",
+            "student id",
+        )
+    )
+    has_password = any(
+        marker in normalized for marker in ("密码", "password", "passwd")
+    )
+    return has_identifier and has_password
+
 
 def redact_cli_command(command: Any) -> str:
     """Mask sensitive option values before a command reaches results or logs."""
     raw = str(command or "")
+    if is_account_set_intent(raw):
+        return "account set --student-id <redacted> --password <redacted>"
+    parse_raw = raw.translate(
+        str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
+    )
     try:
-        argv = shlex.split(raw)
+        argv = shlex.split(parse_raw)
     except ValueError:
-        return _SENSITIVE_OPTION_PATTERN.sub(r"\1<redacted>", raw)
+        return "<invalid command; sensitive values redacted>"
 
     masked: list[str] = []
     index = 0
@@ -87,13 +151,30 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
             help_topic="",
         )
 
+    format_error = account_command_format_error(raw)
+    if format_error:
+        return _error_spec(raw, format_error, help_topic="account set")
+
+    parse_raw = raw.translate(
+        str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
+    )
     try:
-        argv = tuple(shlex.split(raw))
+        argv = tuple(shlex.split(parse_raw))
     except ValueError as exc:
         return _error_spec(raw, f"命令解析失败: {exc}", help_topic="")
 
     if not argv:
         return _error_spec(raw, "命令不能为空。", help_topic="")
+
+    if argv[0].lower() == "empty_classroom":
+        return _error_spec(
+            raw,
+            "LangBot 使用空格命令：请改为 `empty classroom ...`。",
+            help_topic="empty_classroom",
+        )
+
+    if len(argv) >= 2 and argv[0].lower() == "empty" and argv[1].lower() == "classroom":
+        argv = ("empty_classroom", *argv[2:])
 
     head = argv[0].lower()
     if head in {"help", "-h", "--help"}:
@@ -116,6 +197,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_system(raw, argv)
     if head == "account":
         return _parse_account(raw, argv)
+    if head in {"preferences", "preference", "prefs"}:
+        return _parse_preferences(raw, argv)
     if head == "schedule":
         return _parse_schedule(raw, argv)
     if head in {"course", "courses", "xk"}:
@@ -144,6 +227,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
 
 def build_help_payload(topic: str) -> dict[str, Any]:
     normalized = _normalize_topic(topic.split())
+    if normalized == "empty classroom":
+        normalized = "empty_classroom"
 
     if not normalized:
         return {
@@ -152,6 +237,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "commands": [
                 "account status",
                 "account set --student-id ... --password ...",
+                "preferences get",
                 "schedule now",
                 "course status",
                 "course plan --candidates-json '<json>'",
@@ -159,7 +245,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "course plan --excel ./courses.xlsx --class 25软工1",
                 "library current",
                 "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
-                "empty_classroom query --week 1 --day-of-week 1 --period 1",
+                "empty classroom query --term-code <学期> --week 1 --day-of-week 1 --period 1",
                 "resource search 十号楼101",
                 "yunfz leave list",
                 "yunfz signin list",
@@ -170,11 +256,12 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
             "examples": [
                 "help account",
+                "help preferences",
                 "help schedule",
                 "help course",
                 "help library",
                 "help seminar",
-                "help empty_classroom",
+                "help empty classroom",
                 "help resource",
                 "help yunfz",
                 "help yuketang",
@@ -199,6 +286,10 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "account set --student-id 20230001 --password 'secret'",
             ],
             "tips": [
+                "登录名必须是河大统一身份认证学号，不是 QQ、手机号或邮箱。",
+                "格式：`account set --student-id <学号> --password '<密码>'`；实际发送时不要保留尖括号。",
+                "学号和密码必须在同一条结构化私聊命令中发送；不会接收下一条裸密码。",
+                "每个 QQ 独立保存绑定；`account status` 会显示最近一次在线登录校验结果，但不保证登录态长期有效，超过 24 小时会标记为可能已过期。",
                 "默认会验证登录并自动校准节次。",
                 "若只想保存不验证，可追加 `--no-verify-login`。",
             ],
@@ -216,8 +307,31 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "account set --student-id 20230001 --password 'secret' --library-location 金明馆北区 --library-seat-no 201",
             ],
             "tips": [
+                "学号和密码必须与 ids.henu.edu.cn 一致，不要填写 QQ、手机号或邮箱。",
+                "若密码含空格，请使用英文单引号或双引号包住；中文弯引号也会被兼容处理。",
+                "出现验证码、额外校验或账号锁定时会停止重试；请先用浏览器完成验证或解锁。",
                 "默认 `verify_login=true`、`calibrate_period_time=true`。",
                 "可用 `--no-verify-login`、`--no-calibrate-period-time` 关闭默认行为。",
+            ],
+        }
+
+    if normalized == "preferences":
+        return {
+            "topic": normalized,
+            "summary": "管理当前 QQ 独立保存的使用偏好。",
+            "commands": [
+                "preferences get",
+                "preferences set --library-location <区域> --library-seat-no <座位>",
+                "preferences clear [--library-location] [--library-seat-no]",
+            ],
+            "examples": [
+                "preferences get",
+                "preferences set --library-location 金明七层南自习室 --library-seat-no 001",
+                "preferences clear --library-location --library-seat-no",
+            ],
+            "tips": [
+                "不带清空选项执行 `preferences clear` 时，会同时清空区域和座位。",
+                "偏好只属于当前 QQ，不会覆盖其他同学的配置。",
             ],
         }
 
@@ -242,6 +356,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "需要精确某天时，用 `schedule day --date ...`。",
             ],
         }
+
 
     if normalized == "course":
         return {
@@ -285,23 +400,22 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library locations [--date YYYY-MM-DD]",
                 "library seats [--location <区域>|--area-id <ID>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM]",
                 "library current",
-                "library operation-status",
-                "library plan --area-id <ID> --seat-no <座位> --date YYYY-MM-DD --time HH:MM",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
-                "library reserve (--location <区域>|--area-id <ID>) --seat-no <座位> --date YYYY-MM-DD --time HH:MM (--end-time HH:MM|--end-policy server_full_slot) [--retry-until HH:MM] [--max-attempts 30]",
+                "library reserve [--location <区域>] [--seat-no <座位>] --date YYYY-MM-DD --time HH:MM (--end-time HH:MM | --end-policy ask|server_full_slot) [--retry-until HH:MM] [--max-attempts 30]",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
             "examples": [
                 "library current",
                 "library seats --location 金明馆北区 --date 2026-03-30 --time 08:00",
-                "library reserve --area-id 16 --seat-no 001 --date YYYY-MM-DD --time 09:00 --end-policy server_full_slot",
+                "library reserve --location 金明七层南自习室 --seat-no 001 --date 2026-09-20 --time 08:00 --end-policy ask --end-time 12:00",
+                "library reserve --location 金明七层南自习室 --seat-no 001 --date 2026-09-20 --time 08:00 --end-policy server_full_slot",
             ],
             "tips": [
-                "先查 locations、seats 或 plan；固定分段的实际起止以学校返回值为准。",
-                "空位不等于当前允许提交；预约前进行只读预检。",
-                "只有日期、时间与结束策略齐全才生成确认；不使用查询默认值。",
-                "追问是否成功用 library operation-status；失败原因不能改写成尚未确认。",
+                "先用 `library current` 或 `library records` 看现状。",
+                "预约写操作不使用“明天/08:00”等查询默认值；日期和开始时间必须来自用户明确表达。",
+                "明确提供 --end-time 时视为 explicit_end；否则必须用 end_policy=ask 或 server_full_slot。",
+                "“随便”不等于 12:00；end_policy=ask 时必须补 end-time，server_full_slot 才允许使用服务端完整有效窗口。",
                 "取消与签到属于真实写操作，只认 `success=true`。",
             ],
         }
@@ -397,19 +511,17 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "topic": normalized,
             "summary": "空教室、教室占用、校区楼房与教室类型查询。",
             "commands": [
-                "empty_classroom query [--view free|day_matrix|occupancy|classrooms|types] [--term-code <学期>] [--week 1] [--day-of-week 1] [--period 1] [--campus-code <校区>] [--building-code <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity 80] [--keyword <关键词>] [--room-id <ID>] [--ttl-seconds 300] [--max-stale-seconds 86400]",
-                "empty_classroom sync [--term-code <学期>] --campus-code <校区> --building-code <楼房> [--type-code <类型>] [--force-refresh]",
-                "empty_classroom campuses",
-                "empty_classroom buildings --campus-code <校区>",
+                "empty classroom query [--view free|day_matrix|occupancy|classrooms|types] [--term-code <学期>] [--week 1] [--day-of-week 1] [--period 1] [--campus-code <校区>] [--building-code <楼房>] [--classroom-text <教室>] [--type-code <类型>] [--min-capacity 80] [--keyword <关键词>] [--room-id <ID>] [--ttl-seconds 300] [--max-stale-seconds 86400]",
+                "empty classroom sync --term-code <学期> --campus-code <校区> --building-code <楼房> [--type-code <类型>] [--force-refresh]",
+                "empty classroom campuses",
+                "empty classroom buildings --campus-code <校区>",
             ],
             "examples": [
-                "empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼",
-                "empty_classroom query --view occupancy --classroom-text 十号楼101",
-                "empty_classroom sync --term-code 2025,1 --campus-code 01 --building-code 0013",
+                "empty classroom query --term-code 2026,1 --week 1 --day-of-week 1 --period 1 --building-text 十号楼",
+                "empty classroom query --view occupancy --term-code 2026,1 --week 1 --day-of-week 1 --period 1 --room-id <教室ID>",
+                "empty classroom sync --term-code 2026,1 --campus-code 01 --building-code 0013",
             ],
             "tips": [
-                "学期省略时自动核实学校当前学期；显式学期优先，星期省略时查询今天。",
-                "教学周不能按月份猜算；工具只报告仍缺少的参数。未指定大节时可用 day_matrix 查询全天五个大节。",
                 "空教室数据来自教务系统缓存，真实使用前建议先 sync。",
                 "公共教室缓存可共享，不会保存账号或 Cookie。",
             ],
@@ -531,9 +643,11 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help yunfz"]
+            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty classroom", "help resource", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
+        if topic == "preferences":
+            return ["preferences get", "preferences set", "preferences clear"]
         if topic == "schedule":
             return ["schedule now", "schedule sync"]
         if topic == "course":
@@ -549,7 +663,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         if topic == "seminar":
             return ["seminar filters", "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4"]
         if topic == "empty_classroom":
-            return ["empty_classroom query --week 1 --day-of-week 1 --period 1", "empty_classroom campuses"]
+            return ["empty classroom query --term-code <学期> --week 1 --day-of-week 1 --period 1", "empty classroom campuses"]
         if topic == "resource":
             return ["resource search 十号楼101", "resource stats"]
         if topic == "yunfz":
@@ -567,6 +681,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
 
     if resolved_tool == "setup_account":
         return ["account status", "schedule sync", "schedule now"]
+    if resolved_tool == "preferences":
+        return ["preferences get", "library current", "help library"]
     if resolved_tool == "smart_course_selection":
         return ["help course", "course plan --excel ./courses.xlsx --class 25软工1 --compact-days --target-days 3"]
     if resolved_tool == "sync_schedule":
@@ -676,9 +792,24 @@ def _parse_account(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"status", "show", "whoami"}:
         return _system_status_spec(raw, argv, action=f"account {sub}")
     if sub in {"set", "bind"}:
-        options, _, error = _parse_options(argv[2:])
+        options, positionals, error = _parse_options(argv[2:])
         if error:
             return _error_spec(raw, error, help_topic="account set")
+        allowed_options = {
+            "student_id",
+            "password",
+            "library_location",
+            "library_seat_no",
+            "no_verify_login",
+            "no_calibrate_period_time",
+        }
+        if positionals or any(key not in allowed_options for key in options):
+            return _error_spec(
+                raw,
+                "账号命令含未识别参数，可能是密码含空格但未加引号。"
+                "本次未执行登录；请按帮助格式重新发送。",
+                help_topic="account set",
+            )
         missing = _missing_required(options, "student_id", "password")
         if missing:
             return _error_spec(raw, missing, help_topic="account set")
@@ -700,6 +831,74 @@ def _parse_account(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
 
     return _error_spec(raw, f"未知命令 `account {argv[1]}`。", help_topic="account")
+
+
+def _parse_preferences(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 1:
+        return _help_spec(raw, argv, "preferences")
+
+    sub = argv[1].lower()
+    if sub in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "preferences")
+    if sub in {"get", "show", "status"}:
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="preferences",
+            params={"action": "get"},
+            action="preferences get",
+            should_preload_runtime_context=False,
+        )
+
+    options, _, error = _parse_options(argv[2:])
+    if error:
+        return _error_spec(raw, error, help_topic="preferences")
+
+    if sub == "set":
+        params = {
+            "action": "set",
+            "library_location": _string_option(options, "library_location"),
+            "library_seat_no": _string_option(options, "library_seat_no"),
+        }
+        if not params["library_location"] and not params["library_seat_no"]:
+            return _error_spec(
+                raw,
+                "请至少提供 `--library-location` 或 `--library-seat-no`。",
+                help_topic="preferences",
+            )
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="preferences",
+            params=params,
+            action="preferences set",
+            should_preload_runtime_context=False,
+        )
+
+    if sub == "clear":
+        clear_location = _flag(options, "library_location")
+        clear_seat_no = _flag(options, "library_seat_no")
+        if not clear_location and not clear_seat_no:
+            clear_location = True
+            clear_seat_no = True
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="preferences",
+            params={
+                "action": "clear",
+                "clear_library_location": clear_location,
+                "clear_library_seat_no": clear_seat_no,
+            },
+            action="preferences clear",
+            should_preload_runtime_context=False,
+        )
+
+    return _error_spec(
+        raw,
+        f"未知命令 `preferences {argv[1]}`。",
+        help_topic="preferences",
+    )
 
 
 def _parse_schedule(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
@@ -957,7 +1156,6 @@ def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
 
     return _error_spec(raw, f"未知命令 `course {argv[1]}`。", help_topic="course")
 
-
 def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if len(argv) == 1:
         return _help_spec(raw, argv, "library")
@@ -966,126 +1164,9 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "library")
 
-    options, positionals, error = _parse_options(argv[2:])
+    options, _, error = _parse_options(argv[2:])
     if error:
         return _error_spec(raw, error, help_topic="library")
-
-    common = {
-        "location",
-        "area_id",
-        "date",
-        "target_date",
-        "time",
-        "preferred_time",
-        "end_time",
-        "preferred_end_time",
-    }
-    allowed_by_action = {
-        "locations": {"date", "target_date"},
-        "areas": {"date", "target_date"},
-        **{name: common for name in ("seats", "seat", "available", "free")},
-        "plan": common | {"seat_no"},
-        **{
-            name: common
-            | {
-                "seat_no",
-                "end_policy",
-                "retry_until",
-                "retry_interval_seconds",
-                "max_attempts",
-            }
-            for name in ("reserve", "book")
-        },
-        "current": set(),
-        "now": set(),
-        "operation-status": set(),
-        "records": {"record_type", "page", "limit"},
-        "history": {"record_type", "page", "limit"},
-        "signin": {"record_id"},
-        "checkin": {"record_id"},
-        "cancel": {"record_id", "record_type"},
-    }
-    unknown = set(options) - allowed_by_action.get(sub, set())
-    if unknown or positionals:
-        return _error_spec(
-            raw,
-            "不支持的图书馆参数：" + ", ".join(sorted(unknown) + positionals),
-            help_topic="library",
-        )
-    for key, value in options.items():
-        if value is True or not str(value).strip():
-            return _error_spec(
-                raw, f"--{key.replace('_', '-')} 缺少值。", help_topic="library"
-            )
-    if sub == "operation-status":
-        return CliCommandSpec(
-            raw=raw,
-            argv=argv,
-            resolved_tool=None,
-            params={},
-            action="library operation-status",
-            should_preload_runtime_context=False,
-        )
-    for short, long in (
-        ("date", "target_date"),
-        ("time", "preferred_time"),
-        ("end_time", "preferred_end_time"),
-    ):
-        if short in options and long in options and options[short] != options[long]:
-            return _error_spec(
-                raw, f"--{short} 与 --{long} 冲突。", help_topic="library"
-            )
-    if "location" in options and "area_id" in options:
-        return _error_spec(
-            raw, "--location 与 --area-id 请选择一个。", help_topic="library"
-        )
-    for key in ("time", "preferred_time", "end_time", "preferred_end_time"):
-        if key in options:
-            if key in {"end_time", "preferred_end_time"} and options[key] == "到最晚":
-                if options.get("end_policy") not in (None, "server_full_slot"):
-                    return _error_spec(
-                        raw,
-                        "到最晚需要 --end-policy server_full_slot。",
-                        help_topic="library",
-                    )
-                options.pop(key)
-                options["end_policy"] = "server_full_slot"
-                continue
-            from campus_core.seat_reservation import SeatReservationMixin
-
-            try:
-                options[key] = SeatReservationMixin._reservation_time(options[key])
-            except RuntimeError as exc:
-                return _error_spec(raw, str(exc), help_topic="library")
-    date_text = _string_option(options, "date") or _string_option(
-        options, "target_date"
-    )
-    if date_text:
-        from datetime import date
-
-        try:
-            if date.fromisoformat(date_text).isoformat() != date_text:
-                raise ValueError
-        except ValueError:
-            return _error_spec(raw, "日期必须为 YYYY-MM-DD。", help_topic="library")
-    end_time = _string_option(options, "end_time") or _string_option(
-        options, "preferred_end_time"
-    )
-    policy = _string_option(options, "end_policy") or (
-        "explicit_end" if end_time else ""
-    )
-    if policy and policy not in {"ask", "explicit_end", "server_full_slot"}:
-        return _error_spec(
-            raw,
-            "end-policy 仅支持 ask、explicit_end、server_full_slot。",
-            help_topic="library",
-        )
-    if policy == "server_full_slot" and end_time:
-        return _error_spec(
-            raw,
-            "完整时段与 --end-time 冲突，请选择一种结束策略。",
-            help_topic="library",
-        )
 
     if sub in {"locations", "areas"}:
         return CliCommandSpec(
@@ -1099,23 +1180,25 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             action="library locations",
             should_preload_runtime_context=True,
         )
-    if sub in {"seats", "seat", "available", "free", "plan"}:
+    if sub in {"seats", "seat", "available", "free"}:
+        target_date = _string_option(options, "date") or _string_option(options, "target_date")
+        preferred_time = _string_option(options, "time") or _string_option(options, "preferred_time")
         return CliCommandSpec(
             raw=raw,
             argv=argv,
             resolved_tool="library_query",
             params={
-                "view": "plan" if sub == "plan" else "seats",
-                "seat_no": _string_option(options, "seat_no"),
+                "view": "seats",
                 "location": _string_option(options, "location"),
                 "area_id": _string_option(options, "area_id"),
-                "target_date": _string_option(options, "date")
-                or _string_option(options, "target_date"),
-                "preferred_time": _string_option(options, "time")
-                or _string_option(options, "preferred_time")
-                or "08:00",
-                "preferred_end_time": _string_option(options, "end_time")
-                or _string_option(options, "preferred_end_time"),
+                "target_date": target_date,
+                "preferred_time": preferred_time or "08:00",
+                "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+                "defaulted_fields": [
+                    field
+                    for field, defaulted in (("date", not target_date), ("start_time", not preferred_time))
+                    if defaulted
+                ],
             },
             action=f"library {sub}",
             should_preload_runtime_context=True,
@@ -1156,21 +1239,25 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         max_attempts, error = _int_option(options, "max_attempts", 1)
         if error:
             return _error_spec(raw, error, help_topic="library")
+        preferred_end_time = _string_option(options, "end_time") or _string_option(
+            options, "preferred_end_time"
+        )
+        end_policy = _string_option(options, "end_policy")
+        if preferred_end_time and not end_policy:
+            end_policy = "explicit_end"
         return CliCommandSpec(
             raw=raw,
             argv=argv,
             resolved_tool="library_reserve",
             params={
-                "location": _string_option(options, "location")
-                or _string_option(options, "area_id"),
+                "location": _string_option(options, "location"),
                 "seat_no": _string_option(options, "seat_no"),
                 "target_date": _string_option(options, "date")
                 or _string_option(options, "target_date"),
                 "preferred_time": _string_option(options, "time")
                 or _string_option(options, "preferred_time"),
-                "preferred_end_time": _string_option(options, "end_time")
-                or _string_option(options, "preferred_end_time"),
-                "end_policy": policy,
+                "preferred_end_time": preferred_end_time,
+                "end_policy": end_policy,
                 "retry_until": _string_option(options, "retry_until"),
                 "retry_interval_seconds": retry_interval,
                 "max_attempts": max_attempts,
@@ -1569,8 +1656,7 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     options, _, _ = _parse_options(argv[2:])
 
     if sub in ("查询", "query", "free"):
-        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": options.get("view", "free"),
+        params = {"view": options.get("view", "free"),
                 "term_code": options.get("term_code", options.get("学期", "")),
                 "week": _int_opt(options, "week", "周", 0),
                 "day_of_week": _int_opt(options, "day_of_week", "星期", 0),
@@ -1588,7 +1674,37 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 "force_refresh": _bool_opt(options, "force_refresh", "强制刷新"),
                 "ttl_seconds": _int_opt(options, "ttl_seconds", default=300),
                 "max_stale_seconds": _int_opt(options, "max_stale_seconds", default=86400),
-            }, action="查询空教室", should_preload_runtime_context=True)
+            }
+        view = str(params["view"] or "free").strip().lower()
+        required: list[tuple[str, str]] = []
+        if view in {"free", "day_matrix", "occupancy"}:
+            required.extend(
+                [
+                    ("term_code", "--term-code <学期>"),
+                    ("week", "--week <教学周>"),
+                    ("day_of_week", "--day-of-week <星期1-7>"),
+                ]
+            )
+        if view in {"free", "occupancy"}:
+            required.append(("period", "--period <大节1-5>"))
+        if view == "occupancy":
+            required.append(("room_id", "--room-id <教室ID>"))
+        missing = [label for key, label in required if not params.get(key)]
+        if missing:
+            return _error_spec(
+                raw,
+                "空教室查询缺少参数：" + "、".join(missing) + "。",
+                help_topic="empty_classroom",
+                missing_params=tuple(missing),
+            )
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            resolved_tool="empty_classroom_query",
+            params=params,
+            action="查询空教室",
+            should_preload_runtime_context=True,
+        )
 
     if sub in ("同步", "sync"):
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_sync",
@@ -1903,12 +2019,10 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     return _error_spec(raw, f"未知命令 `yuketang exam {argv[2]}`。", help_topic="yuketang exam")
 
 
-def _parse_yuketang_listop(
-    raw: str, argv: tuple[str, ...], scope: str, help_topic: str
-) -> CliCommandSpec:
+def _parse_yuketang_listop(raw: str, argv: tuple[str, ...], scope: str, help_topic: str) -> CliCommandSpec:
     base = 3 if scope in {"lesson_whitelist", "lesson_blacklist", "exam_whitelist"} else 2
     if len(argv) <= base:
-        return _error_spec(raw, "缺少 add/remove/clear 子操作。", help_topic=help_topic)
+        return _error_spec(raw, f"缺少 add/remove/clear 子操作。", help_topic=help_topic)
 
     op = argv[base].lower()
     if op not in {"add", "remove", "clear", "新增", "移除", "清空"}:
@@ -1918,7 +2032,7 @@ def _parse_yuketang_listop(
     if op == "clear" and items:
         return _error_spec(raw, "`clear` 不接受额外名称参数。", help_topic=help_topic)
     if op in {"add", "remove"} and not items:
-        return _error_spec(raw, "缺少名称参数。", help_topic=help_topic)
+        return _error_spec(raw, f"缺少名称参数。", help_topic=help_topic)
 
     return CliCommandSpec(
         raw=raw, argv=argv, resolved_tool="yuketang_list_update",
@@ -1945,7 +2059,13 @@ def _bool_opt(options: dict, *keys: str) -> bool:
     return False
 
 
-def _error_spec(raw: str, message: str, *, help_topic: str) -> CliCommandSpec:
+def _error_spec(
+    raw: str,
+    message: str,
+    *,
+    help_topic: str,
+    missing_params: tuple[str, ...] = (),
+) -> CliCommandSpec:
     return CliCommandSpec(
         raw=raw,
         argv=(),
@@ -1955,6 +2075,7 @@ def _error_spec(raw: str, message: str, *, help_topic: str) -> CliCommandSpec:
         should_preload_runtime_context=False,
         help_topic=help_topic,
         error=message,
+        missing_params=missing_params,
     )
 
 

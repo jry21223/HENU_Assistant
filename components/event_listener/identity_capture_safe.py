@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import re
+import time
 from typing import Any
 
 from langbot_plugin.api.entities import context, events
@@ -27,16 +30,34 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         "yuketang login",        # 登录动作，仅私聊直处理
         "yuketang 登录",
     )
-    # yuketang 令牌命令只在含 --x-access-token 时视为敏感，其余 exam set 走正常模型链路。
-    _YUKETANG_TOKEN_PREFIX = "yuketang exam set"
-    _YUKETANG_TOKEN_FLAG = "--x-access-token"
-    _SENSITIVE_TOOLS = {
-        "setup_account",
-        "set_calibration_source",
-        "yuketang_set_token",
-        "yuketang_account_set",
-        "yuketang_login",
-    }
+    _LOGIN_INTENT_PATTERN = re.compile(
+        r"^(?:(?:帮我|我要|请|想要|需要)\s*)?"
+        r"(?:登[录陆]|登录账号|绑定账号|绑定学号)[吧吗呀啊。！!？?]*$"
+    )
+    _STUDENT_ID_FIELD_PATTERN = re.compile(
+        r"(?is)(?:学号|student[\s_-]*id|账号)\s*[:：=]?\s*\d{8,14}"
+    )
+    _PASSWORD_FIELD_PATTERN = re.compile(
+        r"(?is)(?:密码|password|passwd)\s*[:：=]?\s*\S{6,}"
+    )
+    _BARE_CREDENTIAL_PATTERN = re.compile(
+        r"^\s*\d{8,14}\s+\S{6,}\s*$"
+    )
+    _PASSWORD_OPTION_PATTERN = re.compile(
+        r"(?i)(--password(?:\s+|=))(?:'[^']*'|\"[^\"]*\"|\S+)"
+    )
+    _STUDENT_OPTION_PATTERN = re.compile(
+        r"(?i)(--student-id(?:\s+|=))\d{8,14}"
+    )
+    _PASSWORD_VALUE_PATTERN = re.compile(
+        r"(?is)((?:密码|password|passwd)\s*[:：=]?\s*)"
+        r"(?:'[^']*'|\"[^\"]*\"|\S{6,})"
+    )
+    _STUDENT_VALUE_PATTERN = re.compile(
+        r"(?is)((?:学号|student[\s_-]*id|账号)\s*[:：=]?\s*)\d{8,14}"
+    )
+    _CREDENTIAL_INTAKE_TTL_SECONDS = 300.0
+    _credential_intake_deadlines: dict[str, float] = {}
 
     async def initialize(self):
         await super().initialize()
@@ -67,6 +88,12 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         @self.handler(events.GroupNormalMessageReceived)
         async def on_group_sensitive_command(ctx: context.EventContext):
             await self._maybe_handle_sensitive_command(ctx, is_group=True)
+
+        @self.handler(events.NormalMessageResponded)
+        async def redact_sensitive_model_output(ctx: context.EventContext):
+            ctx.event.response_text = self._redact_sensitive_output(
+                str(getattr(ctx.event, "response_text", "") or "")
+            )
 
     async def _alter_user_message(self, ctx: context.EventContext) -> None:
         # Do not persist wall-clock time, account state, QQ IDs, or credentials in
@@ -190,11 +217,23 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
                 f"campus_now={now_iso or now_text}",
                 f"campus_weekday={weekday or '未知'}",
                 f"account_bound={'true' if account.get('is_bound') else 'false'}",
+                f"account_login_check={self._login_status_value(account, 'login_verification')}",
+                f"last_account_attempt={self._login_status_value(account, 'last_login_attempt')}",
+                "The login check is historical evidence, not a guarantee of current session validity. "
+                "A failed candidate binding does not replace an existing binding. "
+                "Unknown means no verification record, not necessarily unbound. "
+                "Use the current tool result for current validity; never ask for a password when the requested tool succeeds.",
                 "Interpret 今天/明天/现在/当前/是否过期 only from this block.",
                 "Never reuse an older HENU runtime block from conversation history.",
                 "Use henu_cli for campus data; external writes require a later user confirmation token.",
             ]
         )
+
+    @staticmethod
+    def _login_status_value(account: dict, field: str) -> str:
+        value = account.get(field)
+        status = value.get('status') if isinstance(value, dict) else None
+        return status if status in {'verified', 'failed', 'stale', 'unverified'} else 'unknown'
 
     async def _maybe_handle_sensitive_command(
         self,
@@ -211,26 +250,26 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
             return
         text = str(getattr(ctx.event, "text_message", "") or "").strip()
         compact = " ".join(text.lower().split())
-        spec = inspect_cli_command(text)
-        parser_sensitive = spec.resolved_tool in self._SENSITIVE_TOOLS
-        yuketang_credential_intent = (
-            compact.startswith(("yuketang ", "雨课堂 "))
-            and any(
-                marker in compact
-                for marker in (
-                    "--password",
-                    "--x-access-token",
-                    "--x_access_token",
-                    " login",
-                    " 登录",
+        is_sensitive_command = compact.startswith(self._SENSITIVE_PREFIXES)
+        looks_like_credentials = self._looks_like_free_form_credentials(text)
+        is_login_intent = bool(self._LOGIN_INTENT_PATTERN.search(text))
+        intake_key = self._credential_intake_key(ctx)
+        pending_intake = False
+        if not is_group and intake_key:
+            pending_intake = await self._credential_intake_pending(intake_key)
+            if compact in {"取消", "算了", "cancel"} and pending_intake:
+                await self._clear_credential_intake(intake_key)
+                self._reply_and_stop(ctx, "已取消账号凭据录入。")
+                return
+            if pending_intake and not is_sensitive_command:
+                self._reply_and_stop(
+                    ctx,
+                    "登录意图后的下一条消息可能包含凭据，本条消息未发送给模型，也未执行。"
+                    "请使用：account set --student-id <学号> --password <密码>；"
+                    "如需退出请发送“取消”。",
                 )
-            )
-        )
-        if (
-            not parser_sensitive
-            and not compact.startswith(self._SENSITIVE_PREFIXES)
-            and not yuketang_credential_intent
-        ):
+                return
+        if not (is_sensitive_command or looks_like_credentials or is_login_intent):
             return
 
         if is_group:
@@ -240,7 +279,28 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
             )
             return
 
-        if spec.error or spec.resolved_tool not in self._SENSITIVE_TOOLS:
+        if looks_like_credentials:
+            self._reply_and_stop(
+                ctx,
+                "检测到可能包含账号密码的消息，本条消息未发送给模型，也未执行。"
+                "请在当前私聊中使用：account set --student-id <学号> --password <密码>",
+            )
+            return
+
+        if is_login_intent and not is_sensitive_command:
+            if intake_key:
+                await self._arm_credential_intake(intake_key)
+            self._reply_and_stop(
+                ctx,
+                "登录凭据由插件在模型前直接处理。请在当前私聊中发送："
+                "account set --student-id <学号> --password <密码>",
+            )
+            return
+
+        spec = inspect_cli_command(text)
+        if intake_key:
+            await self._clear_credential_intake(intake_key)
+        if spec.error or spec.resolved_tool not in {"setup_account", "set_calibration_source"}:
             self._reply_and_stop(ctx, spec.error or "敏感命令格式无效。")
             return
 
@@ -288,6 +348,119 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         else:
             message = "操作失败：服务返回了异常结果。"
         self._reply_and_stop(ctx, message)
+
+    @classmethod
+    def _looks_like_free_form_credentials(cls, text: str) -> bool:
+        value = str(text or "").strip()
+        if not value:
+            return False
+        return bool(
+            (
+                cls._STUDENT_ID_FIELD_PATTERN.search(value)
+                and cls._PASSWORD_FIELD_PATTERN.search(value)
+            )
+            or cls._BARE_CREDENTIAL_PATTERN.fullmatch(value)
+        )
+
+    async def _credential_intake_pending(self, key: str) -> bool:
+        deadline = float(type(self)._credential_intake_deadlines.get(key, 0.0) or 0.0)
+        if deadline > time.time():
+            return True
+
+        storage_key = self._credential_intake_storage_key(key)
+        plugin = getattr(self, "plugin", None)
+        get_keys = getattr(plugin, "get_plugin_storage_keys", None)
+        get_value = getattr(plugin, "get_plugin_storage", None)
+        if not callable(get_keys) or not callable(get_value):
+            type(self)._credential_intake_deadlines.pop(key, None)
+            return False
+        try:
+            keys = await get_keys()
+        except Exception:
+            # A key-list outage cannot create a pending intake for a user who
+            # has no process-local marker. Exact commands and credential-shaped
+            # input remain independently intercepted.
+            return False
+        if storage_key not in set(keys or []):
+            type(self)._credential_intake_deadlines.pop(key, None)
+            return False
+        try:
+            raw = await get_value(storage_key)
+            if isinstance(raw, (bytes, bytearray)):
+                raw = bytes(raw).decode("ascii")
+            deadline = float(str(raw or "0"))
+        except Exception:
+            # The marker exists, so a value-read failure must remain fail closed.
+            return True
+        if deadline <= time.time():
+            type(self)._credential_intake_deadlines.pop(key, None)
+            return False
+        type(self)._credential_intake_deadlines[key] = deadline
+        return True
+
+    async def _arm_credential_intake(self, key: str) -> None:
+        deadline = time.time() + self._CREDENTIAL_INTAKE_TTL_SECONDS
+        type(self)._credential_intake_deadlines[key] = deadline
+        plugin = getattr(self, "plugin", None)
+        setter = getattr(plugin, "set_plugin_storage", None)
+        if callable(setter):
+            try:
+                await setter(
+                    self._credential_intake_storage_key(key),
+                    repr(deadline).encode("ascii"),
+                )
+            except Exception:
+                # The in-process guard remains active; the exact account command
+                # is independently intercepted even if persistence is unavailable.
+                pass
+
+    async def _clear_credential_intake(self, key: str) -> None:
+        type(self)._credential_intake_deadlines.pop(key, None)
+        plugin = getattr(self, "plugin", None)
+        setter = getattr(plugin, "set_plugin_storage", None)
+        if callable(setter):
+            try:
+                await setter(self._credential_intake_storage_key(key), b"0")
+            except Exception:
+                pass
+
+    @staticmethod
+    def _credential_intake_storage_key(key: str) -> str:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+        return f"henu:credential-intake:v1:{digest}"
+
+    @classmethod
+    def _credential_intake_key(cls, ctx: context.EventContext) -> str:
+        event = ctx.event
+        launcher_type = cls._normalize_launcher_type(
+            getattr(event, "launcher_type", "") or "person"
+        )
+        launcher_id = str(getattr(event, "launcher_id", "") or "").strip()
+        sender_id = str(getattr(event, "sender_id", "") or launcher_id).strip()
+        if launcher_type != "person" or not launcher_id or not sender_id:
+            return ""
+        return f"person:{launcher_id}:{sender_id}"
+
+    @classmethod
+    def _redact_sensitive_output(cls, text: str) -> str:
+        """Defense in depth: never echo credentials produced by a model."""
+        value = str(text or "")
+        value = cls._PASSWORD_OPTION_PATTERN.sub(r"\1<已拦截>", value)
+        value = cls._PASSWORD_VALUE_PATTERN.sub(r"\1<已拦截>", value)
+        if re.fullmatch(
+            r"\s*\d{8,14}\s+(?:'[^']*'|\"[^\"]*\"|\S{6,})\s*",
+            value,
+        ):
+            return "<已拦截凭据>"
+        if re.search(r"(?i)账号|登录|学号|密码|account|student|password|passwd", value):
+            value = re.sub(
+                r"(?<!\d)\d{8,14}\s+(?:'[^']*'|\"[^\"]*\"|\S{6,})(?!\S)",
+                "<已拦截凭据>",
+                value,
+            )
+        value = cls._STUDENT_OPTION_PATTERN.sub(r"\1<已拦截>", value)
+        value = cls._STUDENT_VALUE_PATTERN.sub(r"\1<已拦截>", value)
+        return value
 
     @staticmethod
     def _reply_and_stop(ctx: context.EventContext, text: str) -> None:

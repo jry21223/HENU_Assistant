@@ -1,5 +1,4 @@
 """Resolve a real user's plain confirmation; tokens remain server-side."""
-
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +45,6 @@ class ConfirmationShortcut:
         storage_key = re.sub(r'[^0-9A-Za-z._-]+', '_', sender).strip('._-')
         plugin = self.listener.plugin
         choices = []
-        receipt = None
         records = [('operation', f'user:{storage_key}:pending_operation', storage_key)]
         if not is_group:
             records.append(('binding', f'user:{sender}:yuketang_pending_credentials', sender))
@@ -67,13 +65,6 @@ class ConfirmationShortcut:
                 pending = json.loads(decrypt_value(raw) if kind == 'binding' else raw)
                 if not isinstance(pending, dict) or pending.get('conversation') != conversation:
                     continue
-                if (
-                    kind == "operation"
-                    and pending.get("schema") == "henu.confirmation-receipt.v1"
-                    and str(pending.get("command") or "").startswith("library ")
-                ):
-                    receipt = pending
-                    continue
                 check = validate_pending_operation(pending, token=str(pending.get('token') or ''),
                     storage_key=identity, canonical_command=str(pending.get('command') or ''), query_id=ctx.query_id)
                 if check.ok:
@@ -85,14 +76,6 @@ class ConfirmationShortcut:
             choices = [item for item in choices if item[0] == 'operation']
         elif text in {'确认绑定', '确认雨课堂绑定'}:
             choices = [item for item in choices if item[0] == 'binding']
-        if not choices and receipt is not None and text in {"确认", "确认操作"}:
-            from components.cli_tools.henu_cli_safe import HenuCliSafe
-
-            tool = HenuCliSafe()
-            tool.plugin = plugin
-            result = await tool.operation_status(storage_key, conversation)
-            await self.reply(ctx, result["reply_text"])
-            return True
         if not choices:
             await self.reply(ctx, '当前聊天没有有效的待确认操作，可能已过期或已执行，请重新发起。旧版令牌确认仍可使用。')
             return True

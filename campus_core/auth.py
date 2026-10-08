@@ -18,6 +18,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
 from .time_utils import _now_dt, TimeUtilsMixin
+from .cas_page import classify_cas_login_page, extract_cas_login_fields
 
 
 class AuthMixin:
@@ -268,25 +269,29 @@ class AuthMixin:
                 return False
 
             try:
-                execution_match = re.search(r'name="execution" value="(.*?)"', login_page.text)
-                salt_match = re.search(r'id="pwdEncryptSalt" value="(.*?)"', login_page.text)
-                if not execution_match or not salt_match:
+                cas_fields = extract_cas_login_fields(login_page.text)
+                if not cas_fields["execution"] or not cas_fields["pwd_encrypt_salt"]:
                     page_error = self._extract_cas_login_error(login_page.text)
                     if page_error:
                         self._set_last_error(f"CAS 登录页异常: {page_error}")
                     else:
-                        self._set_last_error("CAS 登录页缺少 execution/pwdEncryptSalt 字段，可能页面已改版或被拦截")
+                        error_code, message = classify_cas_login_page(
+                            login_page.text,
+                            status_code=getattr(login_page, "status_code", None),
+                            final_url=str(getattr(login_page, "url", "") or ""),
+                        )
+                        self._set_last_error(f"[{error_code}] {message}")
                     return False
 
                 form_data = {
                     "username": self.username,
-                    "password": self._encrypt_password(self.password, salt_match.group(1)),
+                    "password": self._encrypt_password(self.password, cas_fields["pwd_encrypt_salt"]),
                     "captcha": "",
                     "_eventId": "submit",
                     "cllt": "userNameLogin",
                     "dllt": "generalLogin",
                     "lt": "",
-                    "execution": execution_match.group(1),
+                    "execution": cas_fields["execution"],
                 }
 
                 login_resp = self.session.post(

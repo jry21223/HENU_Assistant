@@ -1,8 +1,9 @@
 """Versioned encryption for locally materialized account credentials.
 
-Set HENU_MASTER_KEY in production so encrypted profiles remain decryptable across
-container or host migrations. Without it, a stable host/user fingerprint is
-used for backward-compatible local deployments; process IDs are never used.
+Set HENU_MASTER_KEY in production, or mount the same value at
+/run/secrets/henu_master_key, so encrypted profiles remain decryptable across
+container or host migrations. Without either, a stable host/user fingerprint
+is used for backward-compatible local deployments; process IDs are never used.
 """
 from __future__ import annotations
 
@@ -12,14 +13,16 @@ import hashlib
 import json
 import os
 import platform
-import tempfile
 from pathlib import Path
 from typing import Any
+
+from campus_core import atomic_io
 
 _fernet = None
 _V2_PREFIX = "enc:v2:"
 _LEGACY_PREFIX = "enc:"
 _MASTER_KEY_ENV = "HENU_MASTER_KEY"
+_MASTER_KEY_FILE = Path("/run/secrets/henu_master_key")
 
 
 class CredentialDecryptionError(RuntimeError):
@@ -66,6 +69,18 @@ def _master_material() -> str:
     configured = os.environ.get(_MASTER_KEY_ENV, "")
     if configured:
         return f"env:{configured}"
+
+    try:
+        configured = _MASTER_KEY_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        configured = ""
+    except OSError as exc:
+        raise RuntimeError("无法读取 HENU_MASTER_KEY 密钥文件。") from exc
+    if configured:
+        return f"env:{configured}"
+    if _MASTER_KEY_FILE.exists():
+        raise RuntimeError("HENU_MASTER_KEY 密钥文件为空。")
+
     return f"host:{_stable_machine_fingerprint()}"
 
 
@@ -142,22 +157,6 @@ def _read_profile(profile_path: Path) -> dict[str, Any]:
     return data
 
 
-def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    finally:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-
-
 def migrate_profile(profile_path: Path) -> dict[str, Any]:
     data = _read_profile(profile_path)
     if not data:
@@ -166,7 +165,7 @@ def migrate_profile(profile_path: Path) -> dict[str, Any]:
     if password and not is_encrypted(str(password)):
         data["password"] = encrypt_value(str(password))
         data["credential_key_version"] = "v2"
-        _atomic_write_json(profile_path, data)
+        atomic_io.atomic_write_json(profile_path, data)
     return data
 
 
@@ -187,4 +186,4 @@ def save_encrypted_profile(profile_path: Path, data: dict[str, Any]) -> None:
     if password and not is_encrypted(str(password)):
         save_data["password"] = encrypt_value(str(password))
     save_data["credential_key_version"] = "v2"
-    _atomic_write_json(profile_path, save_data)
+    atomic_io.atomic_write_json(profile_path, save_data)

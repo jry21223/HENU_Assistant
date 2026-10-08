@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import campus_core.atomic_io as atomic_io
+
 from henu_mcp.core import course_schedule
 
 
@@ -35,6 +37,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "interval_seconds": MIN_INTERVAL_SECONDS,
 }
+
+
+class MonitorStateError(RuntimeError):
+    """Raised when an existing course-monitor state file cannot be trusted."""
+
+
+class MonitorConfigError(RuntimeError):
+    """Raised when an existing course-monitor config file cannot be trusted."""
 
 
 def _now_iso() -> str:
@@ -60,18 +70,8 @@ def _parse_int(value: Any) -> int | None:
     return int(match.group(0)) if match else None
 
 
-def _load_json(path: Path, default: Any) -> Any:
-    if not path.exists():
-        return default
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return default
-
-
 def _save_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_io.atomic_write_json(path, value)
 
 
 def get_monitor_config_file() -> Path:
@@ -109,7 +109,22 @@ def normalize_monitor_config(config: dict[str, Any] | None = None) -> dict[str, 
 
 
 def load_monitor_config() -> dict[str, Any]:
-    return normalize_monitor_config(_load_json(get_monitor_config_file(), {}))
+    config_path = get_monitor_config_file()
+    try:
+        raw_config = config_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return normalize_monitor_config({})
+    except UnicodeError as exc:
+        raise MonitorConfigError(f"选课监控配置 JSON 损坏: {config_path}") from exc
+    except OSError as exc:
+        raise MonitorConfigError(f"无法读取选课监控配置: {config_path}") from exc
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise MonitorConfigError(f"选课监控配置 JSON 损坏: {config_path}") from exc
+    if not isinstance(config, dict):
+        raise MonitorConfigError(f"选课监控配置必须是 JSON object: {config_path}")
+    return normalize_monitor_config(config)
 
 
 def save_monitor_config(config: dict[str, Any], merge: bool = True) -> dict[str, Any]:
@@ -279,8 +294,22 @@ def evaluate_matches(rows: list[dict[str, Any]], targets: list[dict[str, Any]]) 
 
 
 def load_monitor_state() -> dict[str, Any]:
-    state = _load_json(get_monitor_state_file(), {})
-    return state if isinstance(state, dict) else {}
+    state_path = get_monitor_state_file()
+    try:
+        raw_state = state_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except UnicodeError as exc:
+        raise MonitorStateError(f"选课监控状态 JSON 损坏: {state_path}") from exc
+    except OSError as exc:
+        raise MonitorStateError(f"无法读取选课监控状态: {state_path}") from exc
+    try:
+        state = json.loads(raw_state)
+    except json.JSONDecodeError as exc:
+        raise MonitorStateError(f"选课监控状态 JSON 损坏: {state_path}") from exc
+    if not isinstance(state, dict):
+        raise MonitorStateError(f"选课监控状态必须是 JSON object: {state_path}")
+    return state
 
 
 def save_monitor_state(state: dict[str, Any]) -> None:
@@ -368,6 +397,21 @@ def send_feishu_text(webhook: str, text: str, secret: str = "") -> dict[str, Any
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         parsed = json.loads(body) if body else {}
+        if not isinstance(parsed, dict):
+            return {
+                "success": False,
+                "status_code": resp.status,
+                "response": parsed,
+                "msg": "飞书通知失败: 响应不是 JSON 对象",
+            }
+        business_code = parsed.get("code", parsed.get("StatusCode"))
+        if business_code is None or str(business_code) != "0":
+            return {
+                "success": False,
+                "status_code": resp.status,
+                "response": parsed,
+                "msg": f"飞书通知失败: 业务状态码 {business_code!r}",
+            }
         return {"success": True, "status_code": resp.status, "response": parsed}
     except Exception as exc:
         return {"success": False, "msg": f"飞书通知失败: {exc}"}

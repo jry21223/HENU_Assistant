@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import re
 import json
@@ -13,13 +12,19 @@ from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
 
 from henu_plugin.storage_adapter import PluginStorageAdapter
 from henu_plugin.yuketang_sync import sync_after_commit
-from henu_plugin.service import get_current_user_paths, set_current_user_paths, SessionIdentity
+from henu_plugin.service import (
+    _await_cancellation_safe,
+    _run_sync_cancellation_safe,
+    get_current_user_paths,
+    set_current_user_paths,
+)
 
 
 def _resolve_storage_key(session: provider_session.Session, identity_hint: dict[str, Any]) -> str:
-    """Resolve storage key from session and identity hint."""
-    sender_id = str(identity_hint.get("sender_id") or session.sender_id or "").strip()
-    launcher_id = str(identity_hint.get("launcher_id") or session.launcher_id or "").strip()
+    """Resolve storage only from the runtime-authenticated Session."""
+    del identity_hint
+    sender_id = str(session.sender_id or "").strip()
+    launcher_id = str(session.launcher_id or "").strip()
     qq = sender_id or launcher_id or "unknown"
 
     storage_key = re.sub(r"[^0-9A-Za-z._-]+", "_", qq).strip("._-")
@@ -53,29 +58,45 @@ class BaseHenuTool(Tool):
 
         # Resolve storage key and load user data from LangBot Storage
         storage_key = _resolve_storage_key(session, identity_hint)
+        is_pure_request = getattr(service, "is_pure_request", None)
+        if callable(is_pure_request) and is_pure_request(self.tool_name, params):
+            result = await service.run_tool_async(
+                self.tool_name,
+                params,
+                session,
+                query_id,
+                identity_hint,
+            )
+            self._prepare_delivery_result(result)
+            await self._refresh_after_sensitive_success(query_id, params, result)
+            self._strip_internal_fields(result)
+            self._normalize_for_qq_delivery(result)
+            return result
+
         storage_adapter = PluginStorageAdapter(self.plugin, storage_key)
 
         # Load user data from Storage to temp files
         user_paths = await storage_adapter.load_all()
 
-        # Set thread-local paths for service to use
-        set_current_user_paths(user_paths)
-
         runtime_context = None
-        if self.should_preload_runtime_context(params):
-            await self._prime_runtime_context_query_var(query_id)
-            runtime_context = await self._ensure_runtime_context(
-                query_id,
-                session,
-                identity_hint,
-                service,
-            )
-
         result: dict[str, Any] | None = None
         storage_error: Exception | None = None
+        execution_started = False
         try:
-            result = await asyncio.to_thread(
-                service.run_tool,
+            # The transaction guard starts immediately after load_all acquires
+            # the per-user lock, so preflight failures cannot leak staging.
+            set_current_user_paths(user_paths)
+            if self.should_preload_runtime_context(params):
+                await self._prime_runtime_context_query_var(query_id)
+                runtime_context = await self._ensure_runtime_context(
+                    query_id,
+                    session,
+                    identity_hint,
+                    service,
+                )
+
+            execution_started = True
+            result = await service.run_tool_async(
                 self.tool_name,
                 params,
                 session,
@@ -83,13 +104,18 @@ class BaseHenuTool(Tool):
                 identity_hint,
             )
         finally:
-            # Save user data back to Storage after operation
             try:
-                await storage_adapter.save_all()
-            except Exception as exc:
-                storage_error = exc
-            # Clear thread-local paths
-            set_current_user_paths(None)
+                if execution_started:
+                    # Tool execution may make a late write before cancellation
+                    # is propagated, so preserve the completed transaction.
+                    try:
+                        await _await_cancellation_safe(storage_adapter.save_all())
+                    except Exception as exc:
+                        storage_error = exc
+                else:
+                    await _await_cancellation_safe(storage_adapter.abort())
+            finally:
+                set_current_user_paths(None)
 
         if storage_error is not None:
             failure: dict[str, Any] = {
@@ -208,8 +234,13 @@ class BaseHenuTool(Tool):
         *args: Any,
     ) -> Any:
         if storage_paths is None:
-            return await asyncio.to_thread(func, *args)
-        return await asyncio.to_thread(self._run_with_user_storage_sync, storage_paths, func, *args)
+            return await _run_sync_cancellation_safe(func, *args)
+        return await _run_sync_cancellation_safe(
+            self._run_with_user_storage_sync,
+            storage_paths,
+            func,
+            *args,
+        )
 
     @staticmethod
     def _run_with_user_storage_sync(
@@ -351,9 +382,7 @@ class BaseHenuTool(Tool):
             "status_counts", "location_options", "seat_options", "locations_total",
             "locations_returned", "locations_truncated", "seats_total", "seats_returned",
             "seats_truncated", "fallback_locations", "fallback_locations_truncated",
-            "reservation_rules", "operation_state", "confirmation_required",
-            "outcome_unknown", "submit_success", "external_committed",
-            "term_context", "missing_params",
+            "schedule_summary",
         )
         essential = {
             key: result[key]
@@ -419,6 +448,38 @@ class BaseHenuTool(Tool):
             result["fallback_locations_truncated"] = True
             result["fallback_locations"] = fallback_locations[:12]
 
+        schedule_summary = result.get("schedule_summary")
+        if isinstance(schedule_summary, list):
+            compact_days: list[dict[str, Any]] = []
+            for raw_day in schedule_summary[:7]:
+                if not isinstance(raw_day, dict):
+                    continue
+                raw_courses = raw_day.get("courses")
+                compact_courses: list[dict[str, Any]] = []
+                if isinstance(raw_courses, list):
+                    for raw_course in raw_courses[:2]:
+                        if not isinstance(raw_course, dict):
+                            continue
+                        compact_courses.append(
+                            {
+                                "course": self._trim_text(str(raw_course.get("course") or ""), 36),
+                                "time": self._trim_text(str(raw_course.get("time") or ""), 24),
+                                "classroom": self._trim_text(
+                                    str(raw_course.get("classroom") or ""), 32
+                                ),
+                            }
+                        )
+                compact_days.append(
+                    {
+                        "day": self._trim_text(str(raw_day.get("day") or ""), 16),
+                        "total": int(raw_day.get("total") or len(compact_courses)),
+                        "courses": compact_courses,
+                        "truncated": bool(raw_day.get("truncated"))
+                        or len(raw_courses or []) > len(compact_courses),
+                    }
+                )
+            result["schedule_summary"] = compact_days
+
         for key, limit in (("reply_text", 420), ("llm_hint", 420), ("msg", 600)):
             value = result.get(key)
             if isinstance(value, str) and len(value) > limit:
@@ -444,6 +505,120 @@ class BaseHenuTool(Tool):
             value = result.get("reply_text")
             if isinstance(value, str):
                 result["reply_text"] = self._trim_text(value, 70)
+
+        if len(self._make_payload_json(result)) > max_payload_chars:
+            self._replace_with_bounded_payload(result, max_payload_chars)
+
+    def _replace_with_bounded_payload(
+        self,
+        result: dict[str, Any],
+        max_payload_chars: int,
+    ) -> None:
+        """Deterministic final fallback; delivery must never exceed QQ's budget."""
+        bounded: dict[str, Any] = {
+            "success": bool(result.get("success")),
+            "msg": self._trim_text(str(result.get("msg") or ""), 240),
+            "payload_truncated": True,
+        }
+        for key, limit in (
+            ("error_code", 80),
+            ("warning", 160),
+            ("source", 48),
+            ("date", 24),
+            ("target_date", 24),
+            ("reply_text", 240),
+            ("llm_hint", 100),
+        ):
+            value = result.get(key)
+            if value not in (None, ""):
+                bounded[key] = self._trim_text(str(value), limit)
+
+        for key in (
+            "total",
+            "returned_count",
+            "total_count",
+            "available_count",
+            "locations_total",
+            "seats_total",
+        ):
+            value = result.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                bounded[key] = value
+
+        next_commands = result.get("next_commands")
+        if isinstance(next_commands, list) and next_commands:
+            bounded["next_commands"] = [self._trim_text(str(next_commands[0]), 120)]
+
+        schedule_summary = result.get("schedule_summary")
+        if isinstance(schedule_summary, list):
+            bounded_days: list[dict[str, Any]] = []
+            for raw_day in schedule_summary[:7]:
+                if not isinstance(raw_day, dict):
+                    continue
+                courses: list[dict[str, str]] = []
+                raw_courses = raw_day.get("courses")
+                if isinstance(raw_courses, list) and raw_courses:
+                    first = raw_courses[0]
+                    if isinstance(first, dict):
+                        courses.append(
+                            {
+                                "course": self._trim_text(str(first.get("course") or ""), 30),
+                                "time": self._trim_text(str(first.get("time") or ""), 18),
+                                "classroom": self._trim_text(
+                                    str(first.get("classroom") or ""), 24
+                                ),
+                            }
+                        )
+                bounded_days.append(
+                    {
+                        "day": self._trim_text(str(raw_day.get("day") or ""), 12),
+                        "total": int(raw_day.get("total") or len(courses)),
+                        "courses": courses,
+                        "truncated": True,
+                    }
+                )
+            bounded["schedule_summary"] = bounded_days
+
+        for field in ("location_options", "seat_options", "fallback_locations"):
+            options = result.get(field)
+            if not isinstance(options, list) or not options:
+                continue
+            samples: list[dict[str, str]] = []
+            for item in options[:6]:
+                if not isinstance(item, dict):
+                    continue
+                sample = {
+                    key: self._trim_text(str(item[key]), 36)
+                    for key in ("location", "name", "area_id", "seat_no", "status")
+                    if item.get(key) not in (None, "")
+                }
+                if sample:
+                    samples.append(sample)
+            if samples:
+                bounded["option_samples"] = samples
+                bounded["options_total"] = len(options)
+            break
+
+        result.clear()
+        result.update(bounded)
+        if len(self._make_payload_json(result)) <= max_payload_chars:
+            return
+
+        result.pop("option_samples", None)
+        if len(self._make_payload_json(result)) <= max_payload_chars:
+            return
+
+        result.clear()
+        result.update(
+            {
+                "success": bool(bounded.get("success")),
+                "msg": self._trim_text(str(bounded.get("msg") or ""), 200),
+                "error_code": self._trim_text(
+                    str(bounded.get("error_code") or "payload_too_large"), 80
+                ),
+                "payload_truncated": True,
+            }
+        )
 
     @staticmethod
     def _trim_text(value: str, limit: int) -> str:

@@ -193,30 +193,6 @@ class EmptyClassroomClient:
 
     # ── 学期 ────────────────────────────────────────────────
 
-    def resolve_term(self, term_code: str = "") -> dict[str, Any]:
-        """Prefer an explicit term; otherwise cross-check the school's current term."""
-        requested = str(term_code or "").strip()
-        if requested:
-            return {"success": True, "term_code": requested, "source": "explicit"}
-        try:
-            context = self._client.fetch_user_context()
-            year = str(context.get("current_xn", "")).strip()
-            part = str(context.get("current_xq", "")).strip()
-            if not context.get("authenticated") or not re.fullmatch(r"\d{4}", year) or not re.fullmatch(r"\d+", part):
-                raise ValueError("current term unavailable")
-            current = f"{year},{part}"
-            terms = self.fetch_terms()
-            matched = next((term for term in terms if term.term_code == current), None)
-            if matched is not None:
-                return {"success": True, "term_code": current, "term_name": matched.term_name, "source": "school_current"}
-        except Exception:
-            pass
-        return {
-            "success": False, "error_code": "current_term_unavailable",
-            "missing_params": ["term_code"], "source": "school_current",
-            "msg": "无法从学校当前学期与学期列表核实学期，请指定 term_code，或稍后重试。",
-        }
-
     def fetch_terms(self) -> list[Term]:
         """获取学期列表。"""
         items = self._droplist("Ms_KBBP_FBXQLLJXAP")

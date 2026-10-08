@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import shlex
+import time
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
@@ -16,6 +16,7 @@ from henu_plugin.confirmation import (
     split_confirm_token,
     validate_pending_operation,
 )
+from henu_plugin.service import _await_cancellation_safe
 
 
 class HenuCli(BaseHenuTool):
@@ -23,9 +24,10 @@ class HenuCli(BaseHenuTool):
     _confirmation_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
     @classmethod
-    def _confirmation_lock(cls, storage_key):
+    def _confirmation_lock(cls, storage_key: str) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
         return cls._confirmation_locks.setdefault(
-            (id(asyncio.get_running_loop()), storage_key), asyncio.Lock()
+            (loop_id, storage_key), asyncio.Lock()
         )
 
     def should_preload_runtime_context(self, params):
@@ -50,10 +52,6 @@ class HenuCli(BaseHenuTool):
             return await super().call(params, session, query_id)
 
         storage_key = _resolve_storage_key(session, identity_hint)
-        if raw_command.strip().lower() == "library operation-status":
-            return await self.operation_status(
-                storage_key, conversation_context(session)
-            )
         if self._is_confirmation_command(raw_command):
             return await self._execute_confirmation(
                 raw_command=raw_command,
@@ -64,13 +62,6 @@ class HenuCli(BaseHenuTool):
 
         clean_command, inline_token = split_confirm_token(raw_command)
         spec = inspect_cli_command(clean_command)
-        if spec.action == "library operation-status":
-            return await self.operation_status(storage_key, conversation_context(session))
-
-        if spec.error and clean_command.lower().startswith(("library reserve", "library book")):
-            result = {"success": False, "error_code": "invalid_parameters", "msg": spec.error, "reply_text": spec.error}
-            await self._supersede_library_pending(storage_key, conversation_context(session), query_id, result)
-            return result
 
         # Account passwords and calibration cookies are handled directly by the
         # event listener before the model is called. Fail closed if a provider
@@ -94,8 +85,6 @@ class HenuCli(BaseHenuTool):
         if spec.resolved_tool in WRITE_TOOL_NAMES and not stopping_yuketang:
             parameter_error = self._write_parameter_error(spec)
             if parameter_error:
-                if spec.resolved_tool == "library_reserve":
-                    await self._supersede_library_pending(storage_key, conversation_context(session), query_id, {"success": False, "msg": parameter_error})
                 return {
                     "success": False,
                     "error_code": "confirmation_parameters_incomplete",
@@ -110,87 +99,17 @@ class HenuCli(BaseHenuTool):
                     session=session,
                     query_id=query_id,
                 )
-            summary = self._operation_summary(spec)
-            library_plan = None
-            if spec.resolved_tool == "library_reserve":
-                preview = await self._library_preflight(spec, session, query_id)
-                if not preview.get("success"):
-                    await self._supersede_library_pending(storage_key, conversation_context(session), query_id, preview)
-                    return preview
-                summary = preview["reply_text"]
-                library_plan = preview["library_plan"]
             return await self._request_confirmation(
                 storage_key=storage_key,
                 canonical_command=clean_command,
                 action=spec.action,
-                parameter_summary=summary,
-                library_plan=library_plan,
+                parameter_summary=self._operation_summary(spec),
                 query_id=query_id,
                 conversation=conversation_context(session),
             )
 
         result = await super().call({"command": clean_command}, session, query_id)
         return self._mark_storage_commit_state(result)
-
-    async def _supersede_library_pending(self, storage_key, conversation, query_id, result):
-        async with self._confirmation_lock(storage_key):
-            old = await self._load_pending(storage_key)
-            if old.get("schema") == "henu.pending-operation.v1" and old.get("conversation") == conversation and str(old.get("command") or "").startswith("library "):
-                await self._store_receipt(storage_key, old, query_id, "blocked", result)
-
-    async def _library_preflight(self, spec, session, query_id):
-        p = spec.params
-        command = shlex.join(
-            [
-                "library",
-                "plan",
-                "--location",
-                p["location"],
-                "--seat-no",
-                p["seat_no"],
-                "--date",
-                p["target_date"],
-                "--time",
-                p["preferred_time"],
-            ]
-        )
-        if p.get("preferred_end_time"):
-            command += " --end-time " + shlex.quote(p["preferred_end_time"])
-        result = await super().call({"command": command}, session, query_id)
-        if not isinstance(result, dict) or not result.get("success"):
-            return result
-        rules = result.get("reservation_rules") or {}
-        window = rules.get("booking_window") or {}
-        if not rules.get("effective_start") or not rules.get("effective_end"):
-            return {
-                "success": False,
-                "error_code": "reservation_rules_missing",
-                "msg": "学校未返回明确的实际预约时段，未生成确认请求。",
-                "reply_text": "学校未返回明确的实际预约时段，未生成确认请求。",
-            }
-        if window.get("open_now") is False:
-            msg = f"当前不在学校开放预约时间 {window['start']}～{window['end']} 内，未提交；请在开放后重新发起。"
-            return {
-                "success": False,
-                "error_code": "booking_window_closed",
-                "msg": msg,
-                "reply_text": msg,
-                "reservation_rules": rules,
-            }
-        if not result.get("seats"):
-            msg = f"座位 {p['seat_no']} 当前不可预约，未生成确认请求。"
-            return {
-                "success": False,
-                "error_code": "seat_unavailable",
-                "msg": msg,
-                "reply_text": msg,
-            }
-        prefix = "学校仅支持完整固定时段；" if rules.get("fixed_segment") else ""
-        area = result.get("area") or {}
-        msg = f"{area.get('name') or p['location']}，座位 {p['seat_no']}，{p['target_date']}，实际 {rules['effective_start']}～{rules['effective_end']}。{prefix}你选择的 {p['preferred_time']} 用于选时段。"
-        signature = {"area_id": area.get("id"), "seat_id": result["seats"][0].get("id"), "date": result.get("target_date") or p["target_date"], "segment": rules.get("segment"), "start": rules["effective_start"], "end": rules["effective_end"], "fixed_segment": rules.get("fixed_segment")}
-        signature.update({key: p.get(key) for key in ("retry_until", "max_attempts", "retry_interval_seconds")})
-        return {"success": True, "reply_text": msg, "reservation_rules": rules, "library_plan": signature}
 
     @staticmethod
     def _write_parameter_error(spec: Any) -> str:
@@ -208,15 +127,6 @@ class HenuCli(BaseHenuTool):
         if missing:
             flags = "、".join("--" + key.replace("_", "-") for key in missing)
             return f"外部写操作必须显式提供完整参数，缺少：{flags}。不会使用账号默认值或隐式日期。"
-        if tool == "library_reserve":
-            if not params.get("end_policy"):
-                return (
-                    "请提供结束时间，或选择‘到最晚’（--end-policy server_full_slot）。"
-                )
-            if params["end_policy"] in {"ask", "explicit_end"} and not params.get(
-                "preferred_end_time"
-            ):
-                return "请提供明确结束时间 --end-time，或选择‘到最晚’。"
         if tool == "seminar_signin" and params.get("auto_scan"):
             return "LangBot 写操作确认不允许 seminar signin --auto-scan；请先查询签到任务并指定 --record-id。"
         return ""
@@ -254,7 +164,6 @@ class HenuCli(BaseHenuTool):
         parameter_summary: str,
         query_id: int,
         conversation: dict[str, str],
-        library_plan=None,
     ) -> dict[str, Any]:
         async with self._confirmation_lock(storage_key):
             return await self._request_confirmation_unlocked(
@@ -264,36 +173,23 @@ class HenuCli(BaseHenuTool):
                 parameter_summary=parameter_summary,
                 query_id=query_id,
                 conversation=conversation,
-                library_plan=library_plan,
             )
 
     async def _request_confirmation_unlocked(
         self,
         *,
-        storage_key,
-        canonical_command,
-        action,
-        parameter_summary,
-        query_id,
-        conversation,
-        library_plan=None,
-    ):
-        existing = await self._load_pending(storage_key)
-        same = (
-            existing.get("schema") == "henu.pending-operation.v1"
-            and (existing.get("library_plan") == library_plan if library_plan is not None else existing.get("command") == canonical_command)
-            and existing.get("conversation") == conversation
-            and float(existing.get("expires_at") or 0) > time.time()
-        )
+        storage_key: str,
+        canonical_command: str,
+        action: str,
+        parameter_summary: str,
+        query_id: int,
+        conversation: dict[str, str],
+    ) -> dict[str, Any]:
         pending = create_pending_operation(
             storage_key=storage_key,
             canonical_command=canonical_command,
             query_id=query_id,
         )
-        pending["library_plan"] = library_plan
-        pending["preview"] = parameter_summary
-        if same:
-            pending = existing
         key = pending_storage_key(storage_key)
         pending['conversation'] = conversation
         try:
@@ -308,7 +204,6 @@ class HenuCli(BaseHenuTool):
                 "msg": f"保存待确认操作失败: {exc}",
             }
 
-        remaining = max(0, int(pending["expires_at"] - time.time()))
         confirm_command = "确认"
         action_text = action or "外部写操作"
         summary_text = parameter_summary or "参数已规范化"
@@ -319,10 +214,10 @@ class HenuCli(BaseHenuTool):
             "msg": f"{action_text} 尚未执行，需要用户在下一条消息中明确确认。",
             "reply_text": (
                 f"即将执行：{action_text}；{summary_text}。本次尚未提交。"
-                f"请核对后在下一条消息直接回复“{confirm_command}”（剩余 {remaining} 秒有效）。"
+                f"请核对后在下一条消息直接回复“{confirm_command}”（5 分钟内有效）。"
             ),
             "confirmation_command": confirm_command,
-            "expires_in_seconds": remaining,
+            "expires_in_seconds": 300,
             "retry_safe": True,
             "llm_hint": "必须等待用户发送新的确认消息；禁止在当前轮次自动调用 confirm。",
             "cli": {"mode": "confirmation", "action": action_text},
@@ -342,29 +237,30 @@ class HenuCli(BaseHenuTool):
             return {"success": False, "msg": f"确认命令解析失败: {exc}"}
         if len(argv) != 2 or argv[0].lower() not in {"confirm", "确认"}:
             return {"success": False, "msg": "确认命令格式为 `confirm <token>`。"}
-        pending = await self._load_pending(storage_key)
-        canonical_command = str(pending.get("command") or "") if isinstance(pending, dict) else ""
         return await self._execute_pending(
             token=argv[1],
             storage_key=storage_key,
-            canonical_command=canonical_command,
+            canonical_command="",
             session=session,
             query_id=query_id,
-            pending=pending,
         )
 
     async def _execute_pending(
-        self, *, token, storage_key, canonical_command, session, query_id, pending=None
-    ):
+        self,
+        *,
+        token: str,
+        storage_key: str,
+        canonical_command: str,
+        session,
+        query_id: int,
+    ) -> dict[str, Any]:
         async with self._confirmation_lock(storage_key):
             pending = await self._load_pending(storage_key)
-            if pending.get("conversation") != conversation_context(session):
-                return {
-                    "success": False,
-                    "error_code": "confirmation_invalid",
-                    "msg": "确认会话与原操作不一致，未执行。",
-                }
-            command = canonical_command or str(pending.get("command") or "")
+            command = canonical_command or (
+                str(pending.get("command") or "")
+                if isinstance(pending, dict)
+                else ""
+            )
             check = validate_pending_operation(
                 pending,
                 token=token,
@@ -379,129 +275,95 @@ class HenuCli(BaseHenuTool):
                     "msg": check.message,
                     "retry_safe": True,
                 }
+
             spec = inspect_cli_command(command)
-            if spec.error or spec.resolved_tool not in WRITE_TOOL_NAMES:
+            if spec.resolved_tool not in WRITE_TOOL_NAMES:
                 return {
                     "success": False,
                     "error_code": "confirmation_scope_invalid",
-                    "msg": "待确认操作无效，未执行。",
+                    "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
                 }
+
             try:
-                await self._store_receipt(storage_key, pending, query_id, "executing")
-            except Exception:
+                await self._store_confirmation_receipt(
+                    storage_key=storage_key,
+                    pending=pending,
+                    query_id=query_id,
+                    status="executing",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 return {
                     "success": False,
                     "error_code": "confirmation_storage_failed",
-                    "msg": "保存执行状态失败，未提交。",
+                    "msg": f"占用确认令牌失败，外部操作未执行: {exc}",
+                    "retry_safe": True,
                 }
-            try:
-                result = None
-                if spec.resolved_tool == "library_reserve":
-                    fresh = await self._library_preflight(spec, session, query_id)
-                    if not fresh.get("success"):
-                        result = fresh
-                    elif not pending.get("library_plan") or fresh["library_plan"] != pending["library_plan"]:
-                        msg = "学校实际预约计划已变化，旧确认已失效，本次未提交；请重新预览并确认。"
-                        result = {"success": False, "error_code": "reservation_plan_changed", "msg": msg, "reply_text": msg}
-                if result is None:
-                    result = self._mark_storage_commit_state(await super().call({"command": command, "_library_expected_plan": pending.get("library_plan")}, session, query_id))
-                if not isinstance(result, dict) or not isinstance(result.get("success"), bool):
-                    result = {"success": False, "outcome_unknown": True, "msg": "操作结果未明确返回，请查询当前预约，不要重复提交。"}
-                if spec.resolved_tool == "library_reserve" and result.get("success") is True:
-                    result["reply_text"] = "✅ 预约成功。" + str(result.get("reply_text") or result.get("msg") or "")
-                committed = result.get("success") is True or result.get("external_committed") is True
-                nested = result.get("tool_result") if isinstance(result.get("tool_result"), dict) else {}
-                uncertain = (result.get("outcome_unknown") or result.get("submit_success") or nested.get("submit_success")) and not committed
-                status = "committed" if committed else "uncertain" if uncertain else "failed"
-            except BaseException:
-                await self._store_receipt(storage_key, pending, query_id, "uncertain")
-                raise
-            try:
-                await self._store_receipt(
-                    storage_key, pending, query_id, status, result
-                )
-            except Exception:
-                result["confirmation_cleanup_failed"] = True
-            result["retry_safe"] = False
-        return result
 
-    async def _store_receipt(self, storage_key, pending, query_id, status, result=None):
-        result = result if isinstance(result, dict) else {}
-        summary = {
-            key: result[key]
-            for key in (
-                "success",
-                "msg",
-                "external_committed",
-                "storage_persisted",
-                "submit_success",
+            try:
+                result = await super().call({"command": command}, session, query_id)
+            except BaseException:
+                try:
+                    await self._store_confirmation_receipt(
+                        storage_key=storage_key,
+                        pending=pending,
+                        query_id=query_id,
+                        status="uncertain",
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # The durable pre-execution receipt already consumes the
+                    # token, so a cleanup failure cannot make it replayable.
+                    pass
+                raise
+
+            result = self._mark_storage_commit_state(result)
+            committed = isinstance(result, dict) and bool(
+                result.get("success") or result.get("external_committed")
             )
-            if key in result
-        }
-        if "msg" in summary:
-            summary["msg"] = str(summary["msg"])[:600]
+            try:
+                await self._store_confirmation_receipt(
+                    storage_key=storage_key,
+                    pending=pending,
+                    query_id=query_id,
+                    status="committed" if committed else "failed",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # The executing receipt already blocks replay. Preserve the
+                # business result but make the persistence uncertainty visible.
+                if isinstance(result, dict):
+                    result.setdefault("confirmation_cleanup_failed", True)
+                    result["retry_safe"] = False
+            return result
+
+    async def _store_confirmation_receipt(
+        self,
+        *,
+        storage_key: str,
+        pending: Any,
+        query_id: int,
+        status: str,
+    ) -> None:
+        source = pending if isinstance(pending, dict) else {}
         receipt = {
             "schema": "henu.confirmation-receipt.v1",
             "status": status,
-            "command": pending.get("command", ""),
-            "conversation": pending.get("conversation"),
-            "created_query_id": pending.get("created_query_id"),
-            "consumed_query_id": query_id,
+            "fingerprint": str(source.get("fingerprint") or ""),
+            "command": str(source.get("command") or ""),
+            "created_query_id": source.get("created_query_id"),
+            "consumed_query_id": int(query_id),
             "updated_at": time.time(),
-            "result": summary,
         }
-        task = asyncio.create_task(
+        await _await_cancellation_safe(
             self.plugin.set_plugin_storage(
                 pending_storage_key(storage_key),
-                json.dumps(receipt, ensure_ascii=False).encode(),
+                json.dumps(receipt, ensure_ascii=False).encode("utf-8"),
             )
         )
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            raise
-
-    async def operation_status(self, storage_key, conversation):
-        pending = await self._load_pending(storage_key)
-        if pending.get("conversation") != conversation or not str(
-            pending.get("command") or ""
-        ).startswith("library "):
-            return {
-                "success": False,
-                "operation_state": "none",
-                "reply_text": "当前聊天没有图书馆操作记录。",
-            }
-        state = pending.get("status")
-        if pending.get("schema") == "henu.pending-operation.v1":
-            state = (
-                "pending"
-                if float(pending.get("expires_at") or 0) > time.time()
-                else "expired"
-            )
-        messages = {
-            "pending": "预约尚未提交，请核对已展示的实际时段后回复‘确认’。",
-            "expired": "确认已过期，预约未提交；请重新发起。",
-            "executing": "确认已收到，操作正在执行，请等待结果，不要重复提交。",
-            "committed": "已执行成功；如需查看当前预约，请查询 library current。",
-            "blocked": "新的请求未提交，旧待确认请求已撤销：" + str((pending.get("result") or {}).get("msg") or "请重新发起。"),
-            "failed": "已执行，但未成功："
-            + str(
-                (pending.get("result") or {}).get("msg")
-                or "学校未返回明确原因，请查询当前预约。"
-            ),
-            "uncertain": "操作已发起，但结果尚未核实；请查询 library current，不要重复提交。",
-        }
-        msg = messages.get(state, "操作记录无法识别，请查询当前预约。")
-        return {
-            "success": state == "committed",
-            "operation_state": state or "uncertain",
-            "msg": msg,
-            "reply_text": msg,
-            "confirmation_required": state == "pending",
-            "retry_safe": False,
-            "next_commands": ["library current"],
-        }
 
     async def _load_pending(self, storage_key: str) -> dict[str, Any]:
         try:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import argparse
+import hashlib
+import hmac
 import json
+import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -12,7 +15,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
-from mcp.server.fastmcp import FastMCP
+
+from campus_core.seat_reservation import SeatReservationMixin
 
 from henu_mcp.core.cas_session import (
     extract_cas_cookies as _extract_ids_cas_cookies,
@@ -56,14 +60,10 @@ from henu_mcp.core.period_times import (
 )
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from henu_mcp.core.secure_storage import (
-    encrypt_value,
-    decrypt_value,
-    is_encrypted,
     load_encrypted_profile,
     save_encrypted_profile,
 )
 
-mcp = FastMCP("henu-campus-unified")
 BASE_DIR = Path(__file__).resolve().parents[2]
 PERIOD_TIME_FILE = BASE_DIR / "period_time_config.json"
 PERIOD_CALIBRATION_STATE_FILE = BASE_DIR / "period_time_calibration_state.json"
@@ -94,9 +94,18 @@ DEFAULT_PERIOD_TIMES: dict[str, dict[str, str]] = {
     "15": {"start": "20:55", "end": "21:40"},
 }
 _SEMINAR_SIGNIN_TASK_LOCK = threading.Lock()
-_SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
-_SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
+LOGIN_VERIFICATION_FRESH_HOURS = 24
+LOGIN_ATTEMPT_COOLDOWN_SECONDS = 30
+LOGIN_ATTEMPT_WINDOW_HOURS = 24
+LOGIN_ATTEMPT_MAX_FAILURES = 3
+LOGIN_GUARD_FILE = BASE_DIR / "data" / "shared" / "login_attempt_guard.json"
+_LOGIN_GUARD_LOCK = threading.Lock()
+_LOGIN_MASTER_KEY_FILE = Path('/run/secrets/henu_master_key')
+
+
+class SeminarTaskStateError(RuntimeError):
+    """Raised when persisted seminar sign-in state cannot be trusted."""
 
 # 尝试导入校园核心模块
 HenuCampusBot = None
@@ -126,11 +135,7 @@ try:
         search_resources,
         list_resources as _list_registry_resources,
         get_stats as _get_registry_stats,
-        upsert_resource,
-        get_resource,
         sync_classrooms_from_metadata,
-        sync_library_resources,
-        sync_seminar_resources,
     )
     _resource_registry_available = True
 except Exception:
@@ -448,7 +453,7 @@ def _extract_period_range(course_item: dict[str, Any]) -> tuple[int, int] | None
         return (start, end)
 
     time_text = str(course_item.get("time", "") or "")
-    m2 = re.search(r"\[(\d+)-(\d+)\]", time_text)
+    m2 = re.search(r"\[(\d+)-(\d+)(?:节)?\]", time_text)
     if m2:
         return (int(m2.group(1)), int(m2.group(2)))
     return None
@@ -519,17 +524,17 @@ def get_current_course_status(
     future_courses.sort(key=lambda x: x[0])
     next_course = future_courses[0][1] if future_courses else None
     if current_courses:
-        msg = f"当前共有 {len(current_courses)} 门正在上的课程"
+        msg = f"按星期和节次时间匹配到 {len(current_courses)} 门课程（未验证教学周）"
     elif next_course:
         msg = (
-            "当前没有正在上的课，下一节是"
+            "按星期和节次时间未匹配到当前课程（未验证教学周），下一节是"
             f"{next_course.get('clock_start', '')}-{next_course.get('clock_end', '')} "
             f"{next_course.get('course', '')}"
         ).strip()
     elif day_courses:
-        msg = "当前没有正在上的课，且今天后续没有课程"
+        msg = "按星期和节次时间未匹配到当前或后续课程（未验证教学周）"
     else:
-        msg = "今天课表为空"
+        msg = "今天按星期提取的课表为空（未验证教学周）"
 
     return {
         "success": True,
@@ -541,6 +546,8 @@ def get_current_course_status(
         "day_schedule_count": len(day_courses),
         "current_courses": current_courses,
         "next_course": next_course,
+        "week_filter_applied": False,
+        "interpretation_warning": "课程仅按星期和节次时间匹配，未验证当前教学周是否在课程周次内",
         "period_times": period_times,
         "period_time_calibration": calibration,
     }
@@ -549,6 +556,91 @@ def get_current_course_status(
 def _effective_profile() -> dict[str, Any]:
     """加载并解密配置文件"""
     return load_encrypted_profile(PROFILE_FILE)
+
+
+def _login_verification_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    raw = profile.get("login_verification")
+    if not isinstance(raw, dict):
+        raw = {}
+    status = str(raw.get("status") or "unknown").strip().lower()
+    if status not in {"verified", "unverified", "failed", "stale", "unknown"}:
+        status = "unknown"
+    subject_student_id = str(raw.get("subject_student_id") or "").strip()
+    bound_student_id = str(profile.get("student_id") or "").strip()
+    verified_at = str(raw.get("verified_at") or raw.get("attempted_at") or "").strip()
+    historically_verified = status in {"verified", "stale"} or bool(raw.get("verified_at"))
+    if status == "verified":
+        if not subject_student_id or subject_student_id != bound_student_id:
+            status = "stale"
+        else:
+            try:
+                verified_dt = datetime.fromisoformat(verified_at)
+                now = _now_dt()
+                if verified_dt.tzinfo is None:
+                    verified_dt = verified_dt.replace(tzinfo=now.tzinfo)
+                if now - verified_dt > timedelta(hours=LOGIN_VERIFICATION_FRESH_HOURS):
+                    status = "stale"
+            except (TypeError, ValueError):
+                status = "stale"
+    message = re.sub(r"\s+", " ", str(raw.get("message") or "")).strip()[:240]
+    return {
+        "status": status,
+        "verified": bool(raw.get("verified")) and status == "verified",
+        "historically_verified": historically_verified,
+        "attempted_at": str(raw.get("attempted_at") or "").strip(),
+        "verified_at": verified_at,
+        "subject_student_id": subject_student_id,
+        "auth_mode": str(raw.get("auth_mode") or "").strip(),
+        "error_code": str(raw.get("error_code") or "").strip(),
+        "message": message,
+    }
+
+
+def _login_verification_record(
+    status: str,
+    auth: dict[str, Any] | None = None,
+    subject_student_id: str = "",
+) -> dict[str, Any]:
+    auth_info = auth if isinstance(auth, dict) else {}
+    normalized_status = status if status in {"verified", "unverified", "failed"} else "unknown"
+    default_message = {
+        "verified": "在线登录校验成功",
+        "unverified": "账号已保存，但未执行在线登录校验",
+        "failed": "在线登录校验失败",
+    }.get(normalized_status, "尚无在线登录校验记录")
+    attempted_at = _now_dt().isoformat(timespec="seconds")
+    return {
+        "status": normalized_status,
+        "verified": normalized_status == "verified",
+        "attempted_at": attempted_at,
+        "verified_at": attempted_at if normalized_status == "verified" else "",
+        "subject_student_id": str(subject_student_id or "").strip(),
+        "auth_mode": str(auth_info.get("mode") or "").strip(),
+        "error_code": str(auth_info.get("error_code") or "").strip(),
+        "message": re.sub(
+            r"\s+",
+            " ",
+            str(auth_info.get("message") or default_message),
+        ).strip()[:240],
+    }
+
+
+def _last_login_attempt_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    raw = profile.get("last_login_attempt")
+    if not isinstance(raw, dict):
+        raw = {}
+    status = str(raw.get("status") or "unknown").strip().lower()
+    if status not in {"verified", "unverified", "failed", "unknown"}:
+        status = "unknown"
+    return {
+        "status": status,
+        "verified": bool(raw.get("verified")) and status == "verified",
+        "attempted_at": str(raw.get("attempted_at") or "").strip(),
+        "subject_student_id": str(raw.get("subject_student_id") or "").strip(),
+        "auth_mode": str(raw.get("auth_mode") or "").strip(),
+        "error_code": str(raw.get("error_code") or "").strip(),
+        "message": re.sub(r"\s+", " ", str(raw.get("message") or "")).strip()[:240],
+    }
 
 
 def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -563,6 +655,8 @@ def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "seminar_groups_total": len(seminar_groups),
         "seminar_signin_tasks_total": len(seminar_tasks),
         "has_seminar_mobile": bool(str(profile.get("seminar_mobile") or profile.get("mobile") or "").strip()),
+        "login_verification": _login_verification_summary(profile),
+        "last_login_attempt": _last_login_attempt_summary(profile),
         "profile_file": str(PROFILE_FILE),
         "cookie_file": str(COOKIE_FILE),
         "library_cookie_file": str(LIBRARY_COOKIE_FILE),
@@ -643,11 +737,26 @@ def _saved_seminar_mobile() -> str:
 
 
 def _load_seminar_signin_tasks() -> list[dict[str, Any]]:
-    data = load_json(SEMINAR_SIGNIN_TASK_FILE)
-    tasks = data.get("tasks") or []
-    if not isinstance(tasks, list):
+    try:
+        raw = SEMINAR_SIGNIN_TASK_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return []
-    return [item for item in tasks if isinstance(item, dict)]
+    except (OSError, UnicodeError) as exc:
+        raise SeminarTaskStateError("无法读取研讨室签到任务状态") from exc
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SeminarTaskStateError("研讨室签到任务状态 JSON 已损坏") from exc
+    if not isinstance(data, dict):
+        raise SeminarTaskStateError("研讨室签到任务状态必须是 JSON 对象")
+
+    tasks = data.get("tasks", [])
+    if not isinstance(tasks, list):
+        raise SeminarTaskStateError("研讨室签到任务字段 tasks 必须是列表")
+    if any(not isinstance(item, dict) for item in tasks):
+        raise SeminarTaskStateError("研讨室签到任务列表包含无效条目")
+    return list(tasks)
 
 
 def _save_seminar_signin_tasks(tasks: list[dict[str, Any]]) -> None:
@@ -1208,7 +1317,12 @@ def _process_seminar_signin_tasks(
     due_tasks: list[dict[str, Any]] = []
     for task in tasks:
         status_text = str(task.get("status") or "").strip() or "pending"
-        if status_text in {"success", "cancelled", "expired"}:
+        if status_text == "processing":
+            task["status"] = "uncertain"
+            task["last_msg"] = "上次签到进程在提交后未完成确认；为避免重复签到，需人工核验"
+            task["updated_at"] = _format_dt_text(now)
+            continue
+        if status_text in {"success", "cancelled", "expired", "uncertain"}:
             continue
         if target_task_id and str(task.get("task_id") or "").strip() != target_task_id:
             continue
@@ -1252,9 +1366,6 @@ def _process_seminar_signin_tasks(
     now_text = _format_dt_text(now)
     for task in due_tasks:
         processed_count += 1
-        task["attempts"] = int(task.get("attempts") or 0) + 1
-        task["updated_at"] = now_text
-
         record, record_msg = _resolve_seminar_record_for_task(bot, task)
         if record is None:
             task["last_msg"] = record_msg or "未找到对应预约记录"
@@ -1265,7 +1376,18 @@ def _process_seminar_signin_tasks(
         if record_id_text:
             task["record_id"] = record_id_text
 
-        sign_result = bot.sign_in_seminar_record(record_id_text)
+        task["attempts"] = int(task.get("attempts") or 0) + 1
+        task["status"] = "processing"
+        task["claim_id"] = uuid.uuid4().hex
+        task["claimed_at"] = _format_dt_text(_now_dt())
+        task["updated_at"] = task["claimed_at"]
+        with _SEMINAR_SIGNIN_TASK_LOCK:
+            _save_seminar_signin_tasks(tasks)
+
+        try:
+            sign_result = bot.sign_in_seminar_record(record_id_text)
+        except Exception as exc:
+            sign_result = {"success": False, "msg": f"签到结果不确定: {exc}"}
         task["last_result"] = sign_result
         task["last_msg"] = str(sign_result.get("msg") or "")
         if sign_result.get("success"):
@@ -1283,7 +1405,15 @@ def _process_seminar_signin_tasks(
             task["status"] = "cancelled"
             failed_count += 1
         else:
+            task["status"] = "uncertain"
+            task["last_msg"] = (
+                task["last_msg"] or "签到结果不确定"
+            ) + "；为避免重复签到，任务不会自动重试"
             failed_count += 1
+
+        task["updated_at"] = _format_dt_text(_now_dt())
+        with _SEMINAR_SIGNIN_TASK_LOCK:
+            _save_seminar_signin_tasks(tasks)
 
     _save_library_cookies(bot.get_cookies())
     with _SEMINAR_SIGNIN_TASK_LOCK:
@@ -1299,28 +1429,6 @@ def _process_seminar_signin_tasks(
         "failed_count": failed_count,
         "now": now_text,
     }
-
-
-def _ensure_seminar_auto_signin_worker() -> None:
-    global _SEMINAR_AUTO_SIGNIN_THREAD
-    with _SEMINAR_AUTO_SIGNIN_THREAD_LOCK:
-        if _SEMINAR_AUTO_SIGNIN_THREAD and _SEMINAR_AUTO_SIGNIN_THREAD.is_alive():
-            return
-
-        def _worker() -> None:
-            while True:
-                try:
-                    _process_seminar_signin_tasks(due_only=True, trigger="background")
-                except Exception:
-                    pass
-                time.sleep(SEMINAR_AUTO_SIGNIN_INTERVAL_SECONDS)
-
-        _SEMINAR_AUTO_SIGNIN_THREAD = threading.Thread(
-            target=_worker,
-            name="seminar-auto-signin",
-            daemon=True,
-        )
-        _SEMINAR_AUTO_SIGNIN_THREAD.start()
 
 
 def _resolve_seminar_members(
@@ -1435,51 +1543,210 @@ def _target_library_date(target_date: str | None = None) -> str:
 
 
 def _load_library_cookies() -> dict[str, Any]:
-    return load_json(LIBRARY_COOKIE_FILE)
+    data = load_json(LIBRARY_COOKIE_FILE)
+    if not _artifact_matches_bound_student(data):
+        return {}
+    return {key: value for key, value in data.items() if not str(key).startswith("_")}
 
 
 def _save_library_cookies(cookies: dict[str, Any]) -> None:
-    save_json(LIBRARY_COOKIE_FILE, cookies)
+    save_json(LIBRARY_COOKIE_FILE, {**cookies, "_subject_student_id": _bound_student_id()})
+
+
+def _bound_student_id() -> str:
+    return str(_effective_profile().get("student_id") or "").strip()
+
+
+def _artifact_matches_bound_student(data: dict[str, Any]) -> bool:
+    subject = str(data.get("_subject_student_id") or "").strip()
+    bound = _bound_student_id()
+    return bool(subject and bound and subject == bound)
 
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load this user's IDS CAS cookie jar for cross-service login reuse."""
+    cas_data = load_json(CAS_COOKIE_FILE)
+    xk_data = load_json(COOKIE_FILE)
     return _merge_cas_cookies(
-        load_json(CAS_COOKIE_FILE),
-        load_json(COOKIE_FILE),
+        cas_data if _artifact_matches_bound_student(cas_data) else {},
+        xk_data if _artifact_matches_bound_student(xk_data) else {},
     )
 
 
-def _save_cas_cookies(cookies: dict[str, Any]) -> None:
+def _save_cas_cookies(cookies: dict[str, Any], subject_student_id: str = "") -> None:
     """Save this user's IDS CAS cookie jar for reuse across campus services."""
     clean = _extract_ids_cas_cookies(cookies)
     if clean:
+        clean["_subject_student_id"] = str(subject_student_id or "").strip() or _bound_student_id()
         save_json(CAS_COOKIE_FILE, clean)
 
 
 def _load_xk_cookies() -> dict[str, Any]:
+    xk_data = load_json(COOKIE_FILE)
     return {
-        **load_json(COOKIE_FILE),
+        **(xk_data if _artifact_matches_bound_student(xk_data) else {}),
         **_load_cas_cookies(),
     }
 
 
-def _save_xk_cookies(cookies: dict[str, Any]) -> None:
+def _save_xk_cookies(cookies: dict[str, Any], subject_student_id: str = "") -> None:
     mode = str(cookies.get("_auth_mode") or "")
-    persisted = cookies
+    subject = str(subject_student_id or "").strip() or _bound_student_id()
+    persisted = {**cookies, "_subject_student_id": subject}
     if mode == "xk_kingo":
         persisted = {
             key: value
             for key, value in cookies.items()
             if key not in _extract_ids_cas_cookies(cookies)
         }
+        persisted["_subject_student_id"] = subject
     save_json(COOKIE_FILE, persisted)
     if mode == "ids_cas":
-        _save_cas_cookies(cookies)
+        _save_cas_cookies(cookies, subject)
+
+
+def _clear_account_auth_artifacts() -> None:
+    for path in (COOKIE_FILE, CAS_COOKIE_FILE, LIBRARY_COOKIE_FILE, HEBAO_TOKEN_FILE, SEMINAR_SIGNIN_TASK_FILE):
+        path.unlink(missing_ok=True)
+    output_dir = Path(OUTPUT_DIR)
+    if output_dir.exists():
+        for child in output_dir.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+
+
+def _snapshot_account_binding_files() -> dict[Path, bytes | None]:
+    return {
+        path: path.read_bytes() if path.exists() else None
+        for path in (PROFILE_FILE, COOKIE_FILE, CAS_COOKIE_FILE, LIBRARY_COOKIE_FILE, HEBAO_TOKEN_FILE, SEMINAR_SIGNIN_TASK_FILE)
+    }
+
+
+def _restore_account_binding_files(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+
+def _recent_login_attempt_retry_after(profile: dict[str, Any], student_id: str) -> int:
+    attempt = profile.get("last_login_attempt")
+    if not isinstance(attempt, dict) or str(attempt.get("subject_student_id") or "").strip() != student_id:
+        return 0
+    try:
+        attempted_dt = datetime.fromisoformat(str(attempt.get("attempted_at") or ""))
+        now = _now_dt()
+        if attempted_dt.tzinfo is None:
+            attempted_dt = attempted_dt.replace(tzinfo=now.tzinfo)
+        elapsed = (now - attempted_dt).total_seconds()
+    except (TypeError, ValueError):
+        return 0
+    return max(0, int(LOGIN_ATTEMPT_COOLDOWN_SECONDS - elapsed + 0.999))
+
+
+def _student_guard_hash(student_id: str) -> str:
+    secret = str(os.environ.get("HENU_MASTER_KEY") or "").strip()
+    if not secret:
+        try:
+            secret = _LOGIN_MASTER_KEY_FILE.read_text(encoding='utf-8').strip()
+        except FileNotFoundError:
+            pass
+    if not secret:
+        raise RuntimeError("HENU_MASTER_KEY 未配置，无法安全执行账号验证")
+    return hmac.new(secret.encode(), str(student_id).encode(), hashlib.sha256).hexdigest()
+
+
+def _load_login_guard_store() -> dict[str, Any]:
+    if not LOGIN_GUARD_FILE.exists():
+        return {}
+    try:
+        data = json.loads(LOGIN_GUARD_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError("登录限流状态损坏") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("登录限流状态格式错误")
+    return data
+
+
+def _save_login_guard_store(guards: dict[str, Any]) -> None:
+    LOGIN_GUARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = LOGIN_GUARD_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(guards, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    temporary.replace(LOGIN_GUARD_FILE)
+
+
+def _prune_expired_login_guards(guards: dict[str, Any], now: datetime) -> tuple[dict[str, Any], bool]:
+    kept: dict[str, Any] = {}
+    changed = False
+    for key, value in guards.items():
+        if not isinstance(value, dict):
+            changed = True
+            continue
+        try:
+            started = datetime.fromisoformat(str(value.get("window_started_at") or ""))
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=now.tzinfo)
+            if now - started > timedelta(hours=LOGIN_ATTEMPT_WINDOW_HOURS):
+                changed = True
+                continue
+        except (TypeError, ValueError):
+            changed = True
+            continue
+        kept[key] = value
+    return kept, changed
+
+
+def _login_attempt_guard_retry_after(profile: dict[str, Any], student_id: str) -> int:
+    del profile
+    student_hash = _student_guard_hash(student_id)
+    now = _now_dt()
+    with _LOGIN_GUARD_LOCK:
+        guards, _ = _prune_expired_login_guards(_load_login_guard_store(), now)
+        # Verify persistent guard writability before touching remote IDS.
+        _save_login_guard_store(guards)
+        guard = guards.get(student_hash)
+        if not isinstance(guard, dict) or int(guard.get("failed_attempts") or 0) < LOGIN_ATTEMPT_MAX_FAILURES:
+            return 0
+        started = datetime.fromisoformat(str(guard.get("window_started_at") or ""))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=now.tzinfo)
+        return max(0, int(LOGIN_ATTEMPT_WINDOW_HOURS * 3600 - (now - started).total_seconds() + 0.999))
+
+
+def _next_login_attempt_guard(profile: dict[str, Any], student_id: str) -> dict[str, Any]:
+    del profile
+    now = _now_dt()
+    student_hash = _student_guard_hash(student_id)
+    with _LOGIN_GUARD_LOCK:
+        guards, _ = _prune_expired_login_guards(_load_login_guard_store(), now)
+        current = guards.get(student_hash)
+        if not isinstance(current, dict):
+            current = {}
+        guards[student_hash] = {
+            "window_started_at": str(current.get("window_started_at") or now.isoformat(timespec="seconds")),
+            "failed_attempts": int(current.get("failed_attempts") or 0) + 1,
+            "last_failed_at": now.isoformat(timespec="seconds"),
+        }
+        _save_login_guard_store(guards)
+        return guards[student_hash]
+
+
+def _reset_login_attempt_guard(student_id: str) -> None:
+    student_hash = _student_guard_hash(student_id)
+    with _LOGIN_GUARD_LOCK:
+        guards = _load_login_guard_store()
+        if student_hash in guards:
+            guards.pop(student_hash, None)
+            _save_login_guard_store(guards)
 
 
 def _saved_xk_auth_info() -> dict[str, Any]:
-    mode = str(load_json(COOKIE_FILE).get("_auth_mode") or "")
+    data = load_json(COOKIE_FILE)
+    mode = str(data.get("_auth_mode") or "") if _artifact_matches_bound_student(data) else ""
     return {
         "mode": mode,
         "degraded": mode == "xk_kingo",
@@ -1572,11 +1839,12 @@ def _hebao_login_failed(extra: dict[str, Any] | None = None, default: str = "河
 
 
 def _load_hebao_token() -> dict[str, Any]:
-    return load_json(HEBAO_TOKEN_FILE)
+    data = load_json(HEBAO_TOKEN_FILE)
+    return data if _artifact_matches_bound_student(data) else {}
 
 
 def _save_hebao_token(token: str) -> None:
-    save_json(HEBAO_TOKEN_FILE, {"token": token})
+    save_json(HEBAO_TOKEN_FILE, {"token": token, "_subject_student_id": _bound_student_id()})
 
 
 def _build_hebao_bot(student_id: str, password: str):
@@ -1765,29 +2033,115 @@ def save_account(
 
     context: dict[str, Any] = {}
     auth: dict[str, Any] = _saved_xk_auth_info()
+    current_profile = _effective_profile()
+    bound_sid = str(current_profile.get("student_id") or "").strip()
+    retry_after = max(
+        _recent_login_attempt_retry_after(current_profile, sid),
+        _login_attempt_guard_retry_after(current_profile, sid),
+    ) if verify_login else 0
+    if retry_after > 0:
+        return {
+            "success": False,
+            "verified": False,
+            "error_code": "local_login_cooldown",
+            "retry_after_seconds": retry_after,
+            "msg": f"账号验证请求过于频繁，请等待 {retry_after} 秒后再试",
+        }
+    candidate_cookies: dict[str, Any] = {}
     if verify_login:
-        client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
+        # Verify the submitted credentials themselves; old cookies may belong
+        # to another account or hide a wrong new password.
+        client = HenuXkClient(sid, pwd, saved_cookies=None)
         if not client.login():
+            auth = client.get_auth_info()
+            verification = _login_verification_record("failed", auth, sid)
+            failed_fields: dict[str, Any] = {"last_login_attempt": verification}
+            if str(auth.get("error_code") or "") in {
+                "invalid_credentials", "captcha_required", "rate_limited",
+                "account_locked", "auth_state_unknown",
+            }:
+                _next_login_attempt_guard(current_profile, sid)
+            _save_profile_fields(failed_fields)
             return {
                 "success": False,
                 "msg": client.auth_result.message,
-                "auth": client.get_auth_info(),
+                "verified": False,
+                "auth": auth,
+                "login_verification": verification,
             }
-        _save_xk_cookies(client.get_cookies())
         context = client.fetch_user_context()
         auth = client.get_auth_info()
+        authenticated_sid = str(
+            context.get("login_id") or context.get("user_code") or ""
+        ).strip()
+        if authenticated_sid != sid:
+            auth = {
+                **auth,
+                "error_code": "account_mismatch",
+                "message": "登录态账号与本次提交学号不一致，未保存绑定",
+            }
+            verification = _login_verification_record("failed", auth, sid)
+            _save_profile_fields({"last_login_attempt": verification})
+            return {
+                "success": False,
+                "msg": auth["message"],
+                "verified": False,
+                "auth": auth,
+                "login_verification": verification,
+            }
+        candidate_cookies = client.get_cookies()
 
-    fields: dict[str, Any] = {"student_id": sid, "password": pwd}
+    binding_changed = bound_sid != sid
+
+    verification = _login_verification_record(
+        "verified" if verify_login else "unverified",
+        auth if verify_login else None,
+        sid,
+    )
+    fields: dict[str, Any] = {
+        "student_id": sid,
+        "password": pwd,
+        "login_verification": verification,
+        "last_login_attempt": verification,
+    }
+    if verify_login:
+        _reset_login_attempt_guard(sid)
+    if binding_changed:
+        fields.update({
+            "library_location": "", "location": "",
+            "library_seat_no": "", "seat_no": "",
+            "seminar_groups": {}, "seminar_mobile": "", "mobile": "",
+        })
     if str(library_location or "").strip():
         fields["library_location"] = str(library_location).strip()
     if str(library_seat_no or "").strip():
         fields["library_seat_no"] = str(library_seat_no).strip()
-    _save_profile_fields(fields)
+    snapshot = _snapshot_account_binding_files()
+    try:
+        if binding_changed:
+            _clear_account_auth_artifacts()
+        if verify_login:
+            _save_xk_cookies(candidate_cookies, sid)
+        _save_profile_fields(fields)
+    except Exception as exc:
+        try:
+            _restore_account_binding_files(snapshot)
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "verified": False,
+            "error_code": "binding_persist_failed",
+            "msg": f"账号绑定保存失败，已尝试恢复原绑定状态: {type(exc).__name__}",
+        }
     return {
         "success": True,
         "msg": "账号已保存",
+        "verified": bool(verify_login),
+        "binding_changed": binding_changed,
         "account": _mask_profile(_effective_profile()),
         "auth": auth,
+        "login_verification": verification,
         "context": {
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
@@ -2107,6 +2461,13 @@ def _library_seats_impl(
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):
         _save_cas_cookies(bot.get_cas_cookies())
+    result["query_semantics"] = "reservation_availability"
+    result.setdefault(
+        "date",
+        str(target_date or "").strip()
+        or (_now_dt().date() + timedelta(days=1)).strftime("%Y-%m-%d"),
+    )
+    result.setdefault("time_window", str(preferred_time or "08:00"))
     # 增量 sync 到 resource_registry
     _enrich_library_seats(result.get("seats", []), target_area_id)
     return result
@@ -2121,7 +2482,6 @@ def _library_reserve_impl(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
-    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2133,6 +2493,10 @@ def _library_reserve_impl(
     """
     if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
+
+    retry_deadline, retry_error = SeatReservationMixin._validate_retry_until(retry_until)
+    if retry_error is not None:
+        return retry_error
     
     profile = _effective_profile()
     sid, pwd = str(profile.get("student_id", "")), str(profile.get("password", ""))
@@ -2160,10 +2524,9 @@ def _library_reserve_impl(
         target_date,
         preferred_time=str(preferred_time or "08:00"),
         preferred_end_time=str(preferred_end_time or ""),
-        retry_until=str(retry_until or ""),
+        retry_until=retry_deadline.isoformat() if retry_deadline is not None else "",
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
-        **({"expected_plan": expected_plan} if expected_plan is not None else {}),
     )
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):
@@ -2438,6 +2801,16 @@ def _seminar_rooms_impl(
     rooms = result.get("rooms") or []
     normalized_rooms = [_seminar_room_summary(room) for room in rooms if isinstance(room, dict)]
     result["rooms"] = normalized_rooms
+    result["applied_filters"] = {
+        "date": payload["date"],
+        "members": payload["members"],
+        "start_time": payload.get("start_time", ""),
+        "end_time": payload.get("end_time", ""),
+        "page": payload["page"],
+    }
+    if result.get("success") and not normalized_rooms:
+        result["empty_reason"] = "no_matching_rooms"
+        result["msg"] = "没有匹配当前条件的研讨室"
     result["time_field_semantics"] = {
         "rooms.date": "可预约时段（兼容主字段）",
         "rooms.raw_occupied_date": "已占用时段（原始字段）",
@@ -2445,7 +2818,8 @@ def _seminar_rooms_impl(
         "rooms.available_slots": "根据开放时间减去已占用时段推导出的空闲时段",
         "warning": "rooms.date/available_slots 才是可预约时段；rooms.raw_occupied_date/occupied_slots 是已占用时段",
     }
-    result["msg"] = str(result.get("msg") or "操作成功") + "；rooms.date 已转换为可预约时段"
+    if normalized_rooms:
+        result["msg"] = str(result.get("msg") or "操作成功") + "；rooms.date 已转换为可预约时段"
     result["resolved_query"] = {
         "library_ids": library_id_list,
         "floor_ids": resolved_floor_ids,
@@ -2599,7 +2973,6 @@ def _seminar_reserve_impl(
         if task:
             saved_task = _upsert_seminar_signin_task(task)
             result["auto_signin_task"] = _seminar_task_summary(saved_task)
-            _ensure_seminar_auto_signin_worker()
     result["group_name"] = str(group_name or "").strip()
     result["member_ids"] = resolved_members
     return result
@@ -2768,7 +3141,19 @@ def _course_selection_status_impl(xktype: str = "2") -> dict[str, Any]:
         return {"success": False, "msg": "教务系统登录失败，无法查询选课状态"}
     _save_xk_cookies(client.get_cookies())
     try:
-        return client.get_selection_status(xktype=str(xktype or "2"))
+        result = client.get_selection_status(xktype=str(xktype or "2"))
+        if result.get("success"):
+            is_open = result.get("is_open")
+            if is_open is True:
+                result["status_code"] = "open"
+                result["msg"] = "选课入口当前开放"
+            elif is_open is False:
+                result["status_code"] = "closed"
+                result["msg"] = "选课入口当前未开放"
+            else:
+                result["status_code"] = "unknown"
+                result["msg"] = "选课入口状态暂时无法确认"
+        return result
     except Exception as exc:
         return {"success": False, "msg": f"查询选课状态失败: {exc}"}
 
@@ -2891,11 +3276,17 @@ def _course_monitor_once_impl(config_json: str = "", send_notifications: bool = 
     matches = evaluate_matches(rows, [target for target in config.get("targets") or [] if isinstance(target, dict)])
     state = load_monitor_state()
     alerts, new_state = evaluate_alerts(matches, state)
-    save_monitor_state(new_state)
     notify_result = notify_alerts(alerts, config) if send_notifications else {"success": True, "sent": False, "msg": "已禁用通知发送"}
+    notification_failed = bool(alerts) and not bool(notify_result.get("success"))
+    if not notification_failed:
+        save_monitor_state(new_state)
     return {
-        "success": True,
-        "msg": "选课余量检查完成；本工具只提醒，不会自动选课或提交。",
+        "success": not notification_failed,
+        "msg": (
+            "选课余量提醒发送失败，未推进通知基线；下轮将重试。"
+            if notification_failed
+            else "选课余量检查完成；本工具只提醒，不会自动选课或提交。"
+        ),
         "checked_at": _now_dt().isoformat(),
         "rows_count": len(rows),
         "matches_count": len(matches),
@@ -2960,7 +3351,6 @@ def _course_monitor_run_impl(
 
 
 
-@mcp.tool()
 def smart_course_selection(
     source_path: str = "",
     excel_path: str = "",
@@ -3012,7 +3402,6 @@ def smart_course_selection(
     )
 
 
-@mcp.tool()
 def smart_course_select(
     excel_path: str,
     user_class: str,
@@ -3042,7 +3431,6 @@ def smart_course_select(
         top_k=top_k,
     )
 
-@mcp.tool()
 def setup_account(
     student_id: str,
     password: str,
@@ -3077,21 +3465,33 @@ def setup_account(
     if not result.get("success"):
         return result
 
-    calibration: dict[str, Any] = {}
-    if calibrate_period_time:
+    verified = bool(verify_login)
+    if not verified:
+        calibration: dict[str, Any] = {
+            "skipped": True,
+            "reason": "login_not_verified",
+        }
+    elif calibrate_period_time:
         calibration = auto_calibrate_period_time(force=True)
+    else:
+        calibration = {
+            "skipped": True,
+            "reason": "disabled",
+        }
 
     return {
         "success": True,
-        "msg": "账号初始化完成",
+        "verified": verified,
+        "binding_changed": bool(result.get("binding_changed")),
+        "msg": "账号登录验证成功，已完成绑定" if verified else "账号已保存，尚未验证登录",
         "account": result.get("account", {}),
         "auth": result.get("auth", {}),
+        "login_verification": result.get("login_verification", {}),
         "login_context": result.get("context", {}),
         "period_time_calibration": calibration,
     }
 
 
-@mcp.tool()
 def sync_schedule(
     xn: str | None = None,
     xq: str | None = None,
@@ -3126,7 +3526,6 @@ def sync_schedule(
     return result
 
 
-@mcp.tool()
 def library_query(
     view: str = "current",
     record_type: str = "1",
@@ -3348,7 +3747,6 @@ def _resolve_resource_id_to_params(resource_id: str) -> dict[str, str]:
     return {}
 
 
-@mcp.tool()
 def library_reserve(
     location: str = "",
     seat_no: str = "",
@@ -3359,7 +3757,6 @@ def library_reserve(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
-    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -3405,11 +3802,9 @@ def library_reserve(
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
-        expected_plan=expected_plan,
     )
 
 
-@mcp.tool()
 def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     """
     【必须调用】图书馆自动签到 - 对当前预约执行真实签到操作
@@ -3426,7 +3821,6 @@ def library_auto_signin(record_id: str = "") -> dict[str, Any]:
     return _library_auto_signin_impl(record_id=record_id)
 
 
-@mcp.tool()
 def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     """
     【必须调用】取消图书馆预约 - 执行真实的取消操作
@@ -3444,7 +3838,6 @@ def library_cancel(record_id: str, record_type: str = "auto") -> dict[str, Any]:
     return _library_cancel_impl(record_id=record_id, record_type=record_type)
 
 
-@mcp.tool()
 def course_selection_query(view: str = "status", xktype: str = "2") -> dict[str, Any]:
     """
     安全查询选课第一阶段状态。
@@ -3457,7 +3850,6 @@ def course_selection_query(view: str = "status", xktype: str = "2") -> dict[str,
     return _course_selection_status_impl(xktype=xktype)
 
 
-@mcp.tool()
 def course_selection_plan(
     candidates_json: str,
     existing_schedule_json: str = "",
@@ -3480,7 +3872,6 @@ def course_selection_plan(
         return {"success": False, "msg": f"生成选课计划失败: {exc}"}
 
 
-@mcp.tool()
 def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
     """
     占位工具：当前版本不执行真实选课提交。
@@ -3488,7 +3879,6 @@ def course_selection_submit(payload_json: str = "") -> dict[str, Any]:
     return _course_selection_submit_not_implemented()
 
 
-@mcp.tool()
 def course_monitor_config(config_json: str = "", merge: bool = True) -> dict[str, Any]:
     """
     查看或保存选课余量监控配置。
@@ -3498,7 +3888,6 @@ def course_monitor_config(config_json: str = "", merge: bool = True) -> dict[str
     return _course_monitor_config_impl(config_json=config_json, merge=merge)
 
 
-@mcp.tool()
 def course_monitor_once(config_json: str = "", send_notifications: bool = True) -> dict[str, Any]:
     """
     执行一次只读选课余量检查。
@@ -3508,7 +3897,6 @@ def course_monitor_once(config_json: str = "", send_notifications: bool = True) 
     return _course_monitor_once_impl(config_json=config_json, send_notifications=send_notifications)
 
 
-@mcp.tool()
 def course_monitor_run(
     config_json: str = "",
     max_checks: int = 1,
@@ -3531,7 +3919,6 @@ def course_monitor_run(
         return {"success": False, "msg": f"选课监控运行失败: {exc}"}
 
 
-@mcp.tool()
 def course_monitor_notify_test(config_json: str = "") -> dict[str, Any]:
     """
     测试选课余量飞书通知。
@@ -3547,7 +3934,6 @@ def course_monitor_notify_test(config_json: str = "") -> dict[str, Any]:
         return {"success": False, "msg": f"测试通知失败: {exc}"}
 
 
-@mcp.tool()
 def seminar_group(
     action: str = "list",
     group_name: str = "",
@@ -3572,7 +3958,6 @@ def seminar_group(
     return {"success": False, "msg": "action 仅支持 list/save/delete"}
 
 
-@mcp.tool()
 def seminar_query(
     view: str = "rooms",
     target_date: str = "",
@@ -3644,7 +4029,6 @@ def seminar_query(
     return {"success": False, "msg": "view 仅支持 filters/rooms/detail/records/signin_tasks"}
 
 
-@mcp.tool()
 def seminar_signin(record_id: str = "", auto_scan: bool = False) -> dict[str, Any]:
     """
     对研讨室预约执行签到。
@@ -3661,7 +4045,6 @@ def seminar_signin(record_id: str = "", auto_scan: bool = False) -> dict[str, An
     return _seminar_signin_impl(record_id=record_id)
 
 
-@mcp.tool()
 def seminar_cancel(record_id: str) -> dict[str, Any]:
     """
     取消研讨室预约。
@@ -3672,7 +4055,6 @@ def seminar_cancel(record_id: str) -> dict[str, Any]:
     return _seminar_cancel_impl(record_id=record_id)
 
 
-@mcp.tool()
 def seminar_reserve(
     area_id: str = "",
     target_date: str = "",
@@ -3727,7 +4109,6 @@ def seminar_reserve(
     )
 
 
-@mcp.tool()
 def schedule_query(
     view: str = "current",
     timezone: str = "Asia/Shanghai",
@@ -3762,7 +4143,6 @@ def schedule_query(
     return {"success": False, "msg": "view 仅支持 current/day/week/full"}
 
 
-@mcp.tool()
 def set_calibration_source(
     data: str,
     cookie: str,
@@ -3788,7 +4168,6 @@ def set_calibration_source(
     }
 
 
-@mcp.tool()
 def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
     """
     查看系统状态：账号、时间、节次配置、最近校准状态、输出文件。
@@ -3816,7 +4195,6 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
 
 # ==================== 河宝社区 MCP Tools ====================
 
-@mcp.tool()
 def yunfz_leave_query(
     view: str = "list",
     leave_id: str = "",
@@ -3875,7 +4253,6 @@ def yunfz_leave_query(
     return {"success": False, "msg": "view 仅支持 list/detail/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_signin_query(
     view: str = "list",
     page: int = 1,
@@ -3922,7 +4299,6 @@ def yunfz_signin_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_checksleep_query(
     view: str = "list",
     page: int = 1,
@@ -3969,7 +4345,6 @@ def yunfz_checksleep_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_activity_query(
     view: str = "list",
     page: int = 1,
@@ -4016,7 +4391,6 @@ def yunfz_activity_query(
     return {"success": False, "msg": "view 仅支持 list/statistics", "records": []}
 
 
-@mcp.tool()
 def yunfz_collection_query(
     view: str = "list",
     page: int = 1,
@@ -4104,14 +4478,6 @@ def _resolve_campus_and_building(
     except Exception:
         pass
 
-    # 组合查询文本
-    query_parts = [campus_text]
-    if building_text:
-        query_parts.append(building_text)
-    if classroom_text:
-        query_parts.append(classroom_text)
-    full_query = " ".join(query_parts)
-
     # 1. 先解析校区
     campus_code = ""
     campus_name = ""
@@ -4170,7 +4536,6 @@ def _resolve_campus_and_building(
     }
 
 
-@mcp.tool()
 def empty_classroom_query(
     view: str = "free",
     term_code: str = "",
@@ -4206,9 +4571,6 @@ def empty_classroom_query(
     - "buildings": 查询楼房列表（需 campus_code）
     - "classrooms": 查询教室列表
     - "types": 查询教室类型列表
-
-    term_code 省略时自动读取并核对学校当前学期；显式学期优先。
-    day_of_week 省略时为今天；教学周须可靠获取或由用户指定，不按月份猜算。
 
     参数优先级（校区/楼房）：
     - campus_code/building_code 显式传入时优先
@@ -4249,25 +4611,6 @@ def empty_classroom_query(
     if view in ("terms", "campuses", "buildings", "classrooms", "types"):
         return _empty_classroom_meta_query(client, view, campus_code, building_code, type_code, keyword)
 
-    term_context: dict[str, Any] = {}
-    if view in {"free", "day_matrix", "occupancy"}:
-        term_context = client.resolve_term(term_code)
-        if not term_context.get("success"):
-            return term_context
-        term_code = term_context["term_code"]
-        if day_of_week == 0:
-            day_of_week = _now_dt().isoweekday()
-        required = {"week": week, "day_of_week": day_of_week}
-        if view != "day_matrix":
-            required["period"] = period
-        if view == "occupancy":
-            required["room_id"] = room_id
-        missing = [key for key, value in required.items() if not value or (isinstance(value, int) and value <= 0)]
-        if missing:
-            label = term_context.get("term_name") or term_code
-            return {"success": False, "error_code": "missing_params", "missing_params": missing, "term_context": term_context,
-                "msg": f"已确定学期 {label}（{term_code}）；仍需提供：{', '.join(missing)}。学期无需再次填写。"}
-
     # ── 需要登录态的 view ──
     if view == "free":
         if not term_code or week <= 0 or day_of_week <= 0 or period <= 0:
@@ -4293,7 +4636,6 @@ def empty_classroom_query(
             max_stale_seconds=max_stale_seconds,
         )
         data = result.to_dict()
-        data["term_context"] = term_context
         data["success"] = True
         data["msg"] = f"找到 {result.total} 间空闲教室"
         return data
@@ -4343,7 +4685,6 @@ def empty_classroom_query(
         return {
             "success": True,
             "msg": f"已查询 {len(periods_result)} 个大节",
-            "term_context": term_context,
             "data": {
                 "termCode": term_code,
                 "week": week,
@@ -4359,12 +4700,10 @@ def empty_classroom_query(
                 "success": False,
                 "msg": "view=occupancy 需要提供 term_code, room_id, week, day_of_week, period",
             }
-        data = _empty_classroom_occupancy_query(
+        return _empty_classroom_occupancy_query(
             client, term_code, room_id, week, day_of_week, period,
             campus_code, building_code, freshness, force_refresh, ttl_seconds, max_stale_seconds,
         )
-        data["term_context"] = term_context
-        return data
 
     return {"success": False, "msg": f"不支持的 view: {view}"}
 
@@ -4467,7 +4806,7 @@ def _empty_classroom_occupancy_query(
 ) -> dict[str, Any]:
     """查询单个教室某时间段的占用详情。"""
     # 先拉取课表数据
-    result = query_free_classrooms(
+    query_free_classrooms(
         client=client,
         term_code=term_code,
         week=week,
@@ -4537,7 +4876,6 @@ def _empty_classroom_occupancy_query(
     }
 
 
-@mcp.tool()
 def empty_classroom_sync(
     term_code: str = "",
     campus_code: str = "",
@@ -4552,7 +4890,7 @@ def empty_classroom_sync(
     建议在查询空教室前先同步相关楼房数据。
 
     参数：
-    - term_code: 学期代码，如 "2025,1"；省略时读取学校当前学期
+    - term_code: 学期代码，如 "2025,1"（必填）
     - campus_code: 校区代码，如 "01"（必填）
     - building_code: 楼房代码，如 "0013"（必填）
     - type_code: 教室类型代码，空表示全部
@@ -4566,22 +4904,18 @@ def empty_classroom_sync(
             "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
         }
 
+    if not term_code or not campus_code or not building_code:
+        return {
+            "success": False,
+            "msg": "term_code, campus_code, building_code 均为必填参数",
+        }
+
     client = _get_empty_classroom_client()
     if client is None:
         return {
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
         }
-
-    term_context = client.resolve_term(term_code)
-    if not term_context.get("success"):
-        return term_context
-    term_code = term_context["term_code"]
-    missing = [key for key, value in {"campus_code": campus_code, "building_code": building_code}.items() if not str(value or "").strip()]
-    if missing:
-        return {"success": False, "error_code": "missing_params", "missing_params": missing, "term_context": term_context,
-            "msg": f"已确定学期 {term_code}；仍需提供：{', '.join(missing)}。学期无需再次填写。"}
-
 
     result = _sync_schedule_impl(
         client=client,
@@ -4593,7 +4927,6 @@ def empty_classroom_sync(
     )
 
     data = result.to_dict()
-    data["term_context"] = term_context
     data["success"] = result.sync_status in ("success", "skipped")
     data["msg"] = {
         "success": "同步成功",
@@ -4606,7 +4939,6 @@ def empty_classroom_sync(
 # ── 全局资源编号映射 ──────────────────────────────────────
 
 
-@mcp.tool()
 def resource_registry_query(
     view: str = "search",
     query: str = "",
@@ -4680,7 +5012,6 @@ def resource_registry_query(
     return {"success": False, "msg": f"不支持的 view: {view}，支持 search/resolve/list/stats"}
 
 
-@mcp.tool()
 def resource_registry_sync(
     scope: str = "all",
     force_refresh: bool = False,
@@ -4769,38 +5100,3 @@ def resource_registry_sync(
             "results": results,
         },
     }
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="HENU unified MCP server (schedule + library)")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "streamable-http", "sse"],
-        default="stdio",
-        help="MCP transport type",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
-    parser.add_argument("--port", type=int, default=8001, help="Port for HTTP transports")
-    parser.add_argument("--path", default="/mcp", help="HTTP endpoint path for streamable-http transport")
-    parser.add_argument(
-        "--stateless-http",
-        action="store_true",
-        help="Enable stateless HTTP mode for streamable-http transport",
-    )
-    parser.add_argument(
-        "--json-response",
-        action="store_true",
-        help="Enable JSON response mode for streamable-http transport",
-    )
-    args = parser.parse_args()
-
-    if args.transport in ("streamable-http", "sse"):
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-    if args.transport == "streamable-http":
-        mcp.settings.streamable_http_path = args.path
-        mcp.settings.stateless_http = args.stateless_http
-        mcp.settings.json_response = args.json_response
-
-    _ensure_seminar_auto_signin_worker()
-    mcp.run(transport=args.transport)

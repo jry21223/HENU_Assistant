@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from henu_mcp.core import secure_storage
 from henu_mcp.core.secure_storage import (
     CredentialDecryptionError,
     decrypt_value,
@@ -32,3 +33,26 @@ def test_wrong_master_key_fails_explicitly(monkeypatch) -> None:
     monkeypatch.setenv("HENU_MASTER_KEY", "key-b")
     with pytest.raises(CredentialDecryptionError):
         decrypt_value(token)
+
+
+def test_docker_secret_survives_runtime_hostname_change(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    master_key_file = tmp_path / "henu_master_key"
+    master_key_file.write_text("file-master-key\n", encoding="utf-8")
+    monkeypatch.delenv("HENU_MASTER_KEY", raising=False)
+    monkeypatch.setattr(secure_storage, "_MASTER_KEY_FILE", master_key_file)
+    monkeypatch.setattr(
+        secure_storage,
+        "_stable_machine_fingerprint",
+        lambda: "runtime-a",
+    )
+    token = encrypt_value("secret")
+
+    monkeypatch.setattr(
+        secure_storage,
+        "_stable_machine_fingerprint",
+        lambda: "runtime-b",
+    )
+    assert decrypt_value(token) == "secret"

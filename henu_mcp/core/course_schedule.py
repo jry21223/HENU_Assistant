@@ -6,12 +6,13 @@ import json
 import math
 import random
 import re
-import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
+import campus_core.atomic_io as atomic_io
+from campus_core.cas_page import classify_cas_login_page, extract_cas_login_fields
 
 from henu_mcp.core.cas_session import (
     CAS_COOKIE_NAMES,
@@ -25,7 +26,6 @@ from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file
 from henu_mcp.core.secure_storage import (
     load_encrypted_profile,
     save_encrypted_profile,
-    decrypt_value,
 )
 
 # Windows 时区支持
@@ -47,6 +47,8 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 COOKIE_FILE = BASE_DIR / "henu_cookies.json"
 PROFILE_FILE = BASE_DIR / "henu_profile.json"
 DEFAULT_HOME_URL = "https://xk.henu.edu.cn/frame/homes.action?v=07364432695342088912561"
+IDS_SAFE_FALLBACK_ERROR_CODES = frozenset({"ids_unavailable"})
+IDS_FAIL_CLOSED_GUIDANCE = "请先在浏览器完成验证或稍后重试，勿连续尝试"
 OUTPUT_DIR = BASE_DIR / "output"
 
 
@@ -63,7 +65,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def save_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_io.atomic_write_json(path, data)
 
 
 class HenuXkClient:
@@ -240,52 +242,147 @@ class HenuXkClient:
 
     @staticmethod
     def _ids_error(text: str, status_code: int = 0) -> tuple[str, str]:
-        plain = re.sub(r"(?is)<[^>]+>", " ", str(text or ""))
+        raw = str(text or "")
+        visible = re.sub(
+            r"(?is)<(?:script|style|noscript|template)\b[^>]*>.*?</(?:script|style|noscript|template)>",
+            " ",
+            raw,
+        )
+        visible = re.sub(r"(?is)<!--.*?-->", " ", visible)
+        visible_plain = re.sub(r"(?is)<[^>]+>", " ", visible)
+        visible_plain = re.sub(r"\s+", " ", visible_plain).strip()
+        plain = re.sub(r"(?is)<[^>]+>", " ", raw)
         plain = re.sub(r"\s+", " ", plain).strip()
         compact = plain.lower()
-        if any(marker in compact for marker in ("验证码", "captcha", "校验码")):
-            return "captcha_required", "IDS 统一认证需要验证码或额外校验"
+        if any(
+            marker in compact
+            for marker in (
+                "账号已被锁定",
+                "账户已被锁定",
+                "账号锁定",
+                "账户锁定",
+                "账号冻结",
+                "密码错误次数",
+            )
+        ):
+            return "account_locked", "IDS 统一认证账号已锁定"
+        if status_code == 429 or any(
+            marker in compact
+            for marker in (
+                "尝试次数过多",
+                "登录次数过多",
+                "操作过于频繁",
+                "请求过于频繁",
+            )
+        ):
+            return "rate_limited", "IDS 统一认证尝试次数过多"
         if any(marker in compact for marker in ("账号或密码", "用户名或密码", "密码错误", "密码不正确")):
             return "invalid_credentials", "IDS 统一认证拒绝了账号或密码"
-        if status_code in {401, 403, 429}:
-            return "service_error", f"IDS 统一认证返回 HTTP {status_code}"
+        if any(
+            marker in compact
+            for marker in (
+                "二次验证",
+                "额外校验",
+                "安全验证",
+                "身份核验",
+                "请先完成验证",
+                "扫码验证",
+            )
+        ):
+            return "additional_verification_required", "IDS 统一认证需要额外验证"
+
+        need_captcha_match = re.search(
+            r"(?i)\b(?:var\s+)?needCaptcha\s*[:=]\s*(?:['\"]([^'\"]*)['\"]|(true|false|\d+))",
+            raw,
+        )
+        need_captcha = False
+        if need_captcha_match:
+            raw_value = next(
+                (group for group in need_captcha_match.groups() if group is not None),
+                "",
+            )
+            need_captcha = str(raw_value).strip().lower() not in {
+                "",
+                "0",
+                "false",
+                "null",
+                "none",
+                "undefined",
+            }
+        visible_captcha_error = any(
+            marker in visible_plain.lower()
+            for marker in (
+                "请先输入验证码",
+                "请输入图形验证码",
+                "验证码不能为空",
+                "验证码不正确",
+                "验证码已失效",
+                "验证码已过期",
+                "验证码校验失败",
+                "图形验证码错误",
+                "需要验证码",
+                "captcha required",
+            )
+        )
+        if need_captcha or visible_captcha_error:
+            return "captcha_required", "IDS 统一认证需要验证码或额外校验"
+        if status_code >= 500:
+            return "ids_unavailable", f"IDS 统一认证暂时不可用（HTTP {status_code}）"
+        if status_code in {401, 403}:
+            return "access_denied", f"IDS 统一认证拒绝访问（HTTP {status_code}）"
         return "service_error", "IDS 统一认证未建立 xk 登录态"
 
     def _login_via_ids(self) -> AuthResult:
         cas_auth_url = self._cas_auth_url()
         try:
-            response = self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
+            self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
             if self._check_logged_in():
                 return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
         except Exception as exc:
-            return AuthResult(False, error_code="network_error", message=f"IDS 登录入口访问失败: {exc}")
+            return AuthResult(False, error_code="ids_unavailable", message=f"IDS 登录入口访问失败: {exc}")
 
         if not self.password:
             return AuthResult(False, error_code="missing_password", message="IDS 登录缺少密码")
 
+        credentials_submitted = False
         try:
             self._clear_runtime_cookies()
             login_page = self.session.get(cas_auth_url, timeout=30)
             login_text = self._decode_text(login_page)
-            execution_match = re.search(r'name="execution" value="(.*?)"', login_text)
-            salt_match = re.search(r'id="pwdEncryptSalt" value="(.*?)"', login_text)
-            if not execution_match or not salt_match:
+            cas_fields = extract_cas_login_fields(login_text)
+            if not cas_fields["execution"] or not cas_fields["pwd_encrypt_salt"]:
                 error_code, message = self._ids_error(login_text, login_page.status_code)
                 if error_code == "service_error":
-                    error_code = "protocol_error"
-                    message = "IDS 登录页缺少 execution 或 pwdEncryptSalt"
+                    error_code, message = classify_cas_login_page(
+                        login_text,
+                        status_code=login_page.status_code,
+                        final_url=str(getattr(login_page, "url", "") or ""),
+                    )
                 return AuthResult(False, error_code=error_code, message=message)
+            pre_auth_error_code, pre_auth_message = self._ids_error(
+                login_text,
+                login_page.status_code,
+            )
+            if pre_auth_error_code in {
+                "captcha_required",
+                "additional_verification_required",
+                "account_locked",
+                "rate_limited",
+                "access_denied",
+            }:
+                return AuthResult(False, error_code=pre_auth_error_code, message=pre_auth_message)
 
             form_data = {
                 "username": self.username,
-                "password": self._encrypt_password(self.password, salt_match.group(1)),
+                "password": self._encrypt_password(self.password, cas_fields["pwd_encrypt_salt"]),
                 "captcha": "",
                 "_eventId": "submit",
                 "cllt": "userNameLogin",
                 "dllt": "generalLogin",
                 "lt": "",
-                "execution": execution_match.group(1),
+                "execution": cas_fields["execution"],
             }
+            credentials_submitted = True
             login_response = self.session.post(
                 login_page.url,
                 data=form_data,
@@ -298,9 +395,18 @@ class HenuXkClient:
                 self._decode_text(login_response),
                 login_response.status_code,
             )
+            if error_code in IDS_SAFE_FALLBACK_ERROR_CODES:
+                error_code = "auth_state_unknown"
+                message = f"{message}；认证请求已提交，结果未知"
             return AuthResult(False, error_code=error_code, message=message)
         except Exception as exc:
-            return AuthResult(False, error_code="network_error", message=f"IDS 登录请求失败: {exc}")
+            if credentials_submitted:
+                return AuthResult(
+                    False,
+                    error_code="auth_state_unknown",
+                    message=f"IDS 登录请求已提交但结果未知: {exc}",
+                )
+            return AuthResult(False, error_code="ids_unavailable", message=f"IDS 登录页访问失败: {exc}")
 
     def login(self) -> bool:
         if self._check_logged_in():
@@ -320,6 +426,16 @@ class HenuXkClient:
         if ids_result.success:
             self.auth_result = ids_result
             return True
+
+        if ids_result.error_code not in IDS_SAFE_FALLBACK_ERROR_CODES:
+            self.auth_result = AuthResult(
+                False,
+                error_code=ids_result.error_code or "ids_auth_blocked",
+                message=f"{ids_result.message}。{IDS_FAIL_CLOSED_GUIDANCE}",
+                ids_error_code=ids_result.error_code,
+                ids_message=ids_result.message,
+            )
+            return False
 
         kingo_result = login_via_kingo(
             session=self.session,

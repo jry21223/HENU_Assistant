@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import sys
 
 
@@ -24,16 +25,17 @@ def test_root_help_exposes_empty_classroom_and_resource_topics() -> None:
     commands = "\n".join(payload["commands"])
     examples = "\n".join(payload["examples"])
 
-    assert "empty_classroom" in commands
+    assert "empty classroom" in commands
     assert "resource" in commands
-    assert "help empty_classroom" in examples
+    assert "help empty classroom" in examples
     assert "help resource" in examples
 
 
 def test_empty_classroom_parser_forwards_rich_filters() -> None:
     spec = inspect_cli_command(
-        "empty_classroom query --classroom-text 十号楼101 --type-code 05 "
-        "--min-capacity 80 --keyword 多媒体 --room-id 0001 --ttl-seconds 60 --max-stale-seconds 600"
+        "empty classroom query --classroom-text 十号楼101 --type-code 05 "
+        "--min-capacity 80 --keyword 多媒体 --room-id 0001 --term-code 2026,1 "
+        "--week 1 --day-of-week 1 --period 1 --ttl-seconds 60 --max-stale-seconds 600"
     )
 
     assert spec.resolved_tool == "empty_classroom_query"
@@ -46,8 +48,32 @@ def test_empty_classroom_parser_forwards_rich_filters() -> None:
     assert spec.params["max_stale_seconds"] == 600
 
 
+def test_empty_classroom_accepts_space_dialect_and_reports_all_missing_parameters() -> None:
+    spec = inspect_cli_command("empty classroom query")
+
+    assert spec.resolved_tool is None
+    assert spec.error == (
+        "空教室查询缺少参数：--term-code <学期>、--week <教学周>、"
+        "--day-of-week <星期1-7>、--period <大节1-5>。"
+    )
+    assert spec.help_topic == "empty_classroom"
+    assert spec.missing_params == (
+        "--term-code <学期>",
+        "--week <教学周>",
+        "--day-of-week <星期1-7>",
+        "--period <大节1-5>",
+    )
+
+
+def test_empty_classroom_rejects_agent_snake_case_dialect() -> None:
+    spec = inspect_cli_command("empty_classroom query")
+
+    assert spec.resolved_tool is None
+    assert "empty classroom" in str(spec.error)
+
+
 def test_empty_classroom_help_topic_documents_rich_views() -> None:
-    payload = build_help_payload("empty_classroom")
+    payload = build_help_payload("empty classroom")
     commands = "\n".join(payload["commands"])
 
     assert "day_matrix" in commands
@@ -121,6 +147,152 @@ def test_base_payload_keeps_library_locations_when_compacting() -> None:
 
     assert result["locations"]
     assert result["locations_truncated"] == 8
+
+
+def test_current_schedule_reply_uses_current_courses_not_first_daily_course() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    result = {
+        "success": True,
+        "msg": "按星期和时间匹配到 1 门课程（未验证教学周）",
+        "week_filter_applied": False,
+        "day_schedule": [
+            {"course": "早已结束的课程", "time": "1-2节", "classroom": "A101"},
+            {"course": "当前课程", "time": "3-4节", "classroom": "B201"},
+        ],
+        "current_courses": [
+            {
+                "course": "当前课程",
+                "time": "3-4节",
+                "classroom": "B201",
+                "clock_start": "10:10",
+                "clock_end": "11:50",
+            }
+        ],
+        "next_course": None,
+    }
+
+    reply = tool._build_reply_text(result)
+
+    assert "当前课程" in reply
+    assert "早已结束的课程" not in reply
+    assert "未验证教学周" in reply
+
+
+def test_week_schedule_keeps_a_compact_semantic_summary_under_qq_budget() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    schedule = {
+        f"星期{day}": [
+            {
+                "course": f"课程-{day}-{index}-" + ("超长课程名" * 100),
+                "time": f"{index}-{index + 1}节",
+                "classroom": "综合教学楼" + ("很长" * 40),
+            }
+            for index in range(1, 12)
+        ]
+        for day in "一二三四五"
+    }
+    result = {
+        "success": True,
+        "msg": "完整周课表（未按教学周过滤）",
+        "week_filter_applied": False,
+        "schedule": schedule,
+    }
+
+    tool._prepare_delivery_result(result)
+    tool._normalize_for_qq_delivery(result)
+
+    assert result["schedule_summary"]
+    assert result["schedule_summary"][0]["courses"]
+    assert "课程-一-1" in result["reply_text"]
+    assert "未按教学周过滤" in result["reply_text"]
+    assert len(json.dumps(result, ensure_ascii=False)) <= 2200
+
+
+def test_pathological_option_lists_still_fit_the_qq_payload_budget() -> None:
+    tool = BaseHenuTool.__new__(BaseHenuTool)
+    result = {
+        "success": True,
+        "msg": "查询完成",
+        "location_options": [
+            {
+                "location": "超长区域" * 100,
+                "area_id": str(index) * 100,
+                "description": "冗长说明" * 100,
+            }
+            for index in range(1000)
+        ],
+        "next_commands": ["library seats --location <区域>"],
+    }
+
+    tool._normalize_for_qq_delivery(result)
+
+    assert len(json.dumps(result, ensure_ascii=False)) <= 2200
+    assert result["success"] is True
+    assert result.get("payload_truncated") is True
+
+
+def test_course_status_reply_explains_closed_or_unknown_state() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+
+    closed = tool._build_reply_text(
+        {
+            "success": True,
+            "is_open": False,
+            "status_code": "closed",
+            "message": "当前不在选课时间范围内",
+            "time_range": {"message": "2026-09-01 09:00 至 2026-09-07 18:00"},
+        }
+    )
+    unknown = tool._build_reply_text(
+        {"success": True, "is_open": None, "status_code": "unknown", "message": ""}
+    )
+
+    assert "当前未开放" in closed
+    assert "2026-09-01" in closed
+    assert "暂时无法确认" in unknown
+    assert "操作完成" not in closed + unknown
+
+
+def test_library_seat_reply_names_reservation_semantics_and_defaults() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+
+    reply = tool._build_reply_text(
+        {
+            "success": True,
+            "query_semantics": "reservation_availability",
+            "date": "2026-08-12",
+            "time_window": "08:00-12:00",
+            "defaulted_fields": ["date", "start_time"],
+            "area": {"name": "第一自习室"},
+            "seats": [{"seat_no": "001", "status": "可预约"}],
+            "total_count": 195,
+            "available_count": 192,
+        }
+    )
+
+    assert "预约余位" in reply
+    assert "不代表当前在馆空座" in reply
+    assert "默认" in reply
+    assert "2026-08-12" in reply
+
+
+def test_empty_seminar_reply_does_not_invent_closed_or_fully_booked_reason() -> None:
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+
+    reply = tool._build_reply_text(
+        {
+            "success": True,
+            "msg": "没有匹配当前条件的研讨室",
+            "empty_reason": "no_matching_rooms",
+            "applied_filters": {"date": "2026-08-11", "members": ""},
+            "rooms": [],
+        }
+    )
+
+    assert "没有匹配" in reply
+    assert "不能据此判断" in reply
+    assert "已约满" not in reply
+    assert "未开放" not in reply
 
 
 def test_sensitive_cli_values_are_redacted_in_commands_and_params() -> None:
