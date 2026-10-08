@@ -90,7 +90,11 @@ def test_fixed_segment_query_exposes_actual_times_and_booking_window(monkeypatch
 
 def test_reservation_cli_preserves_explicit_choices_and_rejects_unknown_flags():
     from henu_plugin.cli import inspect_cli_command
-    assert inspect_cli_command("library operation-status").action == "library operation-status"
+
+    assert (
+        inspect_cli_command("library operation-status").action
+        == "library operation-status"
+    )
 
     spec = inspect_cli_command(
         "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 9点 --end-policy server_full_slot"
@@ -345,7 +349,9 @@ def test_concurrent_confirmations_submit_at_most_once(monkeypatch):
         assert any("✅" in r.get("reply_text", "") for r in results)
         await tool.call({"command": command}, session, 4)
         old = json.loads(plugin.storage["user:user-a:pending_operation"])["token"]
-        await tool.call({"command": command.replace("--seat-no 001", "--seat-no 002")}, session, 5)
+        await tool.call(
+            {"command": command.replace("--seat-no 001", "--seat-no 002")}, session, 5
+        )
         assert not (await tool.call({"command": "confirm " + old}, session, 6))[
             "success"
         ]
@@ -357,9 +363,20 @@ def test_concurrent_confirmations_submit_at_most_once(monkeypatch):
 @pytest.mark.parametrize("code,verified", [(0, True), (0, False), (9, False)])
 def test_real_school_submission_and_verification_chain(monkeypatch, code, verified):
     from campus_core import seat_reservation
-    monkeypatch.setattr(seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0))
-    records = [{"id": "77", "no": "001", "areaName": "三楼北附楼走廊", "day": "2026-10-10"}] if verified else []
-    bot, calls = school_bot(monkeypatch, submit_response={"code": code, "msg": "学校拒绝" if code else "操作成功"}, appointments=records)
+
+    monkeypatch.setattr(
+        seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+    )
+    records = (
+        [{"id": "77", "no": "001", "areaName": "三楼北附楼走廊", "day": "2026-10-10"}]
+        if verified
+        else []
+    )
+    bot, calls = school_bot(
+        monkeypatch,
+        submit_response={"code": code, "msg": "学校拒绝" if code else "操作成功"},
+        appointments=records,
+    )
     result = bot.reserve("16", "001", "2026-10-10", "09:00")
     assert result["success"] is verified
     assert result["submit_success"] is (code == 0)
@@ -370,64 +387,273 @@ def test_real_school_submission_and_verification_chain(monkeypatch, code, verifi
         assert result["msg"] == "学校拒绝"
 
 
-def test_changed_school_slot_and_blocked_replacement_invalidate_old_confirmation(monkeypatch):
-    import asyncio,json
+def test_changed_school_slot_and_blocked_replacement_invalidate_old_confirmation(
+    monkeypatch,
+):
+    import asyncio, json
     from pathlib import Path
     from unittest.mock import Mock
     import mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
-    from langbot_plugin.api.entities.builtin.provider.session import Session,LauncherTypes
+    from langbot_plugin.api.entities.builtin.provider.session import (
+        Session,
+        LauncherTypes,
+    )
     from test_confirmation_shortcut import Plugin
+
     async def run():
         from campus_core import seat_reservation
-        monkeypatch.setattr(seat_reservation,"_now_dt",lambda:dt.datetime(2026,10,9,9,0))
-        live_map=copy.deepcopy(MAP)
-        bot,_=school_bot(monkeypatch, space_map=live_map)
-        monkeypatch.setattr(mcp_server,"library_query",lambda **kw:bot.list_available_seats(location_name=kw.get("location",""),target_date=kw.get("target_date",""),preferred_time=kw.get("preferred_time","")))
-        submit=Mock(return_value={"success":True})
-        monkeypatch.setattr(mcp_server,"library_reserve",submit)
-        plugin=Plugin();plugin.service=HardenedHenuPluginService(Path(__file__).resolve().parents[1])
-        tool=HenuCliSafe();tool.plugin=plugin
-        session=Session(sender_id="user-a",launcher_id="user-a",launcher_type=LauncherTypes("person"))
-        command="library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
-        await tool.call({"command":command},session,1)
-        token=json.loads(plugin.storage['user:user-a:pending_operation'])['token']
-        live_map['date']['list'][0]['times'][0]['end']='22:00'
-        result=await tool.call({"command":"confirm "+token},session,2)
-        assert result['error_code']=='reservation_plan_changed'
+
+        monkeypatch.setattr(
+            seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+        )
+        live_map = copy.deepcopy(MAP)
+        bot, _ = school_bot(monkeypatch, space_map=live_map)
+        monkeypatch.setattr(
+            mcp_server,
+            "library_query",
+            lambda **kw: bot.list_available_seats(
+                location_name=kw.get("location", ""),
+                target_date=kw.get("target_date", ""),
+                preferred_time=kw.get("preferred_time", ""),
+            ),
+        )
+        submit = Mock(return_value={"success": True})
+        monkeypatch.setattr(mcp_server, "library_reserve", submit)
+        plugin = Plugin()
+        plugin.service = HardenedHenuPluginService(Path(__file__).resolve().parents[1])
+        tool = HenuCliSafe()
+        tool.plugin = plugin
+        session = Session(
+            sender_id="user-a",
+            launcher_id="user-a",
+            launcher_type=LauncherTypes("person"),
+        )
+        command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
+        await tool.call({"command": command}, session, 1)
+        token = json.loads(plugin.storage["user:user-a:pending_operation"])["token"]
+        live_map["date"]["list"][0]["times"][0]["end"] = "22:00"
+        result = await tool.call({"command": "confirm " + token}, session, 2)
+        assert result["error_code"] == "reservation_plan_changed"
         submit.assert_not_called()
-        await tool.call({"command":command},session,3)
-        token=json.loads(plugin.storage['user:user-a:pending_operation'])['token']
-        await tool.call({"command":command.replace('--seat-no 001','--seat-no 002')},session,4)
-        assert not (await tool.call({"command":"confirm "+token},session,5))['success']
+        await tool.call({"command": command}, session, 3)
+        token = json.loads(plugin.storage["user:user-a:pending_operation"])["token"]
+        await tool.call(
+            {"command": command.replace("--seat-no 001", "--seat-no 002")}, session, 4
+        )
+        assert not (await tool.call({"command": "confirm " + token}, session, 5))[
+            "success"
+        ]
         submit.assert_not_called()
+
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("response", [None, {}, {"msg": "unknown"}])
 def test_unknown_school_result_is_reported_as_uncertain(monkeypatch, response):
-    import asyncio,json
+    import asyncio, json
     from pathlib import Path
     import mcp_server
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     from henu_plugin.hardened_service import HardenedHenuPluginService
-    from langbot_plugin.api.entities.builtin.provider.session import Session,LauncherTypes
+    from langbot_plugin.api.entities.builtin.provider.session import (
+        Session,
+        LauncherTypes,
+    )
     from test_confirmation_shortcut import Plugin
+
     async def run():
         from campus_core import seat_reservation
-        monkeypatch.setattr(seat_reservation,"_now_dt",lambda:dt.datetime(2026,10,9,9,0))
-        bot,_=school_bot(monkeypatch)
-        monkeypatch.setattr(mcp_server,"library_query",lambda **kw:bot.list_available_seats(location_name=kw.get("location",""),target_date=kw.get("target_date",""),preferred_time=kw.get("preferred_time","")))
-        monkeypatch.setattr(mcp_server,"library_reserve",lambda **kw:response)
-        plugin=Plugin();plugin.service=HardenedHenuPluginService(Path(__file__).resolve().parents[1])
-        tool=HenuCliSafe();tool.plugin=plugin
-        session=Session(sender_id="user-a",launcher_id="user-a",launcher_type=LauncherTypes("person"))
-        command="library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
-        await tool.call({"command":command},session,1)
-        token=json.loads(plugin.storage['user:user-a:pending_operation'])['token']
-        await tool.call({"command":"confirm "+token},session,2)
-        result=await tool.call({"command":"library operation-status"},session,3)
-        assert result['operation_state']=='uncertain'
-        assert '✅' not in result['reply_text']
+
+        monkeypatch.setattr(
+            seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+        )
+        bot, _ = school_bot(monkeypatch)
+        monkeypatch.setattr(
+            mcp_server,
+            "library_query",
+            lambda **kw: bot.list_available_seats(
+                location_name=kw.get("location", ""),
+                target_date=kw.get("target_date", ""),
+                preferred_time=kw.get("preferred_time", ""),
+            ),
+        )
+        monkeypatch.setattr(mcp_server, "library_reserve", lambda **kw: response)
+        plugin = Plugin()
+        plugin.service = HardenedHenuPluginService(Path(__file__).resolve().parents[1])
+        tool = HenuCliSafe()
+        tool.plugin = plugin
+        session = Session(
+            sender_id="user-a",
+            launcher_id="user-a",
+            launcher_type=LauncherTypes("person"),
+        )
+        command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
+        await tool.call({"command": command}, session, 1)
+        token = json.loads(plugin.storage["user:user-a:pending_operation"])["token"]
+        await tool.call({"command": "confirm " + token}, session, 2)
+        result = await tool.call({"command": "library operation-status"}, session, 3)
+        assert result["operation_state"] == "uncertain"
+        assert "✅" not in result["reply_text"]
+
+    asyncio.run(run())
+
+
+def test_actual_write_payload_must_match_confirmed_plan(monkeypatch):
+    from campus_core import seat_reservation
+
+    monkeypatch.setattr(
+        seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+    )
+    changed = copy.deepcopy(MAP)
+    changed["date"]["list"][0]["times"][0]["end"] = "22:00"
+    bot, calls = school_bot(monkeypatch, space_map=changed, submit_response={"code": 0})
+    expected = {
+        "area_id": "16",
+        "seat_id": "100",
+        "date": "2026-10-10",
+        "segment": "1772124",
+        "start": "08:00",
+        "end": "23:00",
+        "fixed_segment": True,
+    }
+    result = bot.reserve("16", "001", "2026-10-10", "09:00", expected_plan=expected)
+    assert result["error_code"] == "reservation_plan_changed"
+    assert not any(path == "/v4/space/confirm" for path, _ in calls)
+
+
+@pytest.mark.parametrize("code,verified", [(0, True), (0, False), (9, False)])
+def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, verified):
+    import asyncio, json
+    from pathlib import Path
+    from types import SimpleNamespace
+    import mcp_server
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+    from henu_plugin.confirmation_shortcut import ConfirmationShortcut
+    from langbot_plugin.api.entities.builtin.provider.session import (
+        Session,
+        LauncherTypes,
+    )
+    from test_confirmation_shortcut import Plugin, ctx
+
+    async def run():
+        from campus_core import seat_reservation
+
+        monkeypatch.setattr(
+            seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+        )
+        records = (
+            [
+                {
+                    "id": "77",
+                    "no": "001",
+                    "areaName": "三楼北附楼走廊",
+                    "day": "2026-10-10",
+                }
+            ]
+            if verified
+            else []
+        )
+        bot, calls = school_bot(
+            monkeypatch,
+            submit_response={"code": code, "msg": "学校拒绝" if code else "操作成功"},
+            appointments=records,
+        )
+        monkeypatch.setattr(
+            mcp_server,
+            "library_query",
+            lambda **kw: bot.list_available_seats(
+                location_name=kw.get("location", ""),
+                target_date=kw.get("target_date", ""),
+                preferred_time=kw.get("preferred_time", ""),
+            ),
+        )
+        monkeypatch.setattr(
+            mcp_server,
+            "library_reserve",
+            lambda **kw: bot.reserve(
+                kw["location"],
+                kw["seat_no"],
+                kw["target_date"],
+                kw["preferred_time"],
+                preferred_end_time=kw.get("preferred_end_time"),
+                expected_plan=kw.get("expected_plan"),
+            ),
+        )
+        plugin = Plugin()
+        plugin.service = HardenedHenuPluginService(Path(__file__).resolve().parents[1])
+        tool = HenuCliSafe()
+        tool.plugin = plugin
+        session = Session(
+            sender_id="user-a",
+            launcher_id="user-a",
+            launcher_type=LauncherTypes("person"),
+        )
+        command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
+        await tool.call({"command": command}, session, 1)
+        flow = ConfirmationShortcut(SimpleNamespace(plugin=plugin))
+        request = ctx(query_id=2)
+        await flow.handle(request)
+        await flow.tasks["user-a"]
+        status = await tool.call({"command": "library operation-status"}, session, 3)
+        assert status["operation_state"] == (
+            "committed" if verified else "uncertain" if code == 0 else "failed"
+        )
+        assert sum(path == "/v4/space/confirm" for path, _ in calls) == 1
+        assert ("✅" in str(request.reply.call_args_list)) is verified
+
+    asyncio.run(run())
+
+
+def test_changed_retry_constraints_create_a_new_confirmation(monkeypatch):
+    import asyncio, json
+    from pathlib import Path
+    import mcp_server
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+    from langbot_plugin.api.entities.builtin.provider.session import (
+        Session,
+        LauncherTypes,
+    )
+    from test_confirmation_shortcut import Plugin
+
+    async def run():
+        from campus_core import seat_reservation
+
+        monkeypatch.setattr(
+            seat_reservation, "_now_dt", lambda: dt.datetime(2026, 10, 9, 9, 0)
+        )
+        bot, _ = school_bot(monkeypatch)
+        monkeypatch.setattr(
+            mcp_server,
+            "library_query",
+            lambda **kw: bot.list_available_seats(
+                location_name=kw.get("location", ""),
+                target_date=kw.get("target_date", ""),
+                preferred_time=kw.get("preferred_time", ""),
+            ),
+        )
+        plugin = Plugin()
+        plugin.service = HardenedHenuPluginService(Path(__file__).resolve().parents[1])
+        tool = HenuCliSafe()
+        tool.plugin = plugin
+        session = Session(
+            sender_id="user-a",
+            launcher_id="user-a",
+            launcher_type=LauncherTypes("person"),
+        )
+        command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot --max-attempts 30"
+        await tool.call({"command": command}, session, 1)
+        first = json.loads(plugin.storage["user:user-a:pending_operation"])
+        await tool.call(
+            {"command": command.replace("--max-attempts 30", "--max-attempts 1")},
+            session,
+            2,
+        )
+        second = json.loads(plugin.storage["user:user-a:pending_operation"])
+        assert first["token"] != second["token"]
+        assert "--max-attempts 1" in second["command"]
+
     asyncio.run(run())

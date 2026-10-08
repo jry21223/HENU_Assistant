@@ -94,7 +94,8 @@ class HenuCli(BaseHenuTool):
         if spec.resolved_tool in WRITE_TOOL_NAMES and not stopping_yuketang:
             parameter_error = self._write_parameter_error(spec)
             if parameter_error:
-                await self._supersede_library_pending(storage_key, conversation_context(session), query_id, {"success": False, "msg": parameter_error})
+                if spec.resolved_tool == "library_reserve":
+                    await self._supersede_library_pending(storage_key, conversation_context(session), query_id, {"success": False, "msg": parameter_error})
                 return {
                     "success": False,
                     "error_code": "confirmation_parameters_incomplete",
@@ -188,6 +189,7 @@ class HenuCli(BaseHenuTool):
         area = result.get("area") or {}
         msg = f"{area.get('name') or p['location']}，座位 {p['seat_no']}，{p['target_date']}，实际 {rules['effective_start']}～{rules['effective_end']}。{prefix}你选择的 {p['preferred_time']} 用于选时段。"
         signature = {"area_id": area.get("id"), "seat_id": result["seats"][0].get("id"), "date": result.get("target_date") or p["target_date"], "segment": rules.get("segment"), "start": rules["effective_start"], "end": rules["effective_end"], "fixed_segment": rules.get("fixed_segment")}
+        signature.update({key: p.get(key) for key in ("retry_until", "max_attempts", "retry_interval_seconds")})
         return {"success": True, "reply_text": msg, "reservation_rules": rules, "library_plan": signature}
 
     @staticmethod
@@ -306,6 +308,7 @@ class HenuCli(BaseHenuTool):
                 "msg": f"保存待确认操作失败: {exc}",
             }
 
+        remaining = max(0, int(pending["expires_at"] - time.time()))
         confirm_command = "确认"
         action_text = action or "外部写操作"
         summary_text = parameter_summary or "参数已规范化"
@@ -316,10 +319,10 @@ class HenuCli(BaseHenuTool):
             "msg": f"{action_text} 尚未执行，需要用户在下一条消息中明确确认。",
             "reply_text": (
                 f"即将执行：{action_text}；{summary_text}。本次尚未提交。"
-                f"请核对后在下一条消息直接回复“{confirm_command}”（5 分钟内有效）。"
+                f"请核对后在下一条消息直接回复“{confirm_command}”（剩余 {remaining} 秒有效）。"
             ),
             "confirmation_command": confirm_command,
-            "expires_in_seconds": max(0, int(pending["expires_at"] - time.time())),
+            "expires_in_seconds": remaining,
             "retry_safe": True,
             "llm_hint": "必须等待用户发送新的确认消息；禁止在当前轮次自动调用 confirm。",
             "cli": {"mode": "confirmation", "action": action_text},
@@ -401,7 +404,7 @@ class HenuCli(BaseHenuTool):
                         msg = "学校实际预约计划已变化，旧确认已失效，本次未提交；请重新预览并确认。"
                         result = {"success": False, "error_code": "reservation_plan_changed", "msg": msg, "reply_text": msg}
                 if result is None:
-                    result = self._mark_storage_commit_state(await super().call({"command": command}, session, query_id))
+                    result = self._mark_storage_commit_state(await super().call({"command": command, "_library_expected_plan": pending.get("library_plan")}, session, query_id))
                 if not isinstance(result, dict) or not isinstance(result.get("success"), bool):
                     result = {"success": False, "outcome_unknown": True, "msg": "操作结果未明确返回，请查询当前预约，不要重复提交。"}
                 if spec.resolved_tool == "library_reserve" and result.get("success") is True:

@@ -465,7 +465,10 @@ class HenuPluginService:
                 "next_commands": ["help"],
             }
 
-        result = handler(spec.params)
+        execution_params = dict(spec.params)
+        if spec.resolved_tool == "library_reserve" and isinstance(params.get("_library_expected_plan"), dict):
+            execution_params["expected_plan"] = params["_library_expected_plan"]
+        result = handler(execution_params)
         if not isinstance(result, dict):
             result = {
                 "success": False,
@@ -728,6 +731,7 @@ class HenuPluginService:
 
     def _library_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.library_reserve(
+            expected_plan=params.get("expected_plan"),
             location=_text(params.get("location")),
             seat_no=_text(params.get("seat_no")),
             target_date=_text(params.get("target_date")),

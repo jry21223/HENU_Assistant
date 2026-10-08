@@ -2121,6 +2121,7 @@ def _library_reserve_impl(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2162,6 +2163,7 @@ def _library_reserve_impl(
         retry_until=str(retry_until or ""),
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
+        **({"expected_plan": expected_plan} if expected_plan is not None else {}),
     )
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):
@@ -3357,6 +3359,7 @@ def library_reserve(
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    expected_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -3402,6 +3405,7 @@ def library_reserve(
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
+        expected_plan=expected_plan,
     )
 
 

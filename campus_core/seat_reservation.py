@@ -858,6 +858,7 @@ class SeatReservationMixin:
         target_date: str,
         preferred_time: str | None = None,
         preferred_end_time: str | None = None,
+        expected_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         area_id, area_name = self._resolve_area(location_name, target_date)
         space_map = self._get_space_map(area_id)
@@ -917,6 +918,9 @@ class SeatReservationMixin:
                 },
             }
 
+        actual = {"area_id": str(area_id), "seat_id": str(target_seat.get("id") or ""), "date": target_date, "segment": plan["confirm_payload"].get("segment"), "start": plan["seat_query"].get("start_time"), "end": plan["seat_query"].get("end_time"), "fixed_segment": str(plan.get("reserve_type")) == "1"}
+        if expected_plan is not None and any(expected_plan.get(key) != value for key, value in actual.items()):
+            return {"success": False, "retryable": False, "not_submitted": True, "error_code": "reservation_plan_changed", "msg": "实际提交计划与确认预览不一致，本次未提交；请重新预览并确认。"}
         confirm_payload = dict(plan["confirm_payload"])
         confirm_payload["seat_id"] = str(target_seat.get("id"))
         confirm_resp = self._post_json(
@@ -977,6 +981,7 @@ class SeatReservationMixin:
         retry_until: str | None = None,
         retry_interval_seconds: int = 2,
         max_attempts: int = 1,
+        expected_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
             dt.date.fromisoformat(target_date)
@@ -999,7 +1004,7 @@ class SeatReservationMixin:
             attempts_limit = max(1, min(120, int(max_attempts)))
         except (TypeError, ValueError):
             attempts_limit = 1
-        if retry_deadline is not None and attempts_limit <= 1:
+        if retry_deadline is not None and attempts_limit <= 1 and expected_plan is None:
             attempts_limit = 120
 
         last_result: dict[str, Any] = {}
@@ -1015,6 +1020,7 @@ class SeatReservationMixin:
                     target_date=target_date,
                     preferred_time=preferred_time,
                     preferred_end_time=preferred_end_time,
+                    expected_plan=expected_plan,
                 )
             except Exception as exc:
                 message = f"预约流程异常: {exc}"
