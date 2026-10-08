@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import shlex
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
-from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import (
     conversation_context,
     WRITE_TOOL_NAMES,
@@ -18,6 +20,13 @@ from henu_plugin.confirmation import (
 
 class HenuCli(BaseHenuTool):
     tool_name = "henu_cli"
+    _confirmation_locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+    @classmethod
+    def _confirmation_lock(cls, storage_key):
+        return cls._confirmation_locks.setdefault(
+            (id(asyncio.get_running_loop()), storage_key), asyncio.Lock()
+        )
 
     def should_preload_runtime_context(self, params):
         command = params.get("command") if isinstance(params, dict) else ""
@@ -41,6 +50,10 @@ class HenuCli(BaseHenuTool):
             return await super().call(params, session, query_id)
 
         storage_key = _resolve_storage_key(session, identity_hint)
+        if raw_command.strip().lower() == "library operation-status":
+            return await self.operation_status(
+                storage_key, conversation_context(session)
+            )
         if self._is_confirmation_command(raw_command):
             return await self._execute_confirmation(
                 raw_command=raw_command,
@@ -88,17 +101,75 @@ class HenuCli(BaseHenuTool):
                     session=session,
                     query_id=query_id,
                 )
+            summary = self._operation_summary(spec)
+            if spec.resolved_tool == "library_reserve":
+                preview = await self._library_preflight(spec, session, query_id)
+                if not preview.get("success"):
+                    return preview
+                summary = preview["reply_text"]
             return await self._request_confirmation(
                 storage_key=storage_key,
                 canonical_command=clean_command,
                 action=spec.action,
-                parameter_summary=self._operation_summary(spec),
+                parameter_summary=summary,
                 query_id=query_id,
                 conversation=conversation_context(session),
             )
 
         result = await super().call({"command": clean_command}, session, query_id)
         return self._mark_storage_commit_state(result)
+
+    async def _library_preflight(self, spec, session, query_id):
+        p = spec.params
+        command = shlex.join(
+            [
+                "library",
+                "plan",
+                "--location",
+                p["location"],
+                "--seat-no",
+                p["seat_no"],
+                "--date",
+                p["target_date"],
+                "--time",
+                p["preferred_time"],
+            ]
+        )
+        if p.get("preferred_end_time"):
+            command += " --end-time " + shlex.quote(p["preferred_end_time"])
+        result = await super().call({"command": command}, session, query_id)
+        if not isinstance(result, dict) or not result.get("success"):
+            return result
+        rules = result.get("reservation_rules") or {}
+        window = rules.get("booking_window") or {}
+        if not rules.get("effective_start") or not rules.get("effective_end"):
+            return {
+                "success": False,
+                "error_code": "reservation_rules_missing",
+                "msg": "学校未返回明确的实际预约时段，未生成确认请求。",
+                "reply_text": "学校未返回明确的实际预约时段，未生成确认请求。",
+            }
+        if window.get("open_now") is False:
+            msg = f"当前不在学校开放预约时间 {window['start']}～{window['end']} 内，未提交；请在开放后重新发起。"
+            return {
+                "success": False,
+                "error_code": "booking_window_closed",
+                "msg": msg,
+                "reply_text": msg,
+                "reservation_rules": rules,
+            }
+        if not result.get("seats"):
+            msg = f"座位 {p['seat_no']} 当前不可预约，未生成确认请求。"
+            return {
+                "success": False,
+                "error_code": "seat_unavailable",
+                "msg": msg,
+                "reply_text": msg,
+            }
+        prefix = "学校仅支持完整固定时段；" if rules.get("fixed_segment") else ""
+        area = result.get("area") or {}
+        msg = f"{area.get('name') or p['location']}，座位 {p['seat_no']}，{p['target_date']}，实际 {rules['effective_start']}～{rules['effective_end']}。{prefix}你选择的 {p['preferred_time']} 用于选时段。"
+        return {"success": True, "reply_text": msg, "reservation_rules": rules}
 
     @staticmethod
     def _write_parameter_error(spec: Any) -> str:
@@ -116,6 +187,15 @@ class HenuCli(BaseHenuTool):
         if missing:
             flags = "、".join("--" + key.replace("_", "-") for key in missing)
             return f"外部写操作必须显式提供完整参数，缺少：{flags}。不会使用账号默认值或隐式日期。"
+        if tool == "library_reserve":
+            if not params.get("end_policy"):
+                return (
+                    "请提供结束时间，或选择‘到最晚’（--end-policy server_full_slot）。"
+                )
+            if params["end_policy"] in {"ask", "explicit_end"} and not params.get(
+                "preferred_end_time"
+            ):
+                return "请提供明确结束时间 --end-time，或选择‘到最晚’。"
         if tool == "seminar_signin" and params.get("auto_scan"):
             return "LangBot 写操作确认不允许 seminar signin --auto-scan；请先查询签到任务并指定 --record-id。"
         return ""
@@ -154,11 +234,40 @@ class HenuCli(BaseHenuTool):
         query_id: int,
         conversation: dict[str, str],
     ) -> dict[str, Any]:
+        async with self._confirmation_lock(storage_key):
+            return await self._request_confirmation_unlocked(
+                storage_key=storage_key,
+                canonical_command=canonical_command,
+                action=action,
+                parameter_summary=parameter_summary,
+                query_id=query_id,
+                conversation=conversation,
+            )
+
+    async def _request_confirmation_unlocked(
+        self,
+        *,
+        storage_key,
+        canonical_command,
+        action,
+        parameter_summary,
+        query_id,
+        conversation,
+    ):
+        existing = await self._load_pending(storage_key)
+        same = (
+            existing.get("schema") == "henu.pending-operation.v1"
+            and existing.get("command") == canonical_command
+            and existing.get("conversation") == conversation
+            and float(existing.get("expires_at") or 0) > time.time()
+        )
         pending = create_pending_operation(
             storage_key=storage_key,
             canonical_command=canonical_command,
             query_id=query_id,
         )
+        if same:
+            pending = existing
         key = pending_storage_key(storage_key)
         pending['conversation'] = conversation
         try:
@@ -186,7 +295,7 @@ class HenuCli(BaseHenuTool):
                 f"请核对后在下一条消息直接回复“{confirm_command}”（5 分钟内有效）。"
             ),
             "confirmation_command": confirm_command,
-            "expires_in_seconds": 300,
+            "expires_in_seconds": max(0, int(pending["expires_at"] - time.time())),
             "retry_safe": True,
             "llm_hint": "必须等待用户发送新的确认消息；禁止在当前轮次自动调用 confirm。",
             "cli": {"mode": "confirmation", "action": action_text},
@@ -218,54 +327,153 @@ class HenuCli(BaseHenuTool):
         )
 
     async def _execute_pending(
-        self,
-        *,
-        token: str,
-        storage_key: str,
-        canonical_command: str,
-        session,
-        query_id: int,
-        pending: Any = None,
-    ) -> dict[str, Any]:
-        if pending is None:
+        self, *, token, storage_key, canonical_command, session, query_id, pending=None
+    ):
+        async with self._confirmation_lock(storage_key):
             pending = await self._load_pending(storage_key)
-        check = validate_pending_operation(
-            pending,
-            token=token,
-            storage_key=storage_key,
-            canonical_command=canonical_command,
-            query_id=query_id,
-        )
-        if not check.ok:
-            return {
-                "success": False,
-                "error_code": "confirmation_invalid",
-                "msg": check.message,
-                "retry_safe": True,
-            }
-
-        spec = inspect_cli_command(canonical_command)
-        if spec.resolved_tool not in WRITE_TOOL_NAMES:
-            return {
-                "success": False,
-                "error_code": "confirmation_scope_invalid",
-                "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
-            }
-
-        result = await super().call({"command": canonical_command}, session, query_id)
-        result = self._mark_storage_commit_state(result)
-        if isinstance(result, dict) and (
-            result.get("success") or result.get("external_committed")
-        ):
+            if pending.get("conversation") != conversation_context(session):
+                return {
+                    "success": False,
+                    "error_code": "confirmation_invalid",
+                    "msg": "确认会话与原操作不一致，未执行。",
+                }
+            command = canonical_command or str(pending.get("command") or "")
+            check = validate_pending_operation(
+                pending,
+                token=token,
+                storage_key=storage_key,
+                canonical_command=command,
+                query_id=query_id,
+            )
+            if not check.ok:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_invalid",
+                    "msg": check.message,
+                    "retry_safe": True,
+                }
+            spec = inspect_cli_command(command)
+            if spec.error or spec.resolved_tool not in WRITE_TOOL_NAMES:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_scope_invalid",
+                    "msg": "待确认操作无效，未执行。",
+                }
             try:
-                await self.plugin.set_plugin_storage(
-                    pending_storage_key(storage_key), b"{}"
+                await self._store_receipt(storage_key, pending, query_id, "executing")
+            except Exception:
+                return {
+                    "success": False,
+                    "error_code": "confirmation_storage_failed",
+                    "msg": "保存执行状态失败，未提交。",
+                }
+            try:
+                result = self._mark_storage_commit_state(
+                    await super().call({"command": command}, session, query_id)
+                )
+            except BaseException:
+                await self._store_receipt(storage_key, pending, query_id, "uncertain")
+                raise
+            if spec.resolved_tool == "library_reserve" and result.get("success"):
+                result["reply_text"] = "✅ 预约成功。" + str(
+                    result.get("reply_text") or result.get("msg") or ""
+                )
+            committed = bool(result.get("success") or result.get("external_committed"))
+            uncertain = (
+                bool(
+                    result.get("submit_success")
+                    or (result.get("tool_result") or {}).get("submit_success")
+                )
+                and not committed
+            )
+            status = (
+                "committed" if committed else "uncertain" if uncertain else "failed"
+            )
+            try:
+                await self._store_receipt(
+                    storage_key, pending, query_id, status, result
                 )
             except Exception:
-                # The Tool result already distinguishes an external commit from
-                # local persistence. Do not mask a completed campus operation.
-                result.setdefault("confirmation_cleanup_failed", True)
+                result["confirmation_cleanup_failed"] = True
+            result["retry_safe"] = False
         return result
+
+    async def _store_receipt(self, storage_key, pending, query_id, status, result=None):
+        result = result if isinstance(result, dict) else {}
+        summary = {
+            key: result[key]
+            for key in (
+                "success",
+                "msg",
+                "external_committed",
+                "storage_persisted",
+                "submit_success",
+            )
+            if key in result
+        }
+        if "msg" in summary:
+            summary["msg"] = str(summary["msg"])[:600]
+        receipt = {
+            "schema": "henu.confirmation-receipt.v1",
+            "status": status,
+            "command": pending.get("command", ""),
+            "conversation": pending.get("conversation"),
+            "created_query_id": pending.get("created_query_id"),
+            "consumed_query_id": query_id,
+            "updated_at": time.time(),
+            "result": summary,
+        }
+        task = asyncio.create_task(
+            self.plugin.set_plugin_storage(
+                pending_storage_key(storage_key),
+                json.dumps(receipt, ensure_ascii=False).encode(),
+            )
+        )
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await task
+            raise
+
+    async def operation_status(self, storage_key, conversation):
+        pending = await self._load_pending(storage_key)
+        if pending.get("conversation") != conversation or not str(
+            pending.get("command") or ""
+        ).startswith("library "):
+            return {
+                "success": False,
+                "operation_state": "none",
+                "reply_text": "当前聊天没有图书馆操作记录。",
+            }
+        state = pending.get("status")
+        if pending.get("schema") == "henu.pending-operation.v1":
+            state = (
+                "pending"
+                if float(pending.get("expires_at") or 0) > time.time()
+                else "expired"
+            )
+        messages = {
+            "pending": "预约尚未提交，请核对已展示的实际时段后回复‘确认’。",
+            "expired": "确认已过期，预约未提交；请重新发起。",
+            "executing": "确认已收到，操作正在执行，请等待结果，不要重复提交。",
+            "committed": "已执行成功；如需查看当前预约，请查询 library current。",
+            "failed": "已执行，但未成功："
+            + str(
+                (pending.get("result") or {}).get("msg")
+                or "学校未返回明确原因，请查询当前预约。"
+            ),
+            "uncertain": "操作已发起，但结果尚未核实；请查询 library current，不要重复提交。",
+        }
+        msg = messages.get(state, "操作记录无法识别，请查询当前预约。")
+        return {
+            "success": state == "committed",
+            "operation_state": state or "uncertain",
+            "msg": msg,
+            "reply_text": msg,
+            "confirmation_required": state == "pending",
+            "retry_safe": False,
+            "next_commands": ["library current"],
+        }
 
     async def _load_pending(self, storage_key: str) -> dict[str, Any]:
         try:
@@ -291,8 +499,24 @@ class HenuCli(BaseHenuTool):
     def _validate_identity(session, identity_hint: dict[str, Any]) -> str:
         launcher_type = getattr(getattr(session, "launcher_type", ""), "value", getattr(session, "launcher_type", ""))
         launcher_type = str(launcher_type or "").lower()
-        sender_id = str(identity_hint.get("sender_id") or getattr(session, "sender_id", "") or "").strip()
-        launcher_id = str(identity_hint.get("launcher_id") or getattr(session, "launcher_id", "") or "").strip()
+        sender_id = str(getattr(session, "sender_id", "") or "").strip()
+        launcher_id = str(getattr(session, "launcher_id", "") or "").strip()
+        trusted = {
+            "sender_id": sender_id,
+            "launcher_id": launcher_id,
+            "launcher_type": launcher_type,
+        }
+        for field, trusted_value in trusted.items():
+            hinted_value = identity_hint.get(field)
+            if hinted_value in (None, ""):
+                continue
+            normalized_hint = str(
+                getattr(hinted_value, "value", hinted_value) or ""
+            ).strip()
+            if field == "launcher_type":
+                normalized_hint = normalized_hint.lower()
+            if normalized_hint != trusted_value:
+                return "调用身份与请求上下文不一致，已拒绝访问任何个人数据。"
         if launcher_type == "group" and sender_id in {"", "0", "None", "none"}:
             return "群聊缺少发送者身份，已拒绝访问任何个人账号或预约数据。"
         if sender_id in {"", "0", "None", "none"} and launcher_id in {"", "0", "None", "none"}:

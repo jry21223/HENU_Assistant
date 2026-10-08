@@ -243,7 +243,6 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
-
     if normalized == "course":
         return {
             "topic": normalized,
@@ -286,18 +285,23 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library locations [--date YYYY-MM-DD]",
                 "library seats [--location <区域>|--area-id <ID>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM]",
                 "library current",
+                "library operation-status",
+                "library plan --area-id <ID> --seat-no <座位> --date YYYY-MM-DD --time HH:MM",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
-                "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
+                "library reserve (--location <区域>|--area-id <ID>) --seat-no <座位> --date YYYY-MM-DD --time HH:MM (--end-time HH:MM|--end-policy server_full_slot) [--retry-until HH:MM] [--max-attempts 30]",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
             "examples": [
                 "library current",
                 "library seats --location 金明馆北区 --date 2026-03-30 --time 08:00",
-                "library reserve --location 金明馆北区 --seat-no 201 --date 2026-03-30",
+                "library reserve --area-id 16 --seat-no 001 --date YYYY-MM-DD --time 09:00 --end-policy server_full_slot",
             ],
             "tips": [
-                "先用 `library current` 或 `library records` 看现状。",
+                "先查 locations、seats 或 plan；固定分段的实际起止以学校返回值为准。",
+                "空位不等于当前允许提交；预约前进行只读预检。",
+                "只有日期、时间与结束策略齐全才生成确认；不使用查询默认值。",
+                "追问是否成功用 library operation-status；失败原因不能改写成尚未确认。",
                 "取消与签到属于真实写操作，只认 `success=true`。",
             ],
         }
@@ -951,6 +955,7 @@ def _parse_course(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
 
     return _error_spec(raw, f"未知命令 `course {argv[1]}`。", help_topic="course")
 
+
 def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if len(argv) == 1:
         return _help_spec(raw, argv, "library")
@@ -959,9 +964,124 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "library")
 
-    options, _, error = _parse_options(argv[2:])
+    options, positionals, error = _parse_options(argv[2:])
     if error:
         return _error_spec(raw, error, help_topic="library")
+
+    common = {
+        "location",
+        "area_id",
+        "date",
+        "target_date",
+        "time",
+        "preferred_time",
+        "end_time",
+        "preferred_end_time",
+    }
+    allowed_by_action = {
+        "locations": {"date", "target_date"},
+        "areas": {"date", "target_date"},
+        **{name: common for name in ("seats", "seat", "available", "free")},
+        "plan": common | {"seat_no"},
+        **{
+            name: common
+            | {
+                "seat_no",
+                "end_policy",
+                "retry_until",
+                "retry_interval_seconds",
+                "max_attempts",
+            }
+            for name in ("reserve", "book")
+        },
+        "current": set(),
+        "now": set(),
+        "operation-status": set(),
+        "records": {"record_type", "page", "limit"},
+        "history": {"record_type", "page", "limit"},
+        "signin": {"record_id"},
+        "checkin": {"record_id"},
+        "cancel": {"record_id", "record_type"},
+    }
+    unknown = set(options) - allowed_by_action.get(sub, set())
+    if unknown or positionals:
+        return _error_spec(
+            raw,
+            "不支持的图书馆参数：" + ", ".join(sorted(unknown) + positionals),
+            help_topic="library",
+        )
+    for key, value in options.items():
+        if value is True or not str(value).strip():
+            return _error_spec(
+                raw, f"--{key.replace('_', '-')} 缺少值。", help_topic="library"
+            )
+    if sub == "operation-status":
+        return CliCommandSpec(
+            raw=raw,
+            argv=argv,
+            action="library operation-status",
+            should_preload_runtime_context=False,
+        )
+    for short, long in (
+        ("date", "target_date"),
+        ("time", "preferred_time"),
+        ("end_time", "preferred_end_time"),
+    ):
+        if short in options and long in options and options[short] != options[long]:
+            return _error_spec(
+                raw, f"--{short} 与 --{long} 冲突。", help_topic="library"
+            )
+    if "location" in options and "area_id" in options:
+        return _error_spec(
+            raw, "--location 与 --area-id 请选择一个。", help_topic="library"
+        )
+    for key in ("time", "preferred_time", "end_time", "preferred_end_time"):
+        if key in options:
+            if key in {"end_time", "preferred_end_time"} and options[key] == "到最晚":
+                if options.get("end_policy") not in (None, "server_full_slot"):
+                    return _error_spec(
+                        raw,
+                        "到最晚需要 --end-policy server_full_slot。",
+                        help_topic="library",
+                    )
+                options.pop(key)
+                options["end_policy"] = "server_full_slot"
+                continue
+            from campus_core.seat_reservation import SeatReservationMixin
+
+            try:
+                options[key] = SeatReservationMixin._reservation_time(options[key])
+            except RuntimeError as exc:
+                return _error_spec(raw, str(exc), help_topic="library")
+    date_text = _string_option(options, "date") or _string_option(
+        options, "target_date"
+    )
+    if date_text:
+        from datetime import date
+
+        try:
+            if date.fromisoformat(date_text).isoformat() != date_text:
+                raise ValueError
+        except ValueError:
+            return _error_spec(raw, "日期必须为 YYYY-MM-DD。", help_topic="library")
+    end_time = _string_option(options, "end_time") or _string_option(
+        options, "preferred_end_time"
+    )
+    policy = _string_option(options, "end_policy") or (
+        "explicit_end" if end_time else ""
+    )
+    if policy and policy not in {"ask", "explicit_end", "server_full_slot"}:
+        return _error_spec(
+            raw,
+            "end-policy 仅支持 ask、explicit_end、server_full_slot。",
+            help_topic="library",
+        )
+    if policy == "server_full_slot" and end_time:
+        return _error_spec(
+            raw,
+            "完整时段与 --end-time 冲突，请选择一种结束策略。",
+            help_topic="library",
+        )
 
     if sub in {"locations", "areas"}:
         return CliCommandSpec(
@@ -975,18 +1095,23 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             action="library locations",
             should_preload_runtime_context=True,
         )
-    if sub in {"seats", "seat", "available", "free"}:
+    if sub in {"seats", "seat", "available", "free", "plan"}:
         return CliCommandSpec(
             raw=raw,
             argv=argv,
             resolved_tool="library_query",
             params={
-                "view": "seats",
+                "view": "plan" if sub == "plan" else "seats",
+                "seat_no": _string_option(options, "seat_no"),
                 "location": _string_option(options, "location"),
                 "area_id": _string_option(options, "area_id"),
-                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
-                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
-                "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+                "target_date": _string_option(options, "date")
+                or _string_option(options, "target_date"),
+                "preferred_time": _string_option(options, "time")
+                or _string_option(options, "preferred_time")
+                or "08:00",
+                "preferred_end_time": _string_option(options, "end_time")
+                or _string_option(options, "preferred_end_time"),
             },
             action=f"library {sub}",
             should_preload_runtime_context=True,
@@ -1032,11 +1157,16 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             argv=argv,
             resolved_tool="library_reserve",
             params={
-                "location": _string_option(options, "location"),
+                "location": _string_option(options, "location")
+                or _string_option(options, "area_id"),
                 "seat_no": _string_option(options, "seat_no"),
-                "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
-                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
-                "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+                "target_date": _string_option(options, "date")
+                or _string_option(options, "target_date"),
+                "preferred_time": _string_option(options, "time")
+                or _string_option(options, "preferred_time"),
+                "preferred_end_time": _string_option(options, "end_time")
+                or _string_option(options, "preferred_end_time"),
+                "end_policy": policy,
                 "retry_until": _string_option(options, "retry_until"),
                 "retry_interval_seconds": retry_interval,
                 "max_attempts": max_attempts,
@@ -1769,10 +1899,12 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     return _error_spec(raw, f"未知命令 `yuketang exam {argv[2]}`。", help_topic="yuketang exam")
 
 
-def _parse_yuketang_listop(raw: str, argv: tuple[str, ...], scope: str, help_topic: str) -> CliCommandSpec:
+def _parse_yuketang_listop(
+    raw: str, argv: tuple[str, ...], scope: str, help_topic: str
+) -> CliCommandSpec:
     base = 3 if scope in {"lesson_whitelist", "lesson_blacklist", "exam_whitelist"} else 2
     if len(argv) <= base:
-        return _error_spec(raw, f"缺少 add/remove/clear 子操作。", help_topic=help_topic)
+        return _error_spec(raw, "缺少 add/remove/clear 子操作。", help_topic=help_topic)
 
     op = argv[base].lower()
     if op not in {"add", "remove", "clear", "新增", "移除", "清空"}:
@@ -1782,7 +1914,7 @@ def _parse_yuketang_listop(raw: str, argv: tuple[str, ...], scope: str, help_top
     if op == "clear" and items:
         return _error_spec(raw, "`clear` 不接受额外名称参数。", help_topic=help_topic)
     if op in {"add", "remove"} and not items:
-        return _error_spec(raw, f"缺少名称参数。", help_topic=help_topic)
+        return _error_spec(raw, "缺少名称参数。", help_topic=help_topic)
 
     return CliCommandSpec(
         raw=raw, argv=argv, resolved_tool="yuketang_list_update",

@@ -166,6 +166,13 @@ class HenuCliSafe(HenuCli):
             if isinstance(available, int)
             else f"图书馆座位查询完成，共返回 {total} 个座位。"
         ]
+        rules = result.get("reservation_rules") or {}
+        if rules.get("effective_start") and rules.get("effective_end"):
+            label = "学校固定整段" if rules.get("fixed_segment") else "实际可约时段"
+            lines.append(f"{label}：{rules['effective_start']}～{rules['effective_end']}。")
+        window = rules.get("booking_window") or {}
+        if window.get("start") and window.get("end"):
+            lines.append(f"学校开放提交时间：{window['start']}～{window['end']}；空位不代表现在可提交。")
         for seat in seats[:10]:
             seat_no = self._first_text(seat, "seat_no", "seatNo", "seat_number", "seatNumber", "name", "id")
             status = self._first_text(seat, "status", "status_text", "state", "state_text")
@@ -241,6 +248,7 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"
             )
+            parts.append("以 reservation_rules 的实际时段为准；固定时段不能改成用户期望的起止时间")
         if result.get("source") == "live_empty":
             parts.append("实时区域为空时不要编造区域、开放时间或替代方案")
         return "；".join(parts) + "。"

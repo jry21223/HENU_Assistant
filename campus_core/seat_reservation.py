@@ -1,24 +1,47 @@
 from __future__ import annotations
 
-import base64
 import datetime as dt
-import json
-import math
-import random
 import re
 import time
-from html import unescape
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
 
-import requests
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
 
 from .time_utils import _now_dt, TimeUtilsMixin
 
 
 class SeatReservationMixin:
+    @staticmethod
+    def _reservation_time(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        normalized = TimeUtilsMixin._to_hhmm(value)
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", normalized):
+            raise RuntimeError("预约时间必须为有效的 HH:MM 或中文时间（如9点）")
+        return normalized
+
+    @classmethod
+    def _reservation_rules(
+        cls, plan: dict[str, Any], date_row: dict[str, Any]
+    ) -> dict[str, Any]:
+        start = cls._to_hhmm(date_row.get("book_start"))
+        end = cls._to_hhmm(date_row.get("book_end"))
+        now_minutes = _now_dt().hour * 60 + _now_dt().minute
+        start_minutes = cls._time_to_minutes(start)
+        end_minutes = cls._time_to_minutes(end)
+        open_now = None
+        if start_minutes is not None and end_minutes is not None:
+            open_now = (
+                start_minutes <= now_minutes < end_minutes
+                if start_minutes <= end_minutes
+                else now_minutes >= start_minutes or now_minutes < end_minutes
+            )
+        return {
+            "fixed_segment": str(plan.get("reserve_type")) == "1",
+            "effective_start": plan["seat_query"].get("start_time", ""),
+            "effective_end": plan["seat_query"].get("end_time", ""),
+            "booking_window": {"start": start, "end": end, "open_now": open_now},
+        }
+
     @staticmethod
     def _normalize_points(points: dict[str, Any] | None = None) -> dict[str, Any]:
         if not isinstance(points, dict):
@@ -76,15 +99,13 @@ class SeatReservationMixin:
         return data
 
     @staticmethod
-    def _pick_date_row(date_list: list[dict[str, Any]], target_date: str) -> dict[str, Any] | None:
+    def _pick_date_row(
+        date_list: list[dict[str, Any]], target_date: str
+    ) -> dict[str, Any] | None:
         for row in date_list:
             if str(row.get("day")) == target_date:
                 return row
-        for row in date_list:
-            day = str(row.get("day") or "")
-            if day and day >= target_date:
-                return row
-        return date_list[0] if date_list else None
+        return None
 
     def _get_study_period(self, area_id: str, target_date: str) -> dict[str, Any]:
         resp = self._post_json("/v4/member/checkStudyOpenTime", {"area": str(area_id)})
@@ -98,7 +119,7 @@ class SeatReservationMixin:
             end_day = str(item.get("endDay") or "")
             if start_day and end_day and start_day <= target_date <= end_day:
                 return item
-        return periods[0]
+        raise RuntimeError(f"区域未返回包含 {target_date} 的学习周期")
 
     def _build_reservation_plan(
         self,
@@ -110,8 +131,8 @@ class SeatReservationMixin:
     ) -> dict[str, Any]:
         space_type = str(space_map.get("type") or "")
         label_ids: list[Any] = []
-        requested_start_hhmm = self._to_hhmm(preferred_time or "")
-        requested_end_hhmm = self._to_hhmm(preferred_end_time or "")
+        requested_start_hhmm = self._reservation_time(preferred_time)
+        requested_end_hhmm = self._reservation_time(preferred_end_time)
         requested_start_min = self._time_to_minutes(requested_start_hhmm) if requested_start_hhmm else None
         requested_end_min = self._time_to_minutes(requested_end_hhmm) if requested_end_hhmm else None
         has_time_window = requested_end_min is not None
@@ -174,7 +195,11 @@ class SeatReservationMixin:
             times = date_row.get("times") or []
             if not times:
                 raise RuntimeError(f"{day} 未返回可预约时段")
-            active_slots = [item for item in times if str(item.get("status", "1")) == "1"] or times
+            active_slots = [
+                item for item in times if str(item.get("status", "1")) == "1"
+            ]
+            if not active_slots:
+                raise RuntimeError(f"{day} 没有开放的预约时段")
             first_slot = active_slots[0]
             slot_rows: list[tuple[int, int, dict[str, Any]]] = []
             for item in active_slots:
@@ -204,7 +229,7 @@ class SeatReservationMixin:
                 if slot_rows:
                     matched = None
                     for start_min, end_min, item in slot_rows:
-                        if start_min <= requested_start_min <= end_min:
+                        if start_min <= requested_start_min < end_min:
                             matched = item
                             break
                     if matched is None:
@@ -212,7 +237,9 @@ class SeatReservationMixin:
                         if later:
                             matched = later[0]
                         else:
-                            matched = slot_rows[-1][2]
+                            raise RuntimeError(
+                                f"期望时间 {requested_start_hhmm} 不在可预约时段内"
+                            )
                     first_slot = matched
             seat_query["start_time"] = self._to_hhmm(first_slot.get("start"))
             seat_query["end_time"] = self._to_hhmm(first_slot.get("end"))
@@ -309,7 +336,7 @@ class SeatReservationMixin:
                 confirm_payload["start_time"] = seat_query["start_time"]
                 confirm_payload["end_time"] = seat_query["end_time"]
 
-        return {
+        plan = {
             "seat_query": seat_query,
             "confirm_path": "/v4/space/confirm",
             "confirm_payload": confirm_payload,
@@ -318,8 +345,12 @@ class SeatReservationMixin:
             "space_type": space_type,
             "preferred_time": requested_start_hhmm,
             "preferred_end_time": requested_end_hhmm,
-            "time_window": self._format_time_window(requested_start_hhmm, requested_end_hhmm),
+            "time_window": self._format_time_window(
+                requested_start_hhmm, requested_end_hhmm
+            ),
         }
+        plan["reservation_rules"] = self._reservation_rules(plan, date_row)
+        return plan
 
     def _query_seats(self, seat_query_payload: dict[str, Any]) -> list[dict[str, Any]]:
         resp = self._post_json("/v4/Space/seat", seat_query_payload)
@@ -434,8 +465,10 @@ class SeatReservationMixin:
             "area": {"id": resolved_area_id, "name": area_name},
             "target_date": target_day,
             "time_window": plan.get("time_window", ""),
+            "reservation_rules": plan.get("reservation_rules", {}),
             "total_count": len(seats),
             "available_count": len(available_seats),
+            "date": target_day,
             "returned_count": len(available_seats),
             "truncated": False,
             "seats": available_seats,
@@ -745,28 +778,59 @@ class SeatReservationMixin:
             return {"success": False, "msg": f"取消预约异常: {exc}"}
 
     @staticmethod
-    def _parse_retry_until(retry_until: str) -> dt.datetime | None:
+    def _parse_retry_until(
+        retry_until: str,
+        *,
+        now: dt.datetime | None = None,
+    ) -> dt.datetime | None:
         text = str(retry_until or "").strip()
         if not text:
             return None
 
-        now = _now_dt()
-        hhmm = self._to_hhmm(text)
-        if re.fullmatch(r"\d{2}:\d{2}", hhmm):
-            hour, minute = [int(part) for part in hhmm.split(":")]
-            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        now = now or _now_dt()
+        if re.fullmatch(r"\d{1,2}\s*[:：]\s*\d{1,2}", text):
+            normalized_time = TimeUtilsMixin._to_hhmm(text)
+            if not re.fullmatch(r"\d{2}:\d{2}", normalized_time):
+                return None
+            hour, minute = (int(part) for part in normalized_time.split(":"))
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                return None
+            try:
+                return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except ValueError:
+                return None
 
-        normalized = text.replace("Z", "+00:00")
+        normalized = f"{text[:-1]}+00:00" if text.endswith(("Z", "z")) else text
         try:
             parsed = dt.datetime.fromisoformat(normalized)
         except ValueError:
             return None
         if parsed.tzinfo is None:
-            try:
-                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-            except Exception:
-                pass
+            parsed = parsed.replace(tzinfo=now.tzinfo)
         return parsed
+
+    @classmethod
+    def _validate_retry_until(
+        cls,
+        retry_until: str | None,
+    ) -> tuple[dt.datetime | None, dict[str, Any] | None]:
+        text = str(retry_until or "").strip()
+        if not text:
+            return None, None
+        now = _now_dt()
+        deadline = cls._parse_retry_until(text, now=now)
+        if deadline is None:
+            return None, {
+                "success": False,
+                "msg": "retry_until 格式必须为 HH:MM 或 ISO 日期时间",
+            }
+        if deadline <= now:
+            return deadline, {
+                "success": False,
+                "msg": "retry_until 已过期，未执行登录或预约",
+                "retry_until": deadline.isoformat(),
+            }
+        return deadline, None
 
     @staticmethod
     def _is_retryable_reserve_error(message: str) -> bool:
@@ -802,6 +866,15 @@ class SeatReservationMixin:
             preferred_time=preferred_time,
             preferred_end_time=preferred_end_time,
         )
+        window = (plan.get("reservation_rules") or {}).get("booking_window") or {}
+        if window.get("open_now") is False:
+            return {
+                "success": False,
+                "retryable": False,
+                "error_code": "booking_window_closed",
+                "msg": f"当前不在学校开放预约时间 {window['start']}～{window['end']} 内，未提交；请在开放后重新发起。",
+                "reservation_rules": plan["reservation_rules"],
+            }
         seats = self._query_seats(plan["seat_query"])
         if not seats:
             return {
@@ -908,13 +981,13 @@ class SeatReservationMixin:
         except ValueError:
             return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD"}
 
+        retry_deadline, retry_error = self._validate_retry_until(retry_until)
+        if retry_error is not None:
+            return retry_error
+
         # 避免使用过期 token 直接进入预约流程
         if not self._is_token_valid() and not self.login():
             return self._login_failed_result()
-
-        retry_deadline = self._parse_retry_until(str(retry_until or ""))
-        if str(retry_until or "").strip() and retry_deadline is None:
-            return {"success": False, "msg": "retry_until 格式必须为 HH:MM 或 ISO 日期时间"}
 
         try:
             interval = max(1, min(60, int(retry_interval_seconds)))

@@ -1,4 +1,5 @@
 """Production hardening overrides for the LangBot plugin service."""
+
 from __future__ import annotations
 
 import contextlib
@@ -222,7 +223,19 @@ class HardenedHenuPluginService(_base.HenuPluginService):
             if cached is not None:
                 return cached
 
+        if view == "plan":
+            normalized["view"] = "seats"
         result = mcp_server.library_query(**normalized)
+        if view == "plan" and isinstance(result, dict) and params.get("seat_no"):
+            target = str(params["seat_no"]).lstrip("0") or "0"
+            result = dict(result)
+            result["seats"] = [
+                seat
+                for seat in result.get("seats", [])
+                if (str(seat.get("no") or seat.get("seat_no") or "").lstrip("0") or "0")
+                == target
+            ]
+            result["returned_count"] = len(result["seats"])
         if cache_key and isinstance(result, dict) and result.get("success"):
             LIBRARY_QUERY_CACHE.set(
                 cache_key,
