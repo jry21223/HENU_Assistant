@@ -31,7 +31,7 @@ def ctx(number, command):
         prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
 
 
-def test_actual_live_listener_commits_then_logs_in_and_storage_failure_never_pushes(monkeypatch):
+def test_actual_live_listener_rejects_unverified_executor_without_saving_or_login(core, monkeypatch):
     async def run(fail):
         plugin = Storage()
         listener = SafeIdentityCaptureListener()
@@ -56,13 +56,9 @@ def test_actual_live_listener_commits_then_logs_in_and_storage_failure_never_pus
         confirm = ctx(2, '确认')
         await ConfirmationShortcut(listener).handle(confirm)
         await flow.tasks[2]
-        if fail:
-            assert not push_mock.called and not login_mock.called
-            assert '未完成' in str(confirm.reply.call_args.args[0])
-        else:
-            assert push_mock.called and login_mock.called, str(confirm.reply.call_args.args[0])
-            assert '登录成功' in str(confirm.reply.call_args.args[0])
-            assert all(b'Demo123@' not in value for value in plugin.data.values())
+        assert not push_mock.called and not login_mock.called
+        assert '执行端尚未完成会员资格约束升级' in str(confirm.reply.call_args.args[0])
+        assert all(b'Demo123@' not in value for value in plugin.data.values())
     asyncio.run(run(False))
     asyncio.run(run(True))
 
@@ -98,7 +94,7 @@ def test_logout_persists_stop_before_bridge_and_reports_remote_failure(monkeypat
     asyncio.run(run(True, True))
 
 
-def test_valid_cookie_skips_login_but_force_does_not(monkeypatch):
+def test_valid_cookie_cannot_bypass_executor_membership_capability(core, monkeypatch):
     async def run():
         plugin = Storage()
         listener = SafeIdentityCaptureListener()
@@ -111,7 +107,7 @@ def test_valid_cookie_skips_login_but_force_does_not(monkeypatch):
         start = Mock(return_value={'ok':True,'session_id':'synthetic'})
         monkeypatch.setattr(bridge_client, 'login_password', start)
         result = await flow.call_service(request, 'yuketang_login', {'force':False})
-        assert result['success'] and not start.called and 'login_session_id' not in result
+        assert result['error_code'] == 'EXECUTOR_UNAVAILABLE' and not start.called
         forced = await flow.call_service(request, 'yuketang_login', {'force':True})
-        assert forced['login_session_id'] == 'synthetic' and start.call_count == 1
+        assert forced['error_code'] == 'EXECUTOR_UNAVAILABLE' and not start.called
     asyncio.run(run())

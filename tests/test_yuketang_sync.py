@@ -33,8 +33,8 @@ def test_sync_uses_committed_config_and_reports_pending(monkeypatch):
         await adapter.save_all()
         result = {'success': True, '_yuketang_sync_required': True}
         await sync_after_commit(plugin, 'test-user', result)
-        assert post.call_args.args[1]['enabled'] is True
-        assert result['bridge']['status'] == 'pending'
-        assert '尚不能确认远端已停止' in result['reply_text']
+        assert not post.called
+        assert result['bridge']['status'] == 'membership_blocked'
+        assert '存量远端是否已停止尚未确认' in result['reply_text']
         assert '_yuketang_sync_required' not in result
     asyncio.run(run())

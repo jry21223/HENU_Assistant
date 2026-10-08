@@ -12,6 +12,7 @@ from langbot_plugin.api.entities.builtin.provider.session import Session, Launch
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
 from henu_plugin import bridge_client
 from henu_plugin.cli import inspect_cli_command
+from henu_plugin.membership import MembershipError, require_yuketang_entry, yuketang_needs_benefit
 from henu_plugin.confirmation import create_pending_operation, validate_pending_operation, conversation_context
 from henu_plugin.yuketang_nl import match_action
 
@@ -153,7 +154,8 @@ class YuketangLoginCoordinator:
         started = await self.call_service(ctx, 'yuketang_login', login_params)
         session_id = started.get('login_session_id')
         if not started.get('success') or not session_id:
-            if started.get('success') or started.get('error_code') in {'account_unbound', 'bridge_login_rejected'}:
+            if started.get('success') or started.get('error_code') in {'account_unbound', 'bridge_login_rejected', 'NOT_BOUND', 'LIFETIME_REQUIRED',
+                    'MEMBERSHIP_UNAVAILABLE', 'EXECUTOR_UNAVAILABLE'}:
                 await plugin.set_plugin_storage(inflight_key, b'')
             return str(started.get('reply_text') or started.get('msg') or '无法启动雨课堂登录')
         await plugin.set_plugin_storage(inflight_key, encrypt_value(str(session_id)).encode())
@@ -205,6 +207,13 @@ class YuketangLoginCoordinator:
         event = ctx.event
         sender = str(event.sender_id)
         launcher = str(event.launcher_id)
+        spec = inspect_cli_command(str(params.get('command') or '')) if name == 'henu_cli' else None
+        benefit_tool, benefit_params = (spec.resolved_tool, spec.params) if spec else (name, params)
+        if yuketang_needs_benefit(benefit_tool, benefit_params):
+            try:
+                await require_yuketang_entry(sender)
+            except MembershipError as exc:
+                return exc.public_result()
         session = Session(launcher_type=LauncherTypes('person'), launcher_id=launcher, sender_id=sender)
         hint = {'sender_id': sender, 'launcher_id': launcher, 'launcher_type': 'person'}
         return await self.listener._run_with_user_storage(session, hint,

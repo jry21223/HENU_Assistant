@@ -24,7 +24,8 @@ def ctx(text='确认', user='user-a', query_id=2, launcher='user-a', kind='perso
 def pending(command, expires=True):
     p = create_pending_operation(storage_key='user-a', canonical_command=command, query_id=1)
     p['conversation'] = {'launcher_type':'person','launcher_id':'user-a'}
-    if not expires: p['expires_at'] = 0
+    if not expires:
+        p['expires_at'] = 0
     return p
 
 
@@ -73,7 +74,7 @@ def test_ambiguous_pending_requires_readable_choice():
     asyncio.run(run())
 
 
-def test_regular_operation_plain_confirm_executes_once_without_showing_token(monkeypatch):
+def test_regular_operation_plain_confirm_never_enables_when_membership_unavailable(monkeypatch):
     async def run():
         from pathlib import Path
         from components.cli_tools.henu_cli_safe import HenuCliSafe
@@ -87,16 +88,21 @@ def test_regular_operation_plain_confirm_executes_once_without_showing_token(mon
         tool.plugin = plugin
         session = Session(sender_id='user-a',launcher_id='user-a',launcher_type=LauncherTypes('person'))
         preview = await tool.call({'command':'yuketang enable'},session,1)
-        p = json.loads(plugin.storage['user:user-a:pending_operation'])
-        assert preview['confirmation_command'] == '确认'
+        assert preview['error_code'] == 'MEMBERSHIP_UNAVAILABLE'
+        assert 'user:user-a:pending_operation' not in plugin.storage
+        # A pending preview created by an older version cannot bypass the new gate.
+        p = pending('yuketang enable')
+        plugin.storage['user:user-a:pending_operation'] = json.dumps(p).encode()
         assert p['token'] not in str(preview)
         flow = ConfirmationShortcut(SimpleNamespace(plugin=plugin))
         request = ctx()
         assert await flow.handle(request)
         task = flow.tasks['user-a']
         await task
-        assert json.loads(plugin.storage['user:user-a:yuketang_config'])['enabled'] is True
+        assert '会员资格暂时无法核实' in str(request.reply.call_args.args[0])
+        assert 'user:user-a:yuketang_config' not in plugin.storage or not json.loads(plugin.storage['user:user-a:yuketang_config']).get('enabled')
         next_request = ctx(query_id=3)
         await flow.handle(next_request)
-        assert '没有有效' in str(next_request.reply.call_args.args[0])
+        await flow.tasks['user-a']
+        assert '会员资格暂时无法核实' in str(next_request.reply.call_args.args[0])
     asyncio.run(run())

@@ -1,3 +1,4 @@
+import pytest
 import asyncio
 import json
 from types import SimpleNamespace
@@ -81,7 +82,7 @@ def test_order_preview_confirmation_receipt_progress_and_unknown_outcome_fence(m
         courses = await flow.execute('qingmu courses --platform ucampus', 'user-a', conversation, 3)
         assert courses['courses'] == [{'no':1,'name':'大学英语'}]
         preview = await flow.execute('qingmu order add --platform ucampus --course 1', 'user-a', conversation, 4)
-        assert preview['confirmation_required'] and '付费' in preview['reply_text']
+        assert preview['confirmation_required'] and '费用已包含' in preview['reply_text']
         assert '服务：U校园整本（测试服务）' in preview['reply_text']
         assert not add.called
         if unknown:
@@ -264,3 +265,9 @@ def test_shlex_command_and_option_spelling_cannot_bypass_private_intake_or_tool_
             assert result['error_code'] == 'direct_private_command_required'
         assert all(b'StudentSecret!' not in raw for raw in plugin.storage.values())
     asyncio.run(run())
+
+
+@pytest.fixture(autouse=True)
+def existing_supplier_paths_have_authoritative_lifetime(core):
+    # Preserve the earlier supplier regressions with a real HTTP owner boundary.
+    pass

@@ -12,6 +12,7 @@ import time
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
 
 from henu_mcp.core.secure_storage import decrypt_value, encrypt_value
+from henu_plugin.membership import MembershipError, require_benefit, require_benefit_async
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import conversation_context, create_pending_operation, validate_pending_operation
 from henu_plugin.qingmu_cli import PLATFORMS, help_payload, is_qingmu_command
@@ -159,7 +160,7 @@ class QingmuCoordinator:
                 if spec.error:
                     return reply_result('青木命令格式无效，请执行 help qingmu。', success=False)
                 if spec.is_help:
-                    return reply_result('\n'.join(help_payload()['commands']), help=help_payload())
+                    return reply_result('\n'.join(help_payload()['commands'] + help_payload()['tips']), help=help_payload())
                 if spec.resolved_tool in {'qingmu_status', 'qingmu_platforms'}:
                     try:
                         settings = settings_from_env()
@@ -178,6 +179,8 @@ class QingmuCoordinator:
                     verb = '保存绑定' if spec.resolved_tool.endswith('_set') else '删除绑定（保留订单回执）'
                     return reply_result(f"将为 {PLATFORMS[spec.params['platform']]} {verb}。账号密码加密保存；后续查课/下单会发送给青木供应商，不发送给模型。保存不代表登录验证完成。请在下一条私聊回复“确认”（五分钟内有效）。", success=False, confirmation_required=True)
                 return await self._operation(spec, state, sender, conversation, query_id)
+        except MembershipError as exc:
+            return exc.public_result()
         except QingmuError as exc:
             return reply_result('青木配置、接口或状态暂不可用；本次结果未确认。', success=False, error_code=exc.code)
         except Exception:
@@ -218,6 +221,12 @@ class QingmuCoordinator:
         # The durable fence is retained even if the worker thread completes later.
         return await asyncio.wait_for(asyncio.to_thread(function, *args), timeout=25)
 
+    async def _member_network(self, sender, platform, function, *args):
+        def submit():
+            require_benefit(sender, platform)
+            return function(*args)
+        return await self._network(submit)
+
     @staticmethod
     def _provider_identity(settings, platform):
         return hashlib.sha256(json.dumps([settings.url, settings.uid, settings.service(platform)['id']]).encode()).hexdigest()
@@ -244,7 +253,7 @@ class QingmuCoordinator:
             settings.service(platform)
             state['courses'].pop(platform, None)
             await self._save(sender, state)
-            values = await self._network(client.courses, platform, account)
+            values = await self._member_network(sender, platform, client.courses, platform, account)
             state['courses'][platform] = {'values': values, 'revision': account['revision'],
                 'provider': settings.fingerprint, 'queried_at': time.time()}
             await self._save(sender, state)
@@ -293,15 +302,15 @@ class QingmuCoordinator:
                    'provider': settings.fingerprint}
         else:
             return reply_result('未知青木操作，请执行 help qingmu。', success=False)
+        await require_benefit_async(sender, platform)
         pending = create_pending_operation(storage_key=sender, canonical_command=spec.raw, query_id=query_id)
         pending.update(conversation=conversation, kind='order', tool=tool, params=job)
         state['pending'] = pending
         await self._save(sender, state)
-        billing = client.safe_text(settings.service(platform)['billing'])
         service_name = client.safe_text(settings.service(platform)['name'])
-        label = '付费下单' if tool == 'qingmu_order_add' else '申请补刷'
+        label = '提交会员订单' if tool == 'qingmu_order_add' else '申请补刷'
         school = '\n学校：' + client.safe_text(account['school'], account) if tool == 'qingmu_order_add' else ''
-        return reply_result(f"将为 {PLATFORMS[platform]} 的课程“{job['course']['name']}”{label}。{school}\n服务：{service_name}\n计费说明：{billing}\n请核对后在下一条私聊回复“确认”（五分钟内有效）。",
+        return reply_result(f"将为 {PLATFORMS[platform]} 的课程“{job['course']['name']}”{label}。{school}\n服务：{service_name}\n会员服务费用已包含，由站方承担，无需另付费或扣积分。\n请核对后在下一条私聊回复“确认”（五分钟内有效）。",
             success=False, confirmation_required=True)
 
     async def _commit_order(self, state, sender, pending):
@@ -315,6 +324,7 @@ class QingmuCoordinator:
         account = state['accounts'].get(platform)
         if not retry and (not account or account['revision'] != job['revision']):
             return reply_result('账号已变更，请重新查课和预览。', success=False)
+        await require_benefit_async(sender, platform)
         if retry:
             local_id = job['local_id']
             order = state['orders'][local_id]
@@ -338,11 +348,15 @@ class QingmuCoordinator:
         client = QingmuClient(settings)
         try:
             if retry:
-                await self._network(client.retry, platform, order['supplier_id'])
+                await self._member_network(sender, platform, client.retry, platform, order['supplier_id'])
             else:
-                supplier_id = await self._network(client.place_order, platform, account, job['course'])
+                supplier_id = await self._member_network(sender, platform, client.place_order, platform, account, job['course'])
                 order['supplier_id'] = supplier_id
             order[outcome_key] = 'accepted'
+        except MembershipError as exc:
+            order[outcome_key] = 'rejected'
+            await self._save(sender, state)
+            return exc.public_result()
         except QingmuError as exc:
             order[outcome_key] = 'rejected' if exc.code == 'supplier_rejected' else 'unknown'
         except Exception:

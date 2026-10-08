@@ -204,3 +204,9 @@ def test_http_disconnect_after_supplier_received_order_preserves_unknown_fence(m
             assert not duplicate.get('confirmation_required')
             assert len(calls) == 2
         asyncio.run(run())
+
+
+@pytest.fixture(autouse=True)
+def existing_supplier_paths_have_authoritative_lifetime(core):
+    # Preserve the earlier supplier regressions with a real HTTP owner boundary.
+    pass

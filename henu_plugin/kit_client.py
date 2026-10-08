@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 import requests
 
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+REQUEST_DEADLINE_SECONDS = 10.0
+
 FIELDS = ("CORE_URL", "PORTAL_URL", "CLIENT_ID", "KEY_ID", "SECRET", "BOT_UUID")
 
 
@@ -72,7 +74,7 @@ class KitError(RuntimeError):
 
 
 def kit_request(settings, action, payload):
-    if action not in {"start", "pending", "confirm", "status", "resolve", "unlink"}:
+    if action not in {"start", "pending", "confirm", "status", "resolve", "unlink", "benefits"}:
         raise KitError("INVALID_ACTION")
     path = "/api/v1/qq-bindings/" + action
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
@@ -87,16 +89,18 @@ def kit_request(settings, action, payload):
         .decode()
         .rstrip("=")
     )
+    deadline = time.monotonic() + REQUEST_DEADLINE_SECONDS
     try:
         with requests.post(
             settings["core_url"] + path,
             data=raw,
-            timeout=(3, 8),
+            timeout=(3, 1),
             allow_redirects=False,
             stream=True,
             auth=(settings["client_id"], settings["secret"]),
             headers={
                 "Content-Type": "application/json",
+                "Accept-Encoding": "identity",
                 "X-Service-Id": settings["client_id"],
                 "X-Key-Id": settings["key_id"],
                 "X-Timestamp": stamp,
@@ -104,11 +108,21 @@ def kit_request(settings, action, payload):
                 "X-Signature": signature,
             },
         ) as response:
+            if (time.monotonic() >= deadline
+                    or getattr(response, 'headers', {}).get('Content-Encoding', 'identity') not in {'', 'identity'}):
+                raise KitError()
             content = bytearray()
-            for chunk in response.iter_content(4096):
+            # One raw response byte per yield prevents a drip-fed 4096-byte
+            # read from postponing the total deadline indefinitely. Compressed
+            # responses are rejected rather than waiting on decoder output.
+            for chunk in response.iter_content(1):
+                if time.monotonic() >= deadline:
+                    raise KitError()
                 content.extend(chunk)
                 if len(content) > 8192:
                     raise KitError()
+            if time.monotonic() >= deadline:
+                raise KitError()
             envelope = json.loads(content)
             if response.status_code != 200:
                 code = envelope.get("error", {}).get("code", "UNAVAILABLE")
