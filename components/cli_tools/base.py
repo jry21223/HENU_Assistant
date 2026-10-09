@@ -386,6 +386,7 @@ class BaseHenuTool(Tool):
             "reservation_rules", "operation_state", "confirmation_required",
             "outcome_unknown", "submit_success", "external_committed",
             "term_context", "missing_params",
+            "reservation_details",
         )
         essential = {
             key: result[key]

@@ -35,6 +35,11 @@ class HenuCliSafe(HenuCli):
         cli = result.get("cli")
         if isinstance(cli, dict) and cli.get("command"):
             cli["command"] = redact_cli_command(cli["command"])
+        verification = result.get("verification")
+        if isinstance(verification, dict) and verification.get("verified"):
+            record = verification.get("record")
+            if isinstance(record, dict):
+                result["reservation_details"] = self._reservation_details(record)
         self._attach_semantic_options(result)
         self._attach_reply_text(result)
         self._attach_llm_hint(result)
@@ -85,7 +90,7 @@ class HenuCliSafe(HenuCli):
             result["reply_text"] = self._qq_safe_text(self._build_reply_text(result))
 
         result["qq_reply_hint"] = (
-            "最终回复用户时优先复述 reply_text；不要直接发送完整 JSON；"
+            "最终回复直接使用 reply_text，保持简短纯文本；不追加解释或重复提醒；不要发送完整 JSON；"
             "除非用户明确要求翻页、筛选或预约，否则不要重复调用 henu_cli；"
             "实时数据失败时只复述工具错误，不猜测开放状态或推荐无关替代方案。"
         )

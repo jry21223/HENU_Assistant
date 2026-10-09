@@ -413,7 +413,7 @@ class HenuCli(BaseHenuTool):
                     result = {"success": False, "outcome_unknown": True, "msg": "操作结果未明确返回，请查询当前预约，不要重复提交。"}
                 if spec.resolved_tool == "library_reserve" and result.get("success") is True:
                     verification = result.get("verification") or {}
-                    details = self._reservation_details(verification.get("record") or {})
+                    details = result.get("reservation_details") or self._reservation_details(verification.get("record") or {})
                     result["reply_text"] = "✅ 预约成功。" + ("\n" + details if details else "")
                 committed = result.get("success") is True or result.get("external_committed") is True
                 nested = result.get("tool_result") if isinstance(result.get("tool_result"), dict) else {}
@@ -434,11 +434,11 @@ class HenuCli(BaseHenuTool):
     @staticmethod
     def _reservation_details(record: dict[str, Any]) -> str:
         def first(*keys: str) -> str:
-            return next((str(record[key]).strip() for key in keys
+            return next((str(record[key]).strip()[:200] for key in keys
                          if record.get(key) not in (None, "")), "")
 
-        area = first("areaName", "nameMerge", "area_name")
-        seat = first("no", "spaceName", "seat_no", "name")
+        area = first("areaName", "nameMerge", "area_name", "roomName", "libraryName")
+        seat = first("no", "spaceName", "seatName", "seat_no", "name")
         lines = [" · ".join(value for value in (area, f"{seat}号" if seat else "") if value)]
         times = first("showTime", "examTime", "show_time")
         if not times:

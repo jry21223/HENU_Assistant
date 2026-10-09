@@ -556,6 +556,7 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
                     "day": "2026-10-10",
                     "showTime": "2026-10-10 08:00:00～22:59:59",
                     "msg": "请于 2026-10-10 08:45 之前签到",
+                    "padding": "x" * 6000,
                 }
             ]
             if verified
