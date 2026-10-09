@@ -47,6 +47,7 @@ class HenuCliSafe(HenuCli):
                 {
                     "location": self._first_text(item, "location", "name", "areaName", "title"),
                     "area_id": self._first_text(item, "area_id", "areaId", "id"),
+                    **({"campus": item["campus"]} if item.get("campus") else {}),
                 }
                 for item in locations
             ]
@@ -105,6 +106,12 @@ class HenuCliSafe(HenuCli):
             return self._format_locations_reply(result)
         if isinstance(result.get("seats"), list):
             return self._format_seats_reply(result)
+        if isinstance(result.get("appointments"), list):
+            records = [item for item in result["appointments"] if isinstance(item, dict)]
+            if not records:
+                return "当前没有有效预约。"
+            details = [self._reservation_details(record) for record in records[:3]]
+            return "当前预约：\n" + "\n".join(value for value in details if value)
         if isinstance(result.get("preferences"), dict):
             return self._format_preferences_reply(result)
         if isinstance(result.get("rooms"), list):
@@ -169,6 +176,8 @@ class HenuCliSafe(HenuCli):
                 lines.append("area_id 可选值：" + ", ".join(ids))
         for location in display_locations:
             name = self._first_text(location, "location", "name", "areaName", "title") or "未命名区域"
+            if location.get("campus"):
+                name = f"{location['campus']} · {name}"
             area_id = self._first_text(location, "area_id", "areaId", "id")
             suffix = f"（area_id: {area_id}）" if area_id else ""
             lines.append(f"- {name}{suffix}")

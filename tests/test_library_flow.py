@@ -252,7 +252,8 @@ def test_failed_submission_is_consumed_and_reported_without_another_confirmation
         command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
         first = await tool.call({"command": command}, session, 1)
         original = json.loads(plugin.storage["user:user-a:pending_operation"])
-        assert "实际 08:00～23:00" in first["reply_text"]
+        assert "08:00～23:00" in first["reply_text"]
+        assert "不能从09:00起算" in first["reply_text"]
         repeated = await tool.call({"command": command}, session, 2)
         assert (
             json.loads(plugin.storage["user:user-a:pending_operation"])["token"]
@@ -553,6 +554,8 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
                     "no": "001",
                     "areaName": "三楼北附楼走廊",
                     "day": "2026-10-10",
+                    "showTime": "2026-10-10 08:00:00～22:59:59",
+                    "msg": "请于 2026-10-10 08:45 之前签到",
                 }
             ]
             if verified
@@ -594,7 +597,9 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
             launcher_type=LauncherTypes("person"),
         )
         command = "library reserve --area-id 16 --seat-no 001 --date 2026-10-10 --time 09:00 --end-policy server_full_slot"
-        await tool.call({"command": command}, session, 1)
+        preview = await tool.call({"command": command}, session, 1)
+        assert len(preview["reply_text"]) < 180
+        assert "library reserve" not in preview["reply_text"]
         flow = ConfirmationShortcut(SimpleNamespace(plugin=plugin))
         request = ctx(query_id=2)
         await flow.handle(request)
@@ -605,6 +610,12 @@ def test_cli_confirmation_through_real_core_school_results(monkeypatch, code, ve
         )
         assert sum(path == "/v4/space/confirm" for path, _ in calls) == 1
         assert ("✅" in str(request.reply.call_args_list)) is verified
+        if verified:
+            final_text = str(request.reply.call_args_list[-1])
+            assert final_text.count("预约成功") == 1
+            assert "001" in final_text and "2026-10-10" in final_text
+            assert "22:59:59" in final_text and "08:45" in final_text
+            assert sum(path == "/v4/index/subscribe" for path, _ in calls) == 1
 
     asyncio.run(run())
 

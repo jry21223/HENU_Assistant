@@ -28,6 +28,19 @@ def load_library_location_map() -> dict[str, str]:
     }
 
 
+@lru_cache(maxsize=1)
+def load_library_campus_map() -> dict[str, str]:
+    try:
+        data = json.loads(LIBRARY_LOCATIONS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    campuses = data.get("campus_by_area_id", {}) if isinstance(data, dict) else {}
+    if not isinstance(campuses, dict):
+        return {}
+    return {str(area_id): campus for area_id, campus in campuses.items()
+            if campus in ("金明", "明伦", "郑州")}
+
+
 class LocationMixin:
     @staticmethod
     def _normalize_area_name(value: Any) -> str:
@@ -63,11 +76,15 @@ class LocationMixin:
     def _location_summary(cls, area: dict[str, Any], *, source: str = "live") -> dict[str, Any]:
         area_id = cls._area_id(area)
         name = cls._area_name(area)
-        return {
+        summary = {
             "location": name or area_id,
             "area_id": area_id,
             "source": source,
         }
+        campus = load_library_campus_map().get(area_id)
+        if campus:
+            summary["campus"] = campus
+        return summary
 
     @classmethod
     def _summarize_areas(cls, areas: list[dict[str, Any]], *, source: str = "live") -> list[dict[str, Any]]:
@@ -212,7 +229,7 @@ class LocationMixin:
     @classmethod
     def static_locations(cls) -> list[dict[str, Any]]:
         return [
-            {"location": name, "area_id": str(area_id), "source": "static_fallback"}
+            cls._location_summary({"name": name, "id": area_id}, source="static_fallback")
             for name, area_id in load_library_location_map().items()
         ]
 

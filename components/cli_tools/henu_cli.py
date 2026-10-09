@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
+import re
 import shlex
 import time
 from typing import Any
@@ -187,9 +189,10 @@ class HenuCli(BaseHenuTool):
                 "msg": msg,
                 "reply_text": msg,
             }
-        prefix = "学校仅支持完整固定时段；" if rules.get("fixed_segment") else ""
         area = result.get("area") or {}
-        msg = f"{area.get('name') or p['location']}，座位 {p['seat_no']}，{p['target_date']}，实际 {rules['effective_start']}～{rules['effective_end']}。{prefix}你选择的 {p['preferred_time']} 用于选时段。"
+        msg = f"{area.get('name') or p['location']} · {p['seat_no']}号\n{p['target_date']} {rules['effective_start']}～{rules['effective_end']}"
+        if rules.get("fixed_segment") and p["preferred_time"] != rules["effective_start"]:
+            msg += f"\n学校按固定整段预约，不能从{p['preferred_time']}起算。"
         signature = {"area_id": area.get("id"), "seat_id": result["seats"][0].get("id"), "date": result.get("target_date") or p["target_date"], "segment": rules.get("segment"), "start": rules["effective_start"], "end": rules["effective_end"], "fixed_segment": rules.get("fixed_segment")}
         signature.update({key: p.get(key) for key in ("retry_until", "max_attempts", "retry_interval_seconds")})
         return {"success": True, "reply_text": msg, "reservation_rules": rules, "library_plan": signature}
@@ -320,6 +323,8 @@ class HenuCli(BaseHenuTool):
             "error_code": "confirmation_required",
             "msg": f"{action_text} 尚未执行，需要用户在下一条消息中明确确认。",
             "reply_text": (
+                f"{summary_text}\n回复“确认”提交（剩余 {remaining} 秒有效）。"
+                if library_plan is not None else
                 f"即将执行：{action_text}；{summary_text}。本次尚未提交。"
                 f"请核对后在下一条消息直接回复“{confirm_command}”（剩余 {remaining} 秒有效）。"
             ),
@@ -407,7 +412,9 @@ class HenuCli(BaseHenuTool):
                 if not isinstance(result, dict) or not isinstance(result.get("success"), bool):
                     result = {"success": False, "outcome_unknown": True, "msg": "操作结果未明确返回，请查询当前预约，不要重复提交。"}
                 if spec.resolved_tool == "library_reserve" and result.get("success") is True:
-                    result["reply_text"] = "✅ 预约成功。" + str(result.get("reply_text") or result.get("msg") or "")
+                    verification = result.get("verification") or {}
+                    details = self._reservation_details(verification.get("record") or {})
+                    result["reply_text"] = "✅ 预约成功。" + ("\n" + details if details else "")
                 committed = result.get("success") is True or result.get("external_committed") is True
                 nested = result.get("tool_result") if isinstance(result.get("tool_result"), dict) else {}
                 uncertain = (result.get("outcome_unknown") or result.get("submit_success") or nested.get("submit_success")) and not committed
@@ -423,6 +430,30 @@ class HenuCli(BaseHenuTool):
                 result["confirmation_cleanup_failed"] = True
             result["retry_safe"] = False
         return result
+
+    @staticmethod
+    def _reservation_details(record: dict[str, Any]) -> str:
+        def first(*keys: str) -> str:
+            return next((str(record[key]).strip() for key in keys
+                         if record.get(key) not in (None, "")), "")
+
+        area = first("areaName", "nameMerge", "area_name")
+        seat = first("no", "spaceName", "seat_no", "name")
+        lines = [" · ".join(value for value in (area, f"{seat}号" if seat else "") if value)]
+        times = first("showTime", "examTime", "show_time")
+        if not times:
+            start = first("startTime", "start_time")
+            end = first("endTime", "end_time")
+            times = "～".join(value for value in (start, end) if value)
+        if times:
+            lines.append(times)
+        for key in ("msg", "message", "tips", "notice", "sign_msg"):
+            text = re.sub(r"<[^>]*>", "", html.unescape(str(record.get(key) or "")[:2000]))
+            match = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*(?:之)?前签到", text)
+            if match:
+                lines.append(f"请于 {match.group(1)} 前签到。")
+                break
+        return "\n".join(line for line in lines if line)
 
     async def _store_receipt(self, storage_key, pending, query_id, status, result=None):
         result = result if isinstance(result, dict) else {}
