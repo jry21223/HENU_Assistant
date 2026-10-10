@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: henu_food
+  label:
+    en_US: Campus Food
+    zh_Hans: 河大美食
+  description:
+    en_US: Campus food posts with automatic optional Kit identity.
+    zh_Hans: 校园美食投稿与查询；系统自动优先读取当前用户的 Kit 绑定，未绑定仍可投稿并提示绑定，无需账号 UUID。
+spec:
+  parameters:
+    type: object
+    additionalProperties: false
+    properties:
+      action:
+        type: string
+        enum: [create, mine, list, detail, venues]
+        description: create 投稿（立即公开）；mine 我的投稿；list 公开列表；detail 详情；venues 场所汇总
+      venue_name: {type: string, description: 店铺名，投稿必填}
+      campus: {type: string, enum: [minglun, jinming, longzihu], description: 投稿与场所查询必填}
+      tier: {type: string, enum: [hang, top, elite, npc, bad], description: 投稿必填，夯/顶级/人上人/NPC/拉完了}
+      review_text: {type: string, description: 投稿必填，2-2000 字锐评}
+      price_reference: {type: string}
+      hours_reference: {type: string}
+      post_id: {type: string, description: 详情查询使用公开帖子 ID}
+      dishes:
+        type: array
+        maxItems: 6
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            name: {type: string}
+            price: {type: string}
+            reason: {type: string}
+          required: [name]
+      images:
+        type: array
+        maxItems: 6
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            content_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
+            data: {type: string, description: 无前缀 base64，单张至多 2MiB}
+          required: [content_type, data]
+    required: [action]
+  llm_prompt: "美食统一使用 henu_food。只有用户明确要求投稿且提供店铺、校区、档位和锐评时调用 create，创建即公开，每身份每日最多三条。账号自动读取；禁止询问、构造或传入账号 UUID/显示名/QQ/Bot 身份。未绑定或绑定查询暂时不可用时仍可投稿，只复述绑定提示，不要求先绑定。mine 查询当前用户投稿，list/detail/venues 查询公开内容；详情 post_id 是公开帖子 ID。复述 reply_text；不要重复调用 create；结果不确定时先 mine 核验。Kit 账号绑定在私聊由用户发送“绑定 HENU KIT”，学校 IDS 登录与 Kit 绑定不同。"
+execution:
+  python:
+    path: henu_food.py
+    attr: HenuFood

@@ -230,3 +230,17 @@ tests/
 ## License
 
 [MIT](LICENSE)
+
+### 美食投稿的自动 Kit 身份
+
+美食统一通过插件 `henu_food`，支持投稿、我的投稿、公开列表、详情和场所查询。
+用户只提供投稿内容，系统每次优先读取当前 QQ 的 Kit 绑定；未绑定或暂时无法
+读取时仍可用独立游客身份投稿，并提示私聊发送“绑定 HENU KIT”。学校 IDS
+登录不等于 Kit 绑定。游客记录不会自动转移到后来绑定的账号。
+
+配置 `.env` 的 `HENU_FOOD_MCP_ACCESS_TOKEN` 和独立、稳定的
+`HENU_FOOD_CONTEXT_SECRET`（至少 32 字节），后者须与 Kit
+`FOOD_MCP_ACTOR_SECRET` 匹配。共享 QQ 部署启用 Kit
+`FOOD_MCP_REQUIRE_ACTOR_CONTEXT=true`。在 QQ Pipeline 排除原独立 `food`
+MCP 连接器，保留其他 MCP，启用插件 Tool；共享 MCP Session 不能用于用户身份。
+账号不进入模型参数，创建仍沿用现有行为：创建即公开；不确定结果时先查我的投稿。
