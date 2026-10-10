@@ -91,6 +91,9 @@ library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD 
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 yuketang status
+yuketang courses
+yuketang exam list --course 数据结构
+yuketang exam whitelist add 数据结构
 yuketang lesson set --auto-enter on --auto-answer on --llm on --subjective off --enter-delay 30
 yuketang lesson whitelist add <课程名>
 yuketang exam set --master on
@@ -117,7 +120,11 @@ yuketang logout
 
 绑定前请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码；不要使用学校 IDS 密码。私聊发送绑定命令并按提示确认后，插件会后台验证并回复结果。
 
-按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先、课程名完全匹配）；exam 白名单为空等于考试功能整体关闭。课堂侧自动进班、自动答题、大模型**默认开**（`--auto-enter off` / `--auto-answer off` / `--llm off` 关闭；`--auto-enter off` 后开课不进班不答题，考试监听不受影响）。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。`yuketang logout` 退出登录：清除守护进程侧 cookie 并停用监听（绑定与配置保留，自动续期不会把登录续回来；恢复用 `yuketang enable` + `yuketang login`）。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
+按 QQ 隔离的雨课堂监听配置。开关是**总闸**，黑白名单决定**作用范围**（黑名单优先）；exam 白名单为空等于考试功能整体关闭。课堂侧自动进班、自动答题、大模型**默认开**（`--auto-enter off` / `--auto-answer off` / `--llm off` 关闭；`--auto-enter off` 后开课不进班不答题，考试监听不受影响）。课件 PDF / PPT 进度 / 试卷文件推送（ppt/si/paper）已整体停用，不可配置。`--enter-delay` 为开班后进班延时（0-600 秒，默认 0），与 `start-time`（钟表几点前不进班）相互独立；主观题默认不作答，`--subjective on` 开启。`yuketang logout` 退出登录：清除守护进程侧 cookie 并停用监听（绑定与配置保留，自动续期不会把登录续回来；恢复用 `yuketang enable` + `yuketang login`）。数据存于该 QQ 的个人 Storage，守护进程每扫描周期重读，无需重启。
+
+考试白名单后台匹配的是**班级标签**（课程列表的 `name`），不是课程名（`course.name`）。新增时输入课程名或班级标签，插件在真实用户确认后用当前登录态核验并保存唯一班级标签，例如“数据结构”解析为“010 班”。先执行 `yuketang courses` 查看对应关系；含空格的班级标签用引号：`yuketang exam whitelist add "010 班"`。同名多班、重复标签、未登录或查询失败均不新增。移除使用配置中已保存的标签（如 `yuketang exam whitelist remove "010 班"`），移除/清空在桥不可达时仍可操作。现有错误条目不会自动迁移或启用，需要用户重新新增正确范围并移除旧条目。
+
+`yuketang exam list --course 数据结构` 只读查询真实考试列表及封面元数据，包括尚未开始作答的考试；无需创建考试令牌，不开始考试、不读取题目、不提交答案。空考试列表与查询错误分别报告。查询结果只证明当前元数据可读，不能替代远端自动通知验收；桥的 `recent_events` 为空也不能证明没有考试。
 
 #### 守护进程桥（可选）
 

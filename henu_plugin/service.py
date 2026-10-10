@@ -40,6 +40,7 @@ from henu_plugin.storage_adapter import (
 )
 from henu_plugin import yuketang_config
 from henu_plugin import bridge_client
+from henu_plugin.yuketang_catalog import CatalogError, RainCatalog, resolve_classroom
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -178,6 +179,8 @@ class HenuPluginService:
             "resource_registry_query": self._resource_registry_query,
             "resource_registry_sync": self._resource_registry_sync,
             "yuketang_status": self._yuketang_status,
+            "yuketang_courses": self._yuketang_courses,
+            "yuketang_exam_list": self._yuketang_exam_list,
             "yuketang_config_show": self._yuketang_config_show,
             "yuketang_set_enabled": self._yuketang_set_enabled,
             "yuketang_domain_set": self._yuketang_domain_set,
@@ -1056,6 +1059,23 @@ class HenuPluginService:
         )
 
     def _yuketang_list_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        if params.get("scope") == "exam_whitelist" and params.get("op") == "add":
+            try:
+                catalog = self._yuketang_catalog()
+                courses = catalog.courses()
+                items = params.get("items")
+                if not isinstance(items, list) or not items or any(not isinstance(item, str) for item in items):
+                    raise CatalogError("rain_course_invalid", "请提供课程名或班级标签。")
+                resolved = [resolve_classroom(courses, item) for item in items]
+            except CatalogError as exc:
+                return self._yuketang_catalog_failure(exc)
+            result = self._yuketang_apply(lambda config: yuketang_config.apply_list_update(
+                config, "exam_whitelist", "add", [course["classroom_label"] for course in resolved]))
+            if result.get("success"):
+                result["resolved_classrooms"] = resolved
+                result["reply_text"] += "\n已核验课程与班级：" + "；".join(
+                    f"{course['course_name']} → {course['classroom_label']}" for course in resolved)
+            return result
         return self._yuketang_apply(
             lambda config: yuketang_config.apply_list_update(
                 config,
@@ -1064,6 +1084,45 @@ class HenuPluginService:
                 params.get("items") or [],
             )
         )
+
+    def _yuketang_catalog(self) -> RainCatalog:
+        try:
+            live = bridge_client.fetch_status(self._current_openid(), timeout=8)
+        except bridge_client.BridgeError:
+            raise CatalogError("rain_bridge_unavailable", "雨课堂桥不可达，未修改配置；请稍后重试。") from None
+        cookie = live.get("cookie") if isinstance(live.get("cookie"), dict) else {}
+        value = cookie.get("cookie")
+        if live.get("ok") is not True or not isinstance(value, str) or not value:
+            raise CatalogError("rain_login_required", "请先私聊登录雨课堂，再查询课程或新增考试白名单。")
+        return RainCatalog(self._yuketang_read()["domain"], value)
+
+    @staticmethod
+    def _yuketang_catalog_failure(exc: CatalogError) -> dict[str, Any]:
+        return {"success": False, "error_code": exc.code, "msg": str(exc), "reply_text": str(exc)}
+
+    def _yuketang_courses(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            courses = self._yuketang_catalog().courses()
+        except CatalogError as exc:
+            return self._yuketang_catalog_failure(exc)
+        lines = [f"雨课堂课程与班级：共 {len(courses)} 个。"]
+        lines.extend(f"{course['course_name']} → {course['classroom_label']}（ID {course['classroom_id']}）" for course in courses)
+        lines.append('考试白名单新增可用课程名或班级标签；后台保存班级标签，含空格需加引号。')
+        return {"success": True, "courses": courses, "total": len(courses), "source": "live_rain_api",
+                "msg": "雨课堂课程查询成功", "reply_text": "\n".join(lines)}
+
+    def _yuketang_exam_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            catalog = self._yuketang_catalog()
+            classroom = resolve_classroom(catalog.courses(), _text(params.get("course")))
+            exams = catalog.exams(classroom)
+        except CatalogError as exc:
+            return self._yuketang_catalog_failure(exc)
+        lines = [f"{classroom['course_name']} / {classroom['classroom_label']}：本次查询返回 {len(exams)} 个考试。"]
+        lines.extend(f"{exam['title']}：{exam['status_label']}；截止 {exam.get('deadline_china', '未提供')}" for exam in exams)
+        lines.append("以上为只读查询；未开始考试、获取试卷或提交答案。")
+        return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams),
+                "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}
 
     def _yuketang_start_time(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._yuketang_apply(
