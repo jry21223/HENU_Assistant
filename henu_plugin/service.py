@@ -956,6 +956,8 @@ class HenuPluginService:
 
     def _bridge_merge_status(self, result: dict[str, Any]) -> dict[str, Any]:
         """status 查询时合并守护进程实时状态；哈希不一致顺手重推自愈。"""
+        result["bridge"] = {"status": "unverified", "monitoring_state": "unverified",
+                            "exam_submission_state": "not_checked"}
         try:
             if bridge_client.bridge_settings() is None:
                 return result
@@ -982,16 +984,34 @@ class HenuPluginService:
             local_hash = bridge_client.canonical_hash(
                 yuketang_config.sanitize_config(local_config)
             )
-            if not live.get("config_present") or _text(live.get("config_hash")) != local_hash:
+            config_matches = live.get("config_present") is True and _text(live.get("config_hash")) == local_hash
+            if not config_matches:
                 result['_yuketang_sync_required'] = True
                 result['_yuketang_openid'] = openid
                 notes.append("桥端配置缺失或不同，将在本地持久化完成后同步。")
 
             uptime = _int(live.get("uptime_s"), 0)
             wired = live.get('daemon_wired') is True
+            daemon = live.get("daemon") if isinstance(live.get("daemon"), dict) else {}
+            identities = daemon.get("openids")
+            identities_valid = isinstance(identities, list) and all(isinstance(item, str) for item in identities)
+            registered = openid in identities if identities_valid else None
+            age = daemon.get("age_s")
+            age_valid = isinstance(age, (int, float)) and not isinstance(age, bool)
+            fresh = 0 <= age <= 75 if age_valid else None
+            monitoring_state = "unverified"
+            if wired and config_matches and fresh is True and identities_valid:
+                if registered is local_config["enabled"]:
+                    monitoring_state = "running" if registered else "stopped"
             notes.append(f"桥服务：已连接（在线 {uptime} 秒）")
             notes.append("任务执行器：已接入" if wired else "任务执行器：桥端报告尚未接入，不能确认自动化会执行。")
-            result["bridge"] = {"status": "ok", "uptime_s": uptime, "daemon_wired": wired}
+            notes.append({"running": "监听注册：当前身份已注册，配置一致且心跳有效。",
+                          "stopped": "监听注册：当前身份已移除，已确认监听注册停用。",
+                          "unverified": "监听注册：无法确认；请核对配置同步、身份注册及执行器心跳。"}[monitoring_state])
+            notes.append("考试作答与交卷：本次状态查询未核验；答案保存不等于正式交卷。")
+            result["bridge"].update({"status": "ok", "uptime_s": uptime, "daemon_wired": wired,
+                                    "config_hash_matches": config_matches, "identity_registered": registered,
+                                    "heartbeat_fresh": fresh, "monitoring_state": monitoring_state})
 
             lines = _text(result.get("reply_text"), strip=False).split("\n")
             merged = [notes.pop(0) if line.startswith("登录状态：") else line for line in lines]
@@ -1006,7 +1026,7 @@ class HenuPluginService:
                 if line.startswith("守护进程：") else line
                 for line in lines
             )
-            result["bridge"] = {"status": "unreachable"}
+            result["bridge"]["status"] = "unreachable"
             result['_yuketang_sync_required'] = True
             result['_yuketang_openid'] = self._current_openid()
         except Exception:

@@ -466,6 +466,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "--auto-enter 关闭后开课不再进班/答题，考试监听不受影响；自动进班/自动答题/大模型默认开。",
                 "exam 白名单为空等于考试功能整体关闭（与 lesson 相反）。",
                 "考试白名单新增会查询课程列表并保存唯一匹配的班级标签；同名多班需明确班级，含空格标签加引号。未登录或无法核验时不新增；移除使用已保存标签。",
+                "考试流程：本人在官方页面开始考试，后台接管并保存答案，再由本人检查并交卷。接管可能使页面提示其他设备登录；后台作答时避免反复重登。",
+                "同一雨课堂账号请只启用一个聊天身份监听，避免重复作答覆盖。status 核验配置、当前身份注册和心跳，不证明答题完成或交卷成功。",
                 "课件 PDF / PPT 进度 / 试卷文件推送已整体停用，ppt/si/paper 不可配置。",
                 "--enter-delay 是“开班后等多久进班”（秒）；start-time 是“钟表几点前不进”，两者独立。",
                 "--x-access-token 属敏感值，必须由用户在私聊中直接发送整条命令，模型不得构造或复述。",
@@ -518,6 +520,9 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "白名单为空等于考试功能整体关闭。",
                 "后台白名单匹配班级标签；新增可输入课程名，由插件实时解析。多个班级、重复标签或查询失败不会保存。含空格标签需引号，移除使用配置中已保存的班级标签。",
                 "exam list 只读查询考试元数据；不生成令牌、不开始考试、不读题目、不提交答案，空列表与接口错误分开报告。",
+                "考试需本人从官方页面开始；后台接管登录时可能提示其他设备登录，作答期间避免反复重登。后台保存答案后，本人重新进入检查并正式交卷；插件没有自动交卷命令。",
+                "同一雨课堂账号只启用一个聊天身份监听。配置已同步、身份已注册、心跳有效均不代表题目已答完；以官方已答数量和交卷结果为准。",
+                "未知、重复、缺值或多余参数会整条拒绝，不会只保存其中一部分。",
                 "--master 与 --slave 互斥，不能同时开启。",
                 "--x-access-token 必须私聊直发、单独成条，不得与其他配置混在同一条命令。",
             ],
@@ -1569,6 +1574,9 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "yuketang")
 
+    if sub in {"status", "状态", "enable", "disable", "启用", "停用", "logout", "退出登录"} and len(argv) != 2:
+        return _error_spec(raw, "该命令不接受额外参数。", help_topic="yuketang")
+
     if sub in {"status", "状态"}:
         return CliCommandSpec(
             raw=raw, argv=argv, resolved_tool="yuketang_status", params={},
@@ -1582,7 +1590,7 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                               action="yuketang courses", should_preload_runtime_context=False)
 
     if sub in {"login", "登录"}:
-        options, _, error = _parse_options(argv[2:])
+        options, _, error = _parse_yuketang_options(argv[2:], {"force"}, flags=frozenset({"force"}))
         if error:
             return _error_spec(raw, error, help_topic="yuketang")
         return CliCommandSpec(
@@ -1598,7 +1606,7 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 "用法: yuketang account set --account <手机号> --password '<密码>'（仅私聊）。",
                 help_topic="yuketang",
             )
-        options, _, error = _parse_options(argv[3:])
+        options, _, error = _parse_yuketang_options(argv[3:], {"account", "password"})
         if error:
             return _error_spec(raw, error, help_topic="yuketang")
         missing = _missing_required(options, "account", "password")
@@ -1628,7 +1636,8 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
 
     if sub in {"config", "配置"}:
         topic = argv[3].lower() if len(argv) > 3 else ""
-        if len(argv) < 3 or argv[2].lower() not in {"show", "查看"}:
+        if (len(argv) not in {3, 4} or argv[2].lower() not in {"show", "查看"}
+                or topic not in {"", "all", "全部", "lesson", "课堂", "exam", "考试", "other", "其他"}):
             return _error_spec(raw, "用法: yuketang config show [lesson|exam|other]。", help_topic="yuketang")
         return CliCommandSpec(
             raw=raw, argv=argv, resolved_tool="yuketang_config_show",
@@ -1639,7 +1648,7 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"domain", "域名"}:
         if len(argv) < 3 or argv[2].lower() not in {"set", "设置"}:
             return _error_spec(raw, "用法: yuketang domain set --domain <www|pro|changjiang|huanghe>。", help_topic="yuketang")
-        options, _, error = _parse_options(argv[3:])
+        options, _, error = _parse_yuketang_options(argv[3:], {"domain"})
         if error:
             return _error_spec(raw, error, help_topic="yuketang")
         domain = _string_option(options, "domain")
@@ -1670,7 +1679,10 @@ def _parse_yuketang_lesson(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _help_spec(raw, argv, "yuketang lesson")
 
     if verb in {"set", "设置"}:
-        options, _, error = _parse_options(argv[3:])
+        options, _, error = _parse_yuketang_options(
+            argv[3:], {"auto_enter", "auto_answer", "llm", "subjective", "enter_delay"}
+            | set(_YUKETANG_LESSON_FORBIDDEN) | set(_YUKETANG_LESSON_MISPLACED),
+        )
         if error:
             return _error_spec(raw, error, help_topic="yuketang lesson")
         forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_LESSON_FORBIDDEN)
@@ -1710,7 +1722,7 @@ def _parse_yuketang_lesson(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 help_topic="yuketang lesson",
             )
         op = "set" if argv[3].lower() in {"set", "设置"} else "clear"
-        options, _, error = _parse_options(argv[4:])
+        options, _, error = _parse_yuketang_options(argv[4:], {"course", "slots"} if op == "set" else {"course"})
         if error:
             return _error_spec(raw, error, help_topic="yuketang lesson")
         course = _string_option(options, "course")
@@ -1737,7 +1749,7 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _help_spec(raw, argv, "yuketang exam")
 
     if verb in {"list", "列表"}:
-        options, positional, error = _parse_options(argv[3:])
+        options, positional, error = _parse_yuketang_options(argv[3:], {"course"})
         if error or positional or set(options) != {"course"} or not _string_option(options, "course"):
             return _error_spec(raw, "用法: yuketang exam list --course '<课程名或班级标签>'。", help_topic="yuketang exam")
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_exam_list",
@@ -1745,9 +1757,15 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                               action="yuketang exam list", should_preload_runtime_context=False)
 
     if verb in {"set", "设置"}:
-        options, _, error = _parse_options(argv[3:])
+        options, _, error = _parse_yuketang_options(
+            argv[3:], {"auto_answer", "llm", "subjective", "master", "slave", "x_access_token"}
+            | set(_YUKETANG_EXAM_FORBIDDEN),
+        )
         if error:
             return _error_spec(raw, error, help_topic="yuketang exam")
+        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_EXAM_FORBIDDEN)
+        if forbidden:
+            return _error_spec(raw, forbidden, help_topic="yuketang exam")
         has_token = "x_access_token" in options
         normal_flags = {"auto_answer", "llm", "subjective", "master", "slave"} & options.keys()
         if has_token and normal_flags:
@@ -1766,9 +1784,6 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 params={"x_access_token": token},
                 action="yuketang exam set token", should_preload_runtime_context=False,
             )
-        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_EXAM_FORBIDDEN)
-        if forbidden:
-            return _error_spec(raw, forbidden, help_topic="yuketang exam")
         if not normal_flags:
             return _error_spec(
                 raw,
@@ -1804,6 +1819,8 @@ def _parse_yuketang_listop(raw: str, argv: tuple[str, ...], scope: str, help_top
         return _error_spec(raw, f"未知操作 `{argv[base]}`，支持 add/remove/clear。", help_topic=help_topic)
     op = {"新增": "add", "移除": "remove", "清空": "clear"}.get(op, op)
     items = [str(item) for item in argv[base + 1:]]
+    if any(item.startswith("--") for item in items):
+        return _error_spec(raw, "名单操作不支持选项参数；名称含空格时请加引号。", help_topic=help_topic)
     if op == "clear" and items:
         return _error_spec(raw, "`clear` 不接受额外名称参数。", help_topic=help_topic)
     if op in {"add", "remove"} and not items:
@@ -1851,7 +1868,30 @@ def _normalize_topic(parts: Sequence[str]) -> str:
     return " ".join(str(part).strip().lower() for part in parts if str(part).strip())
 
 
-def _parse_options(tokens: Sequence[str]) -> tuple[dict[str, Any], list[str], str | None]:
+def _parse_yuketang_options(
+    tokens: Sequence[str], allowed: set[str], *, flags: frozenset[str] = frozenset(),
+) -> tuple[dict[str, Any], list[str], str | None]:
+    options, positionals, error = _parse_options(tokens, reject_duplicates=True)
+    if error:
+        return {}, [], error
+    if set(options) - allowed:
+        return {}, [], "没有可配置项或包含不支持的雨课堂参数；请查看对应 help。"
+    if positionals:
+        return {}, [], "不接受额外位置参数；参数值含空格时请加引号。"
+    for key, value in options.items():
+        if key in flags:
+            if value is not True and str(value).lower() not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+                return {}, [], "--force 只接受无值开关或明确的 on/off 值。"
+        elif value is True or not str(value).strip():
+            if key == "x_access_token":
+                return {}, [], "缺少令牌值: yuketang exam set --x-access-token '<token>'。"
+            return {}, [], f"缺少参数值：--{key.replace('_', '-')}。"
+    return options, positionals, error
+
+
+def _parse_options(
+    tokens: Sequence[str], *, reject_duplicates: bool = False,
+) -> tuple[dict[str, Any], list[str], str | None]:
     options: dict[str, Any] = {}
     positionals: list[str] = []
     index = 0
@@ -1867,6 +1907,8 @@ def _parse_options(tokens: Sequence[str]) -> tuple[dict[str, Any], list[str], st
         key = name.replace("-", "_").strip()
         if not key:
             return {}, [], "参数格式错误：`--` 后缺少参数名。"
+        if reject_duplicates and key in options:
+            return {}, [], "重复参数不被接受；请每项只传一次。"
 
         if has_equals:
             options[key] = value

@@ -334,7 +334,7 @@ def _list_text(items: list[str]) -> str:
 def build_status_result(config: dict[str, Any]) -> dict[str, Any]:
     cfg = sanitize_config(config)
     lines = [
-        f"雨课堂监听：{'启用' if cfg['enabled'] else '未启用'}",
+        f"雨课堂监听配置：{'启用' if cfg['enabled'] else '未启用'}",
         f"域名：{cfg['domain']}",
         f"课堂：{_lesson_summary(cfg['lesson'])}",
         f"课堂名单：白名单={_list_text(cfg['lesson']['classroomWhiteList'])}；黑名单={_list_text(cfg['lesson']['classroomBlackList'])}",
