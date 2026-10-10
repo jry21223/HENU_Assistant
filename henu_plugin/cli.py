@@ -1763,6 +1763,9 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
         if error:
             return _error_spec(raw, error, help_topic="yuketang exam")
+        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_EXAM_FORBIDDEN)
+        if forbidden:
+            return _error_spec(raw, forbidden, help_topic="yuketang exam")
         has_token = "x_access_token" in options
         normal_flags = {"auto_answer", "llm", "subjective", "master", "slave"} & options.keys()
         if has_token and normal_flags:
@@ -1781,9 +1784,6 @@ def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 params={"x_access_token": token},
                 action="yuketang exam set token", should_preload_runtime_context=False,
             )
-        forbidden = _yuketang_forbidden_error(raw, options, _YUKETANG_EXAM_FORBIDDEN)
-        if forbidden:
-            return _error_spec(raw, forbidden, help_topic="yuketang exam")
         if not normal_flags:
             return _error_spec(
                 raw,

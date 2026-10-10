@@ -160,3 +160,9 @@ def test_rejected_configuration_does_not_create_confirmation_or_push_bridge(monk
 ])
 def test_documented_rain_aliases_and_quoted_values_remain_supported(command):
     assert not inspect_cli_command(command).error
+
+
+@pytest.mark.parametrize('option', ['ppt', 'si', 'progress', 'paper'])
+def test_exam_token_cannot_hide_forbidden_configuration(option):
+    spec = inspect_cli_command(f'yuketang exam set --x-access-token demo --{option} on')
+    assert spec.error and spec.resolved_tool is None and spec.params == {}
