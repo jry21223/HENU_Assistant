@@ -71,6 +71,8 @@ def actor_metadata(
     bot: str,
     sender: str,
     account: dict | None,
+    *,
+    nonce: str | None = None,
 ) -> dict:
     # Match Go encoding/json: sorted keys, UTF-8 and HTML/U+2028/U+2029 escaping.
     canonical = json.dumps(
@@ -100,7 +102,7 @@ def actor_metadata(
         "user_id": account["user_id"] if account else "",
         "display_name": account["display_name"] if account else "",
         "issued_at": int(time.time()),
-        "nonce": secrets.token_urlsafe(24),
+        "nonce": nonce or secrets.token_urlsafe(24),
     }
     raw = json.dumps(claims, ensure_ascii=False, separators=(",", ":")).encode()
     signature = hmac.new(
