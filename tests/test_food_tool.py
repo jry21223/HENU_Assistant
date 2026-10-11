@@ -19,7 +19,7 @@ UID = "44444444-4444-4444-8444-444444444444"
 
 
 @pytest.fixture
-def food_http():
+def food_http(request):
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -50,7 +50,14 @@ def food_http():
                 result = {"tools": []}
             else:
                 calls.append((body["params"], self.headers.get("Authorization")))
-                text = '我的投稿: {"posts":[]}'
+                if getattr(request, "param", "") == "lost_reply":
+                    self.close_connection = True
+                    return
+                text = (
+                    "投稿已发布（夹具）"
+                    if body["params"]["name"] == "create_food_post"
+                    else '我的投稿: {"posts":[]}'
+                )
                 proof = body["params"].get("_meta", {}).get("henukit.dev/food-actor")
                 if (
                     proof
@@ -181,7 +188,7 @@ def test_missing_or_conflicting_sender_is_rejected(monkeypatch, food_http):
     assert not calls
 
 
-def test_unavailable_or_wrong_bot_does_not_block_create(monkeypatch, food_http):
+def test_unavailable_or_wrong_bot_does_not_block_my_posts(monkeypatch, food_http):
     settings, calls = food_http
     monkeypatch.setattr(
         "components.cli_tools.henu_food.kit_settings", lambda: {"bot_uuid": "bot"}
@@ -191,13 +198,7 @@ def test_unavailable_or_wrong_bot_does_not_block_create(monkeypatch, food_http):
         raise KitError()
 
     monkeypatch.setattr("components.cli_tools.henu_food.kit_request", unavailable)
-    params = {
-        "action": "create",
-        "venue_name": "店<&>\u2028",
-        "campus": "minglun",
-        "tier": "top",
-        "review_text": "很好吃",
-    }
+    params = {"action": "mine"}
     a, s = tool(monkeypatch, settings)
     result = asyncio.run(a.call(params, s, 1))
     assert result["success"] and "暂时" in result["reply_text"]
@@ -208,7 +209,7 @@ def test_unavailable_or_wrong_bot_does_not_block_create(monkeypatch, food_http):
         assert c["kind"] == "guest"
     assert claims(calls[0])["scope"] != claims(calls[1])["scope"]
     # Cross-language fixture: Go encoding/json's sorted keys and HTML escaping.
-    canonical = '{"campus":"minglun","review_text":"很好吃","tier":"top","venue_name":"店\\u003c\\u0026\\u003e\\u2028"}'
+    canonical = "{}"
     assert (
         claims(calls[0])["arguments_sha256"]
         == hashlib.sha256(canonical.encode()).hexdigest()

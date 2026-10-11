@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: EventListener
+metadata:
+  name: food_capture
+  label:
+    en_US: Food drafts and pictures
+    zh_Hans: 美食草稿与图片
+spec:
+execution:
+  python:
+    path: food_capture.py
+    attr: FoodCaptureListener

@@ -16,7 +16,7 @@ spec:
       action:
         type: string
         enum: [create, mine, list, detail, venues]
-        description: create 投稿（立即公开）；mine 我的投稿；list 公开列表；detail 详情；venues 场所汇总
+        description: create 创建或更新未发布草稿，返回完整预览；后续独立消息“确认发布”由系统发布；mine 我的投稿；list 公开列表；detail 详情；venues 场所汇总
       venue_name: {type: string, description: 店铺名，投稿必填}
       campus: {type: string, enum: [minglun, jinming, longzihu], description: 投稿与场所查询必填}
       tier: {type: string, enum: [hang, top, elite, npc, bad], description: 投稿必填，夯/顶级/人上人/NPC/拉完了}
@@ -35,18 +35,8 @@ spec:
             price: {type: string}
             reason: {type: string}
           required: [name]
-      images:
-        type: array
-        maxItems: 6
-        items:
-          type: object
-          additionalProperties: false
-          properties:
-            content_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
-            data: {type: string, description: 无前缀 base64，单张至多 2MiB}
-          required: [content_type, data]
     required: [action]
-  llm_prompt: "美食统一使用 henu_food。只有用户明确要求投稿且提供店铺、校区、档位和锐评时调用 create，创建即公开，每身份每日最多三条。账号自动读取；禁止询问、构造或传入账号 UUID/显示名/QQ/Bot 身份。未绑定或绑定查询暂时不可用时仍可投稿，只复述绑定提示，不要求先绑定。mine 查询当前用户投稿，list/detail/venues 查询公开内容；详情 post_id 是公开帖子 ID。复述 reply_text；不要重复调用 create；结果不确定时先 mine 核验。Kit 账号绑定在私聊由用户发送“绑定 HENU KIT”，学校 IDS 登录与 Kit 绑定不同。"
+  llm_prompt: "美食统一使用 henu_food。用户明确要求投稿且提供店铺、校区、档位和锐评时调用 create，只生成未发布草稿；完整复述 reply_text，不得声称已发布。用户继续补充价格、营业时间或推荐菜时必须再次调用 create 更新草稿（可只传新增内容），完整复述最新预览。聊天图片由系统从原消息自动加入草稿，支持 JPG/PNG/WebP，最多六张、单张不超过 2MiB；以返回预览的图片数量为准，不能构造 base64、索要 UUID 或声称图片无法上传。图片无效会阻止发布，按返回提示处理。只有用户在后续独立消息单独发送“确认发布”才由系统提交；无需模型调用发布工具，不接受确认标志。发布后公开且暂不支持修改，每身份每日最多三条。可以发送“取消美食草稿”后重新整理。账号由系统自动读取，禁止询问或构造 UUID/显示名/QQ/Bot 身份；游客投稿不受绑定限制。mine 查询当前投稿；list/detail/venues 查询公开内容，post_id 是公开帖子 ID。不要自动重发，结果不确定时先 mine 核验。Kit 绑定在私聊发送“绑定 HENU KIT”，与学校 IDS 不同。"
 execution:
   python:
     path: henu_food.py
