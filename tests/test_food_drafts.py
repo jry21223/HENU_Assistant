@@ -137,6 +137,70 @@ def test_four_fields_only_prepare_an_unpublished_preview(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "question", ["你能收到图片吗？", "图片收到了吗", "你这边能看到照片吗?"]
+)
+def test_picture_receipt_question_then_repeated_confirmation_publishes_once(
+    monkeypatch, food_http, tmp_path, question
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("投稿美食 金明 夯 大同刀削面炒菜凉菜 便宜好吃", [PNG])
+        await chat.prepare(
+            venue_name="大同刀削面炒菜凉菜", price_reference="人均12左右"
+        )
+        await chat.message(question)
+        assert "已收到 1 张图片" in chat.replies[-1]
+        await chat.message("确认发布")
+        assert len(calls) == 1, (
+            "A picture receipt question must not invalidate the draft"
+        )
+        assert calls[0][0]["arguments"]["price_reference"] == "人均12左右"
+        assert calls[0][0]["arguments"]["images"] == [
+            {"content_type": "image/png", "data": PNG}
+        ]
+        await chat.message("确认发布")
+        assert len(calls) == 1
+
+    asyncio.run(run())
+
+
+def test_receipt_question_does_not_clear_pending_price_changes(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿", [PNG])
+        await chat.prepare(price_reference="人均12元")
+        await chat.message("图片收到了吗？人均改成15元")
+        await chat.message("你能收到图片吗？")
+        assert "待整理" in chat.replies[-1]
+        await chat.message("确认发布")
+        await chat.message("确认发布")
+        assert not calls
+        await chat.message("人均改为15元")
+        await chat.tool.call(
+            {"action": "create", "price_reference": "人均15元"},
+            chat.session,
+            chat.sequence,
+        )
+        await chat.message("确认发布")
+        assert (
+            len(calls) == 1
+            and calls[0][0]["arguments"]["price_reference"] == "人均15元"
+        )
+
+    asyncio.run(run())
+
+
 def test_invalid_or_unavailable_images_block_publication(
     monkeypatch, food_http, tmp_path
 ):
@@ -338,6 +402,8 @@ def test_confirmation_created_before_latest_preview_cannot_publish(
         await chat.prepare()
         await chat.message("确认发布", timestamp=early)
         assert not calls
+        await chat.message("确认发布")
+        assert len(calls) == 1
 
     asyncio.run(run())
 
