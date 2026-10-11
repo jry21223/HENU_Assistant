@@ -88,6 +88,10 @@ class Chat:
                 message_chain=chain,
             ),
         )
+        if getattr(self, "wire_roundtrip", False):
+            event = events.PersonMessageReceived.model_validate(
+                event.model_dump(mode="json")
+            )
 
         async def set_var(key, value):
             self.variables[key] = value
@@ -358,6 +362,35 @@ def test_failed_picture_preview_delivery_blocks_confirmation(
         assert (await chat.prepare())["success"]
         await chat.message("确认发布")
         assert len(calls) == 1 and len(calls[0][0]["arguments"]["images"]) == 1
+
+    asyncio.run(run())
+
+
+def test_serialized_sdk_event_preserves_picture_and_later_confirmation(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+    clock = [datetime.now(timezone.utc).timestamp()]
+    monkeypatch.setattr(
+        "henu_plugin.food_drafts.time", SimpleNamespace(time=lambda: clock[0])
+    )
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        chat.wire_roundtrip = True
+        await chat.message(
+            "我要投稿",
+            ["data:image/png;base64," + PNG],
+            timestamp=datetime.fromtimestamp(clock[0], timezone.utc),
+        )
+        assert (await chat.prepare())["success"]
+        clock[0] += 2  # SDK wire Source timestamps have second precision.
+        await chat.message(
+            "确认发布", timestamp=datetime.fromtimestamp(clock[0], timezone.utc)
+        )
+        assert len(calls) == 1 and calls[0][0]["arguments"]["images"][0]["data"] == PNG
 
     asyncio.run(run())
 
