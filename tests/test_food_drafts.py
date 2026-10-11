@@ -137,6 +137,60 @@ def test_four_fields_only_prepare_an_unpublished_preview(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("food_http", ["publication_json"], indirect=True)
+def test_publication_receipt_is_readable_and_repeated_confirmation_returns_it(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿", [PNG])
+        await chat.prepare(price_reference="人均12元")
+        await chat.message("确认发布")
+        receipt = chat.replies[-1]
+        assert "request_id" not in receipt and '"post"' not in receipt
+        assert "fixture-author" not in receipt and "/api/v1/food" not in receipt
+        assert "大同刀削面" in receipt and "金明" in receipt and "夯" in receipt
+        assert "人均12元" in receipt and "图片：1 张" in receipt
+        assert (
+            "https://henukit.cn/food/post/11111111-1111-4111-8111-111111111111"
+            in receipt
+        )
+        assert receipt.count("绑定 HENU KIT") == 1
+        await chat.message("确认发布")
+        assert chat.replies[-1] == receipt and len(calls) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("food_http", ["malformed_publication"], indirect=True)
+def test_unparseable_success_receipt_remains_claimed_without_raw_json_or_repost(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿")
+        await chat.prepare()
+        await chat.message("确认发布")
+        receipt = chat.replies[-1]
+        assert (
+            "核验" in receipt
+            and "request_id" not in receipt
+            and "{invalid" not in receipt
+        )
+        await chat.message("确认发布")
+        assert chat.replies[-1] == receipt and len(calls) == 1
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize(
     "question", ["你能收到图片吗？", "图片收到了吗", "你这边能看到照片吗?"]
 )

@@ -14,6 +14,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
+from uuid import UUID
 
 from henu_plugin.kit_client import ENV_FILE
 
@@ -141,6 +142,55 @@ def preview(draft):
     return "\n".join(lines)
 
 
+def publication_receipt(arguments, response):
+    """Render a successful publication without exposing its transport envelope."""
+    fallback = (
+        "投稿接口已返回成功，详情暂时无法解析。请查询“我的美食投稿”核验，不要重复投稿。"
+    )
+    try:
+        start = response.index("{")
+        payload, _ = json.JSONDecoder().raw_decode(response[start:])
+        post = payload["post"]
+        images = post["images"]
+        if (
+            not isinstance(images, list)
+            or len(images) > 6
+            or not all(isinstance(x, str) for x in images)
+        ):
+            return fallback
+        post_id = UUID(str(post["id"]))
+        if not post_id.int:
+            return fallback
+        lines = [
+            "投稿已发布（公开）",
+            arguments["venue_name"]
+            + " · "
+            + CAMPUSES[arguments["campus"]]
+            + "校区 · "
+            + TIERS[arguments["tier"]],
+            "锐评：" + arguments["review_text"],
+        ]
+        for key, label in (
+            ("price_reference", "价格"),
+            ("hours_reference", "营业时间"),
+        ):
+            if arguments.get(key):
+                lines.append(label + "：" + arguments[key])
+        if arguments.get("dishes"):
+            lines.append(
+                "推荐菜：" + "、".join(dish["name"] for dish in arguments["dishes"])
+            )
+        lines.extend(
+            [
+                f"图片：{len(images)} 张",
+                f"查看帖子：https://henukit.cn/food/post/{post_id}",
+            ]
+        )
+        return "\n".join(lines)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return fallback
+
+
 class FoodDrafts:
     def __init__(self):
         configured = os.environ.get("HENU_FOOD_DRAFT_DB")
@@ -225,6 +275,21 @@ class FoodDrafts:
                 if not draft:
                     return "没有可发布的有效草稿，请先整理美食投稿并核对预览。", None
                 if draft["status"] != "ready":
+                    # Upgrade an older cached JSON receipt without another
+                    # publication request or a changed publication claim.
+                    if draft.get("receipt", "").startswith("投稿已发布（创建即公开）"):
+                        previous_receipt = draft["receipt"]
+                        draft["receipt"] = publication_receipt(
+                            draft["args"], previous_receipt
+                        )
+                        if "\n暂时无法读取 Kit 绑定" in previous_receipt:
+                            draft["receipt"] += (
+                                "\n暂时无法读取 Kit 绑定，当前使用游客身份，投稿不受影响；稍后可私聊发送“绑定 HENU KIT”。"
+                            )
+                        elif "\n当前使用游客身份" in previous_receipt:
+                            draft["receipt"] += (
+                                "\n当前使用游客身份；私聊发送“绑定 HENU KIT”可将后续投稿关联到账号，投稿不受影响。"
+                            )
                     return draft.get(
                         "receipt"
                     ) or "发布结果尚不确定，请查询“我的美食投稿”，不会重复提交。", None

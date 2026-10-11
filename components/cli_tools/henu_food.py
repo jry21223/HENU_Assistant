@@ -16,6 +16,7 @@ from henu_plugin.food_drafts import (
     FoodDrafts,
     chat_scope,
     inline_image,
+    publication_receipt,
 )
 from henu_plugin.kit_client import KitError, kit_request, kit_settings
 
@@ -191,7 +192,11 @@ class HenuFood(Tool):
                     result = await call_food(
                         settings, "create_food_post", arguments, meta
                     )
-                    reply = result["reply_text"]
+                    reply = (
+                        publication_receipt(arguments, result["reply_text"])
+                        if result["success"]
+                        else result["reply_text"]
+                    )
                     if notice and result["success"] and "绑定 HENU KIT" not in reply:
                         reply += "\n" + notice
                 except Exception:
