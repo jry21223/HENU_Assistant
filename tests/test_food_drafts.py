@@ -96,7 +96,9 @@ class Chat:
             set_query_var=set_var,
             reply=reply,
             prevent_default=lambda: None,
+            is_prevent_default=False,
         )
+        ctx.prevent_default = lambda: setattr(ctx, "is_prevent_default", True)
         for handler in self.listener.registered_handlers[events.PersonMessageReceived]:
             await handler(ctx)
         return ctx
@@ -288,6 +290,24 @@ def test_model_cannot_publish_or_supply_image_bytes(monkeypatch, food_http, tmp_
         ):
             assert not (await chat.prepare(**parameter))["success"]
         assert not calls
+
+    asyncio.run(run())
+
+
+def test_unrelated_campus_messages_are_not_intercepted_by_food_replay_checks(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        now = datetime.now(timezone.utc)
+        await chat.message("今天有什么课", source="schedule", timestamp=now)
+        repeated = await chat.message("今天有什么课", source="schedule", timestamp=now)
+        older = await chat.message("借书查询", timestamp=now - timedelta(seconds=10))
+        assert not repeated.is_prevent_default and not older.is_prevent_default
+        assert not chat.replies and not calls
 
     asyncio.run(run())
 

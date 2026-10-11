@@ -182,7 +182,11 @@ class FoodDrafts:
         with self._state(scope) as state:
             previous = state.get("current", {})
             if source in state.get("seen", []) or stamp < previous.get("stamp", 0):
-                return "这条消息已处理或已过期，未重复发布。", None
+                return (
+                    "这条消息已处理或已过期，未重复发布。"
+                    if text in {CONFIRM, CANCEL}
+                    else ""
+                ), None
             state["seen"] = (state.get("seen", []) + [source])[-128:]
             current = {
                 "source": source,
