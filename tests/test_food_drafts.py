@@ -43,9 +43,16 @@ class Chat:
         self.listener = FoodCaptureListener()
         self.listener.plugin = self.tool.plugin
         await self.listener.initialize()
+
+        async def send_reply(chain):
+            if getattr(self, "fail_delivery", False):
+                raise OSError("fixture SDK delivery failure")
+            self.replies.append(str(chain))
+
         proxy = SimpleNamespace(
             get_query_vars=AsyncMock(side_effect=lambda: self.variables),
             get_bot_uuid=AsyncMock(return_value=bot),
+            reply=AsyncMock(side_effect=send_reply),
         )
         monkeypatch.setattr(
             "components.cli_tools.henu_food.QueryBasedAPIProxy", lambda **kw: proxy
@@ -86,6 +93,8 @@ class Chat:
             self.variables[key] = value
 
         async def reply(chain, **kw):
+            if getattr(self, "fail_delivery", False):
+                raise OSError("fixture SDK delivery failure")
             self.replies.append(str(chain))
 
         ctx = SimpleNamespace(
@@ -264,7 +273,6 @@ def test_draft_survives_reload_and_other_chat_cannot_confirm(
             await other.message("确认发布", source="other-confirm")
         assert not calls
         reloaded = await Chat().start(monkeypatch, settings)
-        reloaded.sequence = 100
         await reloaded.message("确认发布", source="alice-confirm")
         assert len(calls) == 1 and calls[0][0]["arguments"]["images"][0]["data"] == PNG
         await reloaded.message("确认发布", source="alice-confirm")
@@ -308,6 +316,48 @@ def test_unrelated_campus_messages_are_not_intercepted_by_food_replay_checks(
         older = await chat.message("借书查询", timestamp=now - timedelta(seconds=10))
         assert not repeated.is_prevent_default and not older.is_prevent_default
         assert not chat.replies and not calls
+
+    asyncio.run(run())
+
+
+def test_confirmation_created_before_latest_preview_cannot_publish(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿")
+        early = datetime.now(timezone.utc)
+        await chat.prepare()
+        await chat.message("确认发布", timestamp=early)
+        assert not calls
+
+    asyncio.run(run())
+
+
+def test_failed_picture_preview_delivery_blocks_confirmation(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿")
+        await chat.prepare()
+        chat.fail_delivery = True
+        await chat.message("", [PNG])
+        chat.fail_delivery = False
+        await chat.message("确认发布")
+        assert not calls and "尚未送达" in chat.replies[-1]
+        await chat.message("重新整理最新投稿")
+        assert (await chat.prepare())["success"]
+        await chat.message("确认发布")
+        assert len(calls) == 1 and len(calls[0][0]["arguments"]["images"]) == 1
 
     asyncio.run(run())
 

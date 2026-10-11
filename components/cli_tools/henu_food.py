@@ -82,11 +82,18 @@ class HenuFood(Tool):
                     variables.get("_henu_food_source"),
                     arguments,
                 )
+                await proxy.reply(pm.MessageChain([pm.Plain(text=text)]))
+                await asyncio.to_thread(
+                    FoodDrafts().delivered,
+                    scope,
+                    variables.get("_henu_food_source"),
+                    text,
+                )
                 return {
                     "success": True,
                     "reply_text": text,
                     "msg": text,
-                    "qq_reply_hint": "完整复述未发布草稿。允许继续补充；用户后续单独发送确认发布由系统处理。",
+                    "qq_reply_hint": "完整草稿已由系统直接发送，无需重复预览；可继续补充，用户后续单独发送确认发布由系统处理。",
                 }
             if action in {"create", "mine"}:
                 bot, sender = await self._identity(session, query_id)
@@ -194,6 +201,8 @@ class HenuFood(Tool):
                 await asyncio.to_thread(store.complete, scope, nonce, reply)
             if reply:
                 await self._reply(ctx, reply)
+                if not claim and reply.startswith("美食草稿（尚未发布）"):
+                    await asyncio.to_thread(store.delivered, scope, source, reply)
         except Exception:
             if text in {CONFIRM, CANCEL}:
                 await self._reply(

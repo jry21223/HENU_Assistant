@@ -212,10 +212,14 @@ class FoodDrafts:
                     ) or "发布结果尚不确定，请查询“我的美食投稿”，不会重复提交。", None
                 if draft.get("image_error"):
                     return preview(draft), None
-                if (
-                    draft["preview_source"] != previous.get("source")
-                    or draft["preview_query"] == query_id
+                if not draft.get("preview_delivered") or stamp <= draft.get(
+                    "preview_at", 0
                 ):
+                    return (
+                        "最新预览尚未送达，或确认早于预览，尚未发布；请重新整理并核对草稿。",
+                        None,
+                    )
+                if draft["preview_source"] != previous.get("source"):
                     return (
                         "还有新消息未整理进预览，尚未发布；请先重新核对最新草稿。",
                         None,
@@ -244,7 +248,7 @@ class FoodDrafts:
                     and text in {"", "图片", "这个是图片", "照片"}
                 ):
                     draft["preview_source"] = source
-                    draft["preview_query"] = query_id
+                    draft["preview_delivered"] = False
                     draft["expires"] = now + TTL
                     return preview(draft), None
             return "", None
@@ -280,11 +284,24 @@ class FoodDrafts:
             draft.update(
                 args=args,
                 preview_source=source,
-                preview_query=query_id,
+                preview_delivered=False,
                 expires=time.time() + TTL,
             )
             state["draft"] = draft
             return preview(draft)
+
+    def delivered(self, scope, source, text):
+        with self._state(scope) as state:
+            draft = self._active(state)
+            if (
+                not draft
+                or draft["status"] != "ready"
+                or draft["preview_source"] != source
+                or state.get("current", {}).get("source") != source
+                or preview(draft) != text
+            ):
+                raise ValueError("草稿已更新，请核对新的预览，尚未发布。")
+            draft.update(preview_delivered=True, preview_at=time.time())
 
     def complete(self, scope, nonce, reply):
         with self._state(scope) as state:
