@@ -53,11 +53,30 @@ def food_http(request):
                 if getattr(request, "param", "") == "lost_reply":
                     self.close_connection = True
                     return
-                text = (
-                    "投稿已发布（夹具）"
-                    if body["params"]["name"] == "create_food_post"
-                    else '我的投稿: {"posts":[]}'
-                )
+                text = '我的投稿: {"posts":[]}'
+                if body["params"]["name"] == "create_food_post":
+                    arguments = body["params"]["arguments"]
+                    text = "投稿已发布（创建即公开）: " + json.dumps(
+                        {
+                            "post": {
+                                "id": "11111111-1111-4111-8111-111111111111",
+                                "shop": {"name": "大同刀削面"},
+                                "campus": "jinming",
+                                "tags": ["夯"],
+                                "images": [
+                                    f"/api/v1/food/posts/fixture/images/{i}"
+                                    for i in range(len(arguments.get("images", [])))
+                                ],
+                                "author": "fixture-author",
+                                "hidden": False,
+                                "likes": 0,
+                            },
+                            "request_id": "private-request-fixture",
+                        },
+                        ensure_ascii=False,
+                    )
+                    if getattr(request, "param", "") == "malformed_publication":
+                        text = '投稿已发布（创建即公开）: {invalid "request_id": "private-fixture"'
                 proof = body["params"].get("_meta", {}).get("henukit.dev/food-actor")
                 if (
                     proof

@@ -13,7 +13,7 @@ from langbot_plugin.api.entities.builtin.platform import (
     message as pm,
 )
 
-from test_food_tool import UID, claims, food_http as http_fixture, tool
+from test_food_tool import SECRET, UID, claims, food_http as http_fixture, tool
 
 
 @pytest.fixture
@@ -133,6 +133,123 @@ def test_four_fields_only_prepare_an_unpublished_preview(
         result = await chat.prepare()
         assert result["success"] and "尚未发布" in result["reply_text"]
         assert not calls, "Four fields must never publish a public post"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("food_http", ["publication_json"], indirect=True)
+def test_publication_receipt_is_readable_and_repeated_confirmation_returns_it(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿", [PNG])
+        await chat.prepare(price_reference="人均12元")
+        await chat.message("确认发布")
+        receipt = chat.replies[-1]
+        assert "request_id" not in receipt and '"post"' not in receipt
+        assert "fixture-author" not in receipt and "/api/v1/food" not in receipt
+        assert "大同刀削面" in receipt and "金明" in receipt and "夯" in receipt
+        assert "人均12元" in receipt and "图片：1 张" in receipt
+        assert (
+            "https://henukit.cn/food/post/11111111-1111-4111-8111-111111111111"
+            in receipt
+        )
+        assert receipt.count("绑定 HENU KIT") == 1
+        await chat.message("确认发布")
+        assert chat.replies[-1] == receipt and len(calls) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("food_http", ["malformed_publication"], indirect=True)
+def test_unparseable_success_receipt_remains_claimed_without_raw_json_or_repost(
+    monkeypatch, food_http, tmp_path
+):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("我要投稿")
+        await chat.prepare()
+        await chat.message("确认发布")
+        receipt = chat.replies[-1]
+        assert (
+            "核验" in receipt
+            and "request_id" not in receipt
+            and "{invalid" not in receipt
+        )
+        await chat.message("确认发布")
+        assert chat.replies[-1] == receipt and len(calls) == 1
+
+    asyncio.run(run())
+
+
+def test_legacy_finished_json_receipt_is_upgraded_without_publishing_again(
+    monkeypatch, food_http, tmp_path
+):
+    # A synthetic pre-upgrade persisted-state fixture; assertions use SDK replies.
+    import hashlib
+    import hmac
+    import json
+    import sqlite3
+    import time
+
+    settings, calls = food_http
+    db_path = tmp_path / "drafts.sqlite3"
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(db_path))
+    scope = hmac.new(
+        SECRET.encode(),
+        b"henu-food-draft-v1\n" + b'["bot","alice","person","alice"]',
+        hashlib.sha256,
+    ).hexdigest()
+    old_receipt = (
+        "投稿已发布（创建即公开）: "
+        + json.dumps(
+            {
+                "post": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "images": ["/api/v1/food/posts/fixture/images/0"],
+                },
+                "request_id": "old-private-request",
+            }
+        )
+        + "\n当前使用游客身份，私聊发送“绑定 HENU KIT”可关联后续投稿。"
+    )
+    state = {
+        "draft": {
+            "status": "finished",
+            "args": {k: v for k, v in CONTENT.items() if k != "action"},
+            "images": [],
+            "receipt": old_receipt,
+            "expires": time.time() + 600,
+        }
+    }
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "CREATE TABLE drafts (scope TEXT PRIMARY KEY, updated REAL, state TEXT)"
+        )
+        db.execute(
+            "INSERT INTO drafts VALUES (?, ?, ?)",
+            (scope, time.time(), json.dumps(state)),
+        )
+
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("确认发布", source="new-confirm")
+        receipt = chat.replies[-1]
+        assert "request_id" not in receipt and "图片：1 张" in receipt
+        assert receipt.count("绑定 HENU KIT") == 1
+        assert "https://henukit.cn/food/post/" in receipt
+        reloaded = await Chat().start(monkeypatch, settings)
+        await reloaded.message("确认发布", source="reloaded-confirm")
+        assert reloaded.replies[-1] == receipt and not calls
 
     asyncio.run(run())
 
