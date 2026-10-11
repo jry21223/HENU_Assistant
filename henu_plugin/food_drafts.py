@@ -9,6 +9,7 @@ import hmac
 import json
 import math
 import os
+import re
 from pathlib import Path
 import secrets
 import sqlite3
@@ -19,6 +20,23 @@ from henu_plugin.kit_client import ENV_FILE
 TTL = 600
 CONFIRM = "确认发布"
 CANCEL = "取消美食草稿"
+
+
+def picture_receipt_question(text):
+    # Recognize only receipt/visibility questions, never price or dish changes.
+    normalized = re.sub(r"[\s？?！!。，,]", "", text)
+    return (
+        re.fullmatch(
+            r"(?:你(?:这边)?|现在)?(?:能|能够|可以|有没有|是否)?"
+            r"(?:收到|看到)(?:了)?(?:我发的|这张|刚才的)?"
+            r"(?:图片|照片|图)(?:了)?(?:吗|么|没有)?"
+            r"|(?:图片|照片|图)(?:你)?(?:收到|看到)(?:了)?(?:吗|么|没有)",
+            normalized,
+        )
+        is not None
+    )
+
+
 CAMPUSES = {"minglun": "明伦", "jinming": "金明", "longzihu": "龙子湖"}
 TIERS = {"hang": "夯", "top": "顶级", "elite": "人上人", "npc": "NPC", "bad": "拉完了"}
 
@@ -219,9 +237,9 @@ class FoodDrafts:
                         "最新预览尚未送达，或确认早于预览，尚未发布；请重新整理并核对草稿。",
                         None,
                     )
-                if draft["preview_source"] != previous.get("source"):
+                if draft.get("pending_source", "legacy-unverified") is not None:
                     return (
-                        "还有新消息未整理进预览，尚未发布；请先重新核对最新草稿。",
+                        "还有投稿内容未整理进预览，尚未发布；请将补充内容发给我生成最新预览后再确认。",
                         None,
                     )
                 draft["status"] = "submitting"
@@ -229,6 +247,24 @@ class FoodDrafts:
                     {"images": draft["images"]} if draft["images"] else {}
                 )
                 return "", (arguments, draft["nonce"])
+            if draft and draft["status"] == "ready":
+                if not images and not image_error and picture_receipt_question(text):
+                    count = len(draft["images"])
+                    answer = f"当前美食草稿已收到 {count} 张图片。"
+                    if draft.get("image_error"):
+                        answer += "\n" + draft["image_error"] + " 草稿暂不能发布。"
+                    elif (
+                        not draft.get("preview_delivered")
+                        or draft.get("pending_source", "legacy-unverified") is not None
+                    ):
+                        answer += "\n还有投稿内容待整理或预览未送达，请先生成最新预览。"
+                    else:
+                        answer += (
+                            "\n草稿内容未改变，核对已有预览后单独发送“确认发布”即可。"
+                        )
+                    return answer, None
+                # Confirmation attempts are control messages, not content edits.
+                draft["pending_source"] = source
             if draft and draft["status"] == "ready":
                 target = draft
             else:
@@ -283,6 +319,7 @@ class FoodDrafts:
             validate_content(args)
             draft.update(
                 args=args,
+                pending_source=source,
                 preview_source=source,
                 preview_delivered=False,
                 expires=time.time() + TTL,
@@ -297,11 +334,14 @@ class FoodDrafts:
                 not draft
                 or draft["status"] != "ready"
                 or draft["preview_source"] != source
-                or state.get("current", {}).get("source") != source
+                or draft.get("pending_source", "legacy-unverified")
+                not in {None, source}
                 or preview(draft) != text
             ):
                 raise ValueError("草稿已更新，请核对新的预览，尚未发布。")
-            draft.update(preview_delivered=True, preview_at=time.time())
+            draft.update(
+                preview_delivered=True, preview_at=time.time(), pending_source=None
+            )
 
     def complete(self, scope, nonce, reply):
         with self._state(scope) as state:
