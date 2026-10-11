@@ -197,7 +197,7 @@ class HenuFood(Tool):
                         if result["success"]
                         else result["reply_text"]
                     )
-                    if notice and result["success"] and "绑定 HENU KIT" not in reply:
+                    if notice and result["success"]:
                         reply += "\n" + notice
                 except Exception:
                     reply = (
