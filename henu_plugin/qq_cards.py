@@ -394,6 +394,14 @@ class CardCache:
             combined = [re.sub(r"\n第 \d+/\d+ 页 · [^\n]+", "", page) + f"\n\n本轮第 {index}/{len(combined)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”" for index, page in enumerate(combined, 1)]
         if omitted:
             combined[-1] += "\n本轮结果超过20页，请分开查询剩余功能。"
+            retained = OrderedDict()
+            remaining = MAX_PAGES
+            for identifier, group in groups.items():
+                if remaining <= 0:
+                    break
+                retained[identifier] = group[:remaining]
+                remaining -= len(retained[identifier])
+            groups = retained
         self.put(key, combined)
         self.request_results[key] = (query_id, groups)
         return combined
