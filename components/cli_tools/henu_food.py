@@ -54,7 +54,7 @@ class HenuFood(Tool):
             try:
                 filters = {key: params[key] for key in ("campus", "post_id") if isinstance(params, dict) and key in params}
                 result_id = "food " + str(action) + " " + json.dumps(filters, ensure_ascii=False, sort_keys=True)
-                await stage_card(self.plugin, session, query_id, {**result, "cli": {"resolved_tool": "food", "command": result_id}})
+                await stage_card(self.plugin, session, query_id, {**result, "cli": {"resolved_tool": "food", "command": result_id, "action": action}})
             except Exception:
                 pass
         return result

@@ -185,6 +185,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
+    if tool == "food":
+        title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
     msg = str(result.get("reply_text") or result.get("msg") or "")

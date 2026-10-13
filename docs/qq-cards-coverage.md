@@ -87,8 +87,8 @@
 
 ## 针对性验证
 
-- 最终相关测试：282 passed（12 条原 SDK 弃用警告），未运行全仓重测。包含真实帮助payload、真实选课规划器、真实Freshness.to_dict、矩阵/占用/美食详情白名单、群聊私密拦截、SDK序列化、多工具聚合、消息超时、附图分页、完整美食预览后确认。
+- 最终相关测试：283 passed（12 条原 SDK 弃用警告），未运行全仓重测。包含真实帮助payload、真实选课规划器、真实Freshness.to_dict、矩阵/占用/美食详情白名单、群聊私密拦截、SDK序列化、多工具/美食查询聚合、消息超时、附图分页、完整美食预览后确认。
 - `lbp build` 成功；Python编译与 `git diff --check` 通过。包构建只证明可打包，不证明线上已安装。
 - 宿主副本补丁 dry-run、应用与 `verify-qq-cards-host.py` 通过。mock HTTP验证 msg_type=2/content、键盘/模板字段缺席、被动来源和新seq、400/403单次文字回退、超时/5xx不重试。
 - Safari真实打开离线合成HTML，截图已裁掉浏览器栏；[查询预览](previews/queries-safari.png)、[状态预览](previews/states-safari.png)。未使用Chrome/Chromium，包括headless。
-- 两轴独立评审发现的问题均补针对性回归并修复；最终复核报告见后续验证记录。
+- 两轴独立评审发现的问题均补针对性回归并修复；最终复核通过，见 [验证记录](qq-cards-validation.md)。
