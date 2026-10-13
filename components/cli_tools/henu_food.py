@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -51,7 +52,9 @@ class HenuFood(Tool):
             result = await self._call(params, session, query_id)
         if action != "create" or result.get("success") is not True:
             try:
-                await stage_card(self.plugin, session, query_id, {**result, "cli": {"resolved_tool": "food"}})
+                filters = {key: params[key] for key in ("campus", "post_id") if isinstance(params, dict) and key in params}
+                result_id = "food " + str(action) + " " + json.dumps(filters, ensure_ascii=False, sort_keys=True)
+                await stage_card(self.plugin, session, query_id, {**result, "cli": {"resolved_tool": "food", "command": result_id}})
             except Exception:
                 pass
         return result

@@ -209,3 +209,29 @@ def test_food_detail_keeps_existing_public_description_and_dishes():
     for expected in ("面筋道汤清爽", "12元", "10:00–21:00", "刀削面", "汤清爽"):
         assert expected in page
     assert "hidden-author" not in page and "private-image" not in page
+
+
+def test_food_actions_and_detail_ids_share_pages_without_actor_metadata(monkeypatch):
+    from components.cli_tools.henu_food import HenuFood
+    from henu_plugin.qq_cards import cache, scope
+    proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=AsyncMock())
+    monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+    async def call_food(self, params, session, query_id):
+        label = params["action"] + " " + params.get("post_id", "列表A")
+        return {"success": True, "reply_text": label}
+    monkeypatch.setattr(HenuFood, "_call", call_food)
+    tool = HenuFood.__new__(HenuFood)
+    tool.plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+    session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+    async def run():
+        await tool.call({"action": "list"}, session, 1)
+        await tool.call({"action": "detail", "post_id": "详情B"}, session, 1)
+        await tool.call({"action": "detail", "post_id": "详情C"}, session, 1)
+        cards = cache(tool.plugin)
+        key = scope("bot", session)
+        combined = "\n".join(cards.entries[key][1])
+        assert "列表A" in combined and "详情B" in combined and "详情C" in combined
+        assert len(cards.entries[key][1]) == 3
+        await tool.call({"action": "detail", "post_id": "详情D"}, session, 2)
+        assert len(cards.entries[key][1]) == 1 and "详情D" in cards.page(key, "卡片第 1 页")
+    asyncio.run(run())
