@@ -12,7 +12,7 @@ from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
-from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, text_card
+from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, set_card_reply, text_card
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -299,7 +299,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
     @staticmethod
     def _reply_and_stop(ctx: context.EventContext, text: str) -> None:
         ctx.prevent_default()
-        ctx.event.reply = card_chain(text_card("校园账号与校准", str(text or "操作失败"))[0]).model_dump(mode="json")
+        set_card_reply(ctx.event, text_card("校园账号与校准", str(text or "操作失败"))[0])
 
     def _prompt_has_runtime_marker(self, messages: list[Any]) -> bool:
         return any(self._RUNTIME_MARKER in self._message_text(message) for message in messages)

@@ -88,6 +88,26 @@ def test_reply_event_uses_only_the_current_owner_and_preserves_fallback():
     assert event.reply is None
 
 
+def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
+    from langbot_plugin.api.entities import events
+    from components.event_listener.qq_cards import QQCardsListener
+    event = events.NormalMessageResponded.model_construct(
+        launcher_type="person", launcher_id="alice", sender_id="alice",
+        response_text="original", finish_reason="stop", funcs_called=[], prefix="",
+    )
+    ctx = SimpleNamespace(event=event, prevent_default=Mock(),
+        get_bot_uuid=AsyncMock(return_value="bot"),
+        get_query_vars=AsyncMock(return_value={"_henu_card": {
+            "owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "课表"}}))
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    asyncio.run(listener.present(ctx))
+    field = "reply_message_chain" if "reply_message_chain" in type(event).model_fields else "reply"
+    serialized = event.model_dump(mode="json", exclude_unset=True)
+    assert serialized[field] == [{"type": "Plain", "text": PREFIX + "课表"}]
+    ctx.prevent_default.assert_not_called()
+
+
 def test_full_tool_card_is_captured_before_model_compaction(monkeypatch):
     from henu_plugin.qq_cards import stage_card
     variables = {}

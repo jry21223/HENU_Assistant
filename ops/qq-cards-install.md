@@ -8,7 +8,7 @@
 2. 把 `qq_cards_transport.py` 作为 `henu_qq_cards.py` 放到宿主 `langbot/pkg/platform/sources/`；模块依赖宿主既有 httpx。
 3. 在宿主 `langbot/` 根目录对 `qq-cards-host.patch` 先执行 `patch --dry-run -p1`，检查两处目标恰好为 private/group text 方法。不得强行套用有差异的代码。
 4. 应用后运行 `python ops/verify-qq-cards-host.py <宿主api.py>`、Python 编译检查和本地出站 mock 测试；确认模块可从 `langbot.pkg.platform.sources.henu_qq_cards` 导入。
-5. 单独部署本 PR 构建的插件包。确认接收人/测试场景后再验收真实 QQ；审批和验收由根线程完成。
+5. 生产已安装较新的 2.1.0 与独立业务热修复时，只部署经精确 before/after 哈希和保护文件校验的呈现增量，不以本 PR 的 2.0.5 包覆盖线上。SDK 0.4.13 的 `reply_message_chain` 与公开 SDK 的 `reply` 由共享 helper 适配；正常响应覆盖回复链，不调用 `prevent_default`。确认接收人/测试场景后再验收真实 QQ；审批和验收由根线程完成。
 
 回滚：恢复备份的宿主 API 文件和原插件包。保留/移除未引用的 helper 均不影响原来的文字发送。原有业务 Storage 不变。
 

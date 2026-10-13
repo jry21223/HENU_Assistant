@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langbot_plugin.api.definition.components.common.event_listener import EventListener
 from langbot_plugin.api.entities import events
-from henu_plugin.qq_cards import cache, card_chain, page_request_text, scope, text_card
+from henu_plugin.qq_cards import cache, card_chain, page_request_text, scope, set_card_reply, text_card
 
 
 class QQCardsListener(EventListener):
@@ -32,7 +32,7 @@ class QQCardsListener(EventListener):
             owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
             if owner is None or card.get("owner") != list(owner):
                 return
-            ctx.event.reply = card_chain(card["page"]).model_dump(mode="json")
+            set_card_reply(ctx.event, card["page"])
         except Exception:
             # Preserve the pipeline's original text response on API failure.
             return

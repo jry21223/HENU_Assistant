@@ -358,6 +358,15 @@ def card_chain(text: str) -> MessageChain:
     return MessageChain([Plain(text=text)])
 
 
+def set_card_reply(event: Any, text: str) -> None:
+    """Use the real reply contract of either supported LangBot SDK generation."""
+    chain = card_chain(text)
+    if hasattr(event, "reply_message_chain"):
+        event.reply_message_chain = chain
+    else:
+        event.reply = chain.model_dump(mode="json")
+
+
 def scope(bot: str, session: Any) -> tuple[str, str, str, str] | None:
     kind = str(getattr(getattr(session, "launcher_type", ""), "value", getattr(session, "launcher_type", "")))
     sender = str(getattr(session, "sender_id", "") or "")
