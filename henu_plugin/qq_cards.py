@@ -479,3 +479,50 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
         except Exception:
             pass
     return await ctx.reply(card_chain(pages[0]))
+
+
+async def present_card(ctx):
+    if getattr(ctx.event, "funcs_called", []) or getattr(ctx.event, "finish_reason", "") in {"tool_calls", "function_call"}:
+        return
+    try:
+        variables = await ctx.get_query_vars()
+        card = variables.get("_henu_card")
+        if not isinstance(card, dict):
+            return
+        owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
+        if owner is None or card.get("owner") != list(owner):
+            return
+        set_card_reply(ctx.event, card["page"])
+        setter = getattr(ctx, "set_query_var", None)
+        if callable(setter):
+            await setter("_henu_card", None)
+    except Exception:
+        # Preserve the pipeline's original text response on API failure.
+        return
+
+
+async def handle_card_page(plugin: Any, ctx):
+    chain = getattr(getattr(ctx.event, "message_chain", None), "root", [])
+    text = page_request_text(chain)
+    if not text:
+        return False
+    if getattr(ctx, "is_prevent_postorder", False):
+        return True
+    ctx.prevent_default()
+    ctx.prevent_postorder()
+    try:
+        key = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
+        page = cache(plugin).page(key, text) if key else text_card("无法翻页", "无法确认当前会话，请重新查询。")[0]
+    except Exception:
+        key = None
+        page = "卡片读取失败，请重新查询。"
+    try:
+        await ctx.reply(card_chain(page))
+    except Exception:
+        return True  # The first send may already have arrived; never repeat.
+    if key:
+        try:
+            await cache(plugin).delivered(key, page)
+        except Exception:
+            pass  # No complete-preview acknowledgment, so confirmation stays blocked.
+    return True
