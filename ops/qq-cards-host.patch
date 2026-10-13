@@ -1,7 +1,6 @@
 --- a/libs/qq_official_api/api.py
 +++ b/libs/qq_official_api/api.py
-@@ -498,6 +498,13 @@
-         ``event_id`` (e.g. INTERACTION_CREATE id, valid 30 min) is
+@@ -499,4 +499,11 @@
          required. Without either, the call costs the proactive-send quota.
          """
 +        from langbot.pkg.platform.sources.henu_qq_cards import is_card, send_card
@@ -13,9 +12,7 @@
 +
          if not await self.check_access_token():
              await self.get_access_token()
- 
-@@ -544,6 +551,13 @@
-         Either ``msg_id`` or ``event_id`` is required (see
+@@ -545,4 +552,11 @@
          :meth:`send_private_text_msg` for the distinction).
          """
 +        from langbot.pkg.platform.sources.henu_qq_cards import is_card, send_card
@@ -27,4 +24,3 @@
 +
          if not await self.check_access_token():
              await self.get_access_token()
- 
