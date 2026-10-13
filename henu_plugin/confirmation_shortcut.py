@@ -10,6 +10,7 @@ from langbot_plugin.api.entities.builtin.provider.session import Session, Launch
 
 from henu_mcp.core.secure_storage import decrypt_value
 from henu_plugin.confirmation import conversation_context, validate_pending_operation
+from henu_plugin.qq_cards import reply_card
 
 
 CONFIRM_WORDS = {'确认', '确认操作', '确认绑定', '确认雨课堂绑定'}
@@ -121,6 +122,5 @@ class ConfirmationShortcut:
             if self.tasks.get(sender) is asyncio.current_task():
                 self.tasks.pop(sender, None)
 
-    @staticmethod
-    async def reply(ctx, text):
-        await ctx.reply(MessageChain([Plain(text=text)]))
+    async def reply(self, ctx, text):
+        return await reply_card(ctx, "操作确认", text, plugin=self.listener.plugin)

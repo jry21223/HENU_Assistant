@@ -1,0 +1,361 @@
+"""QQ-safe presentation of existing campus results; no business side effects."""
+from __future__ import annotations
+
+import json
+import re
+import time
+import unicodedata
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any
+
+from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+
+from henu_plugin.cli import redact_cli_command
+
+PREFIX = "# 河大助手 · "
+MAX_BYTES = 3600
+MAX_PAGES = 20
+PAGE_TTL = 600
+PRIVATE_NOTICE = "个人信息仅在私聊中展示。请私聊机器人继续此操作。"
+
+
+def is_page_request(text: str) -> bool:
+    return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页", text))
+
+# Every service dispatch route has a deliberate presentation title.
+TOOL_TITLES = {
+    "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
+    "sync_schedule": "课表导入", "schedule_query": "我的课表",
+    "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
+    "course_selection_query": "教务选课", "course_selection_plan": "选课方案",
+    "course_selection_submit": "选课提交", "course_monitor_config": "选课监控设置",
+    "course_monitor_once": "选课监控", "course_monitor_run": "选课监控",
+    "course_monitor_notify_test": "监控通知测试", "library_query": "图书馆座位",
+    "library_reserve": "座位预约", "library_auto_signin": "座位签到",
+    "library_cancel": "取消座位预约", "seminar_group": "研讨室成员组",
+    "seminar_query": "研讨室", "seminar_reserve": "研讨室预约",
+    "seminar_signin": "研讨室签到", "seminar_cancel": "取消研讨室预约",
+    "set_calibration_source": "节次校准", "system_status": "账号与服务状态",
+    "yunfz_leave_query": "河宝请假", "yunfz_signin_query": "河宝签到",
+    "yunfz_checksleep_query": "河宝查寝", "yunfz_activity_query": "河宝活动",
+    "yunfz_collection_query": "河宝信息收集", "empty_classroom_query": "空教室",
+    "empty_classroom_sync": "空教室数据同步", "resource_registry_query": "校园资源",
+    "resource_registry_sync": "校园资源同步", "yuketang_status": "雨课堂状态",
+    "yuketang_courses": "雨课堂课程", "yuketang_exam_list": "雨课堂考试列表",
+    "yuketang_config_show": "雨课堂配置", "yuketang_set_enabled": "雨课堂开关",
+    "yuketang_domain_set": "雨课堂域名", "yuketang_lesson_set": "雨课堂课堂设置",
+    "yuketang_exam_set": "雨课堂考试设置", "yuketang_list_update": "雨课堂课程范围",
+    "yuketang_start_time": "雨课堂进班时间", "yuketang_set_token": "雨课堂令牌绑定",
+    "yuketang_account_set": "雨课堂账号绑定", "yuketang_login": "雨课堂登录",
+    "yuketang_logout": "雨课堂退出登录",
+}
+
+
+def escape(value: Any, limit: int = 500) -> str:
+    """Bound and neutralize external Markdown, mentions and control characters."""
+    text = str(value if value is not None else "")
+    text = "".join(c for c in text if c == "\n" or unicodedata.category(c) not in {"Cc", "Cf"})
+    if re.search(r"(?i)--(?:password|passwd|cookie|data|token|authorization|api[-_]?key|x[-_]?access[-_]?token)\b", text):
+        text = redact_cli_command(text)
+    text = re.sub(r"(?i)\b(password|cookie|access_token|authorization|secret)\s*[:=]\s*\S+", r"\1=已隐藏", text)
+    text = text.replace("<", "＜").replace(">", "＞").replace("@", "＠")
+    text = re.sub(r"([\\`*_{}\[\]()#!|~])", r"\\\1", text)
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _first(item: dict, *keys: str) -> str:
+    return next((str(item[k]) for k in keys if item.get(k) not in (None, "", [], {}) and not isinstance(item[k], (dict, list))), "")
+
+
+def public_spec(spec: Any) -> bool:
+    if spec.is_help:
+        return True
+    tool, params = spec.resolved_tool or "", spec.params
+    return (
+        tool in {"empty_classroom_query", "empty_classroom_sync", "resource_registry_query", "resource_registry_sync"}
+        or tool == "library_query" and params.get("view") in {"locations", "seats"}
+        or tool == "seminar_query" and params.get("view") in {"rooms", "filters", "detail"}
+    )
+
+
+@dataclass(frozen=True)
+class Card:
+    title: str
+    status: str
+    lines: tuple[str, ...]
+    next_step: str = ""
+
+    def pages(self) -> list[str]:
+        # Greedy line pagination with space reserved for header/footer.
+        chunks: list[list[str]] = [[]]
+        budget = MAX_BYTES - 1200
+        for raw in self.lines:
+            line = raw
+            # Never split an escape pair or silently cut one large paragraph.
+            while len(line.encode("utf-8")) > budget:
+                end = min(650, len(line))
+                while len(line[:end].encode("utf-8")) > budget or line[:end].endswith("\\"):
+                    end -= 1
+                chunks.append([line[:end]])
+                line = line[end:]
+            if len(chunks[-1]) >= 8 or len(("\n".join(chunks[-1]) + "\n" + line).encode("utf-8")) > budget:
+                chunks.append([])
+            chunks[-1].append(line)
+        chunks = [chunk for chunk in chunks if chunk] or [[]]
+        omitted = len(chunks) > MAX_PAGES
+        chunks = chunks[:MAX_PAGES]
+        pages = []
+        for number, chunk in enumerate(chunks, 1):
+            lines = [PREFIX + escape(self.title, 60), "", "**" + escape(self.status, 70) + "**", "", *chunk]
+            if self.next_step:
+                lines += ["", "**下一步**", escape(self.next_step, 160)]
+            if len(chunks) > 1:
+                lines += ["", f"第 {number}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”"]
+            if omitted:
+                lines += ["最多展示 20 页，其余内容请缩小查询范围后重新查询。"]
+            pages.append("\n".join(lines))
+        return pages
+
+
+def _row(item: Any) -> str:
+    if not isinstance(item, dict):
+        return "- " + escape(item, 250)
+    name = _first(item, "course", "course_name", "courseName", "nameMerge", "room_name", "roomName", "classroomName", "seat_no", "seatNo", "no", "name", "title", "taskName", "displayName", "location", "group_name", "resource_id", "id") or "条目"
+    fields = [
+        ("时间", _first(item, "show_time", "showTime", "time", "time_range", "clock_start", "begin_time", "start_time", "startTime", "sign_at", "period")),
+        ("结束", _first(item, "clock_end", "end_time", "endTime")),
+        ("位置", _first(item, "classroom", "place", "location", "campusName", "buildingName", "area_name", "areaName")),
+        ("状态", _first(item, "status_name", "statusName", "status_text", "status", "state")),
+        ("编号", _first(item, "area_id", "areaId", "record_id", "recordId", "roomId", "resourceId", "id")),
+        ("人数/容量", _first(item, "member_count", "capacity")),
+    ]
+    slots = item.get("available_slots")
+    if isinstance(slots, list):
+        fields.append(("可预约", "；".join(_first(s, "label") or (_first(s, "start_time") + "–" + _first(s, "end_time")) for s in slots[:3] if isinstance(s, dict)) or "无可预约时段"))
+    parts = [f"{label}：{escape(value, 100)}" for label, value in fields if value]
+    return "- **" + escape(name, 100) + "**" + ("\n  " + " · ".join(parts) if parts else "")
+
+
+LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "candidates", "groups", "data", "commands", "tips", "examples")
+
+
+def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
+    if private:
+        return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
+    cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+    tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
+    if cli.get("mode") == "help":
+        title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
+    msg = str(result.get("reply_text") or result.get("msg") or "")
+    food_rows = None
+    if tool == "food" and "{" in msg:
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(msg[msg.index("{"):])
+            items = payload.get("posts", payload.get("venues", [payload["post"]] if "post" in payload else []))
+            food_rows = []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                shop = item.get("shop") if isinstance(item.get("shop"), dict) else {}
+                food_rows.append({"name": item.get("venue_name") or item.get("name") or shop.get("name") or "美食", "location": item.get("campus"), "status": "、".join(str(tag) for tag in item.get("tags", [])[:5])})
+            msg = f"查询完成，共 {len(food_rows)} 项。"
+        except (ValueError, TypeError, AttributeError):
+            msg = "服务返回的数据格式暂时无法展示，请重新查询核验。"
+    code = str(result.get("error_code") or "")
+    status = "已完成" if result.get("success") else "未完成"
+    if result.get("confirmation_required"):
+        status = "待本人确认 · 尚未提交"
+    elif result.get("external_committed") and result.get("storage_persisted") is False:
+        status = "外部已完成 · 本地保存失败"
+    elif "expired" in code or "过期" in msg:
+        status = "已过期 · 请重新发起"
+    elif code in {"auth_required", "account_not_bound", "login_required"} or "缺少账号" in msg or "尚未绑定" in msg:
+        status = "需要绑定或登录"
+    elif result.get("source") == "static_fallback":
+        status = "静态参考 · 未核验实时可用性"
+    elif result.get("source") == "live_empty":
+        status = "实时接口返回空数据 · 无法确认可用性"
+    elif result.get("stale") or result.get("is_stale"):
+        status = "缓存已过期 · 仅供参考"
+    elif tool.startswith("yuketang") and result.get("bridge") == "pending":
+        status = "本地已保存 · 远端待同步"
+    lines = []
+    query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else {}
+    for label, keys in (("日期", ("date", "target_date")), ("位置", ("area", "location", "room_name")), ("时段", ("time_window", "preferred_time", "start_time"))):
+        value = _first(result, *keys) or _first(query, *keys)
+        if value:
+            lines.append(f"**{label}**：{escape(value, 160)}")
+    for key, label in (("now", "查询时间"), ("available_count", "可用座位"), ("total_count", "座位总数"), ("total", "总结果数"), ("record_id", "预约编号"), ("status", "服务状态"), ("monitoring_state", "监听状态"), ("bridge", "桥端状态")):
+        value = _first(result, key)
+        if value:
+            lines.append(f"**{label}**：{escape(value, 120)}")
+    if msg and not msg.lstrip().startswith(("{", "[")):
+        lines.extend(escape(line, 900) for line in msg.splitlines() if line.strip())
+    if tool == "system_status":
+        wrapper = result.get("account") or {}
+        account = wrapper.get("account", wrapper) if isinstance(wrapper, dict) else {}
+        sid = str(account.get("student_id") or "")
+        lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定"), "**登录凭据**：" + ("已保存" if account.get("has_password") else "未保存")]
+        clock = result.get("server_time") or {}
+        if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
+            lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))
+    # Whitelisted nested data: never dump credentials, raw provider records or
+    # local file paths just because a service adds another result field.
+    for section in ("filters", "statistics", "detail", "room", "area", "library_defaults"):
+        value = result.get(section)
+        if isinstance(value, dict):
+            safe = {key: item for key, item in value.items() if key in {"name", "room_name", "roomName", "nameMerge", "location", "seat_no", "capacity", "id", "area_id", "start_time", "end_time", "status", "available_slots", "total", "count", "finished", "pending"}}
+            if safe:
+                lines.append(_row(safe))
+            collections_in_section = [(key, item) for key, item in value.items() if key in {"libraries", "floors", "categories", "boutiques", "items"} and isinstance(item, list)]
+            for key, rows in collections_in_section:
+                lines.append("**筛选项 · " + escape(key) + "**")
+                lines.extend(_row(row) for row in rows)
+    collections = []
+    for key in ("current_courses", "next_course", "day_schedule", "schedule"):
+        value = result.get(key)
+        if isinstance(value, list):
+            collections.append((key, value))
+        elif isinstance(value, dict):
+            if key == "next_course":
+                collections.append(("下一节课", [value]))
+            else:
+                collections.extend((str(day), rows) for day, rows in value.items() if isinstance(rows, list))
+    if not collections:
+        collections = [(key, result[key]) for key in LIST_FIELDS if isinstance(result.get(key), list)]
+    if food_rows is not None:
+        collections = [("items", food_rows)]
+    if result.get("success") and collections and all(not rows for _, rows in collections):
+        status = "查询完成 · 没有符合条件的结果"
+    for key, rows in collections:
+        if rows:
+            label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天课程", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约"}.get(key, key)
+            lines.append(f"**{escape(label, 60)} · {len(rows)} 项**")
+            lines.extend(_row(row) for row in rows)
+    if result.get("week_filter_applied") is False and "未按教学周过滤" not in msg:
+        lines.append("课表未按教学周过滤，请核对实际教学周。")
+    if tool.startswith("yuketang") and tool != "yuketang_exam_list":
+        lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
+    next_commands = result.get("next_commands") or []
+    next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    if result.get("confirmation_required"):
+        next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
+    elif result.get("external_committed") and result.get("storage_persisted") is False:
+        next_step = "先查询当前记录核验，不要重复提交。"
+    elif status == "需要绑定或登录":
+        next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
+    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "可发送 help 查看当前功能和命令。")
+
+
+def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
+    if private:
+        return result_card({}, private=True).pages()
+    status = "服务回执"
+    if "尚未发布" in text or "尚未提交" in text or "待确认" in text:
+        status = "待本人核对 · 尚未提交"
+    elif "过期" in text or "失效" in text:
+        status = "已过期或失效 · 请重新核验"
+    elif "失败" in text or "无法" in text:
+        status = "未完成 · 请核验状态"
+    # Keep the validated, private KIT authorization URL byte-for-byte. Escaping
+    # its fragment would change the binding token. No arbitrary links/images.
+    lines = []
+    for line in str(text).splitlines():
+        if not line.strip():
+            continue
+        if title == "HENU KIT 绑定" and re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?/bind/qq#[A-Za-z0-9_-]{1,512}", line.strip()):
+            lines.append("[打开 HENU KIT 授权页面](" + line.strip() + ")")
+        else:
+            lines.append(escape(line, 12000))
+    return Card(title, status, tuple(lines)).pages()
+
+
+def card_chain(text: str) -> MessageChain:
+    return MessageChain([Plain(text=text)])
+
+
+def scope(bot: str, session: Any) -> tuple[str, str, str, str] | None:
+    kind = str(getattr(getattr(session, "launcher_type", ""), "value", getattr(session, "launcher_type", "")))
+    sender = str(getattr(session, "sender_id", "") or "")
+    launcher = str(getattr(session, "launcher_id", "") or "")
+    if not bot or kind not in {"person", "group"} or sender in {"", "0", "unknown", "None"} or not launcher:
+        return None
+    return bot, kind, launcher, sender
+
+
+class CardCache:
+    def __init__(self):
+        self.entries: OrderedDict[tuple, tuple[float, list[str], int]] = OrderedDict()
+        self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
+
+    def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
+        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
+        self.preview_receipts.pop(key, None)
+        if on_read is not None:
+            self.preview_receipts[key] = (set(), on_read)
+        self.entries.move_to_end(key)
+        while len(self.entries) > 128:
+            expired, _ = self.entries.popitem(last=False)
+            self.preview_receipts.pop(expired, None)
+
+    async def delivered(self, key: tuple, page: str) -> None:
+        entry = self.entries.get(key)
+        receipt = self.preview_receipts.get(key)
+        if not entry or not receipt or entry[0] <= time.monotonic() or page not in entry[1]:
+            return
+        viewed, callback = receipt
+        viewed.add(entry[1].index(page))
+        if len(viewed) == len(entry[1]):
+            self.preview_receipts.pop(key, None)
+            await callback()
+
+    def page(self, key: tuple, request: str) -> str:
+        entry = self.entries.get(key)
+        if not entry or entry[0] <= time.monotonic():
+            self.entries.pop(key, None)
+            self.preview_receipts.pop(key, None)
+            return text_card("卡片已过期", "卡片已过期或当前会话没有可翻页内容，请重新查询。")[0]
+        expires, pages, current = entry
+        if request == "下一页":
+            selected = current + 1
+        elif request == "上一页":
+            selected = current - 1
+        else:
+            selected = int(re.search(r"\d+", request).group()) - 1
+        if selected < 0 or selected >= len(pages):
+            return text_card("翻页范围", f"当前卡片共 {len(pages)} 页，请发送“卡片第 N 页”。")[0]
+        self.entries[key] = (expires, pages, selected)
+        return pages[selected]
+
+
+def cache(plugin: Any) -> CardCache:
+    if not isinstance(getattr(plugin, "_henu_card_cache", None), CardCache):
+        plugin._henu_card_cache = CardCache()
+    return plugin._henu_card_cache
+
+
+async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> None:
+    from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+    proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=plugin.plugin_runtime_handler)
+    bot = str(await proxy.get_bot_uuid() or "")
+    key = scope(bot, session)
+    if key is None:
+        return
+    pages = result_card(result).pages()
+    cache(plugin).put(key, pages)
+    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
+
+
+async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
+    kind = str(getattr(getattr(ctx.event, "launcher_type", ""), "value", getattr(ctx.event, "launcher_type", "")))
+    pages = text_card(title, text, private=private and kind != "person")
+    if plugin is not None and callable(getattr(ctx, "get_bot_uuid", None)):
+        try:
+            key = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
+            if key:
+                cache(plugin).put(key, pages)
+        except Exception:
+            pass
+    return await ctx.reply(card_chain(pages[0]))

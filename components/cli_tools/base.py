@@ -107,6 +107,7 @@ class BaseHenuTool(Tool):
 
         await sync_after_commit(self.plugin, storage_key, result)
 
+        await self._publish_delivery_result(result, session, query_id)
         self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)
         self._strip_internal_fields(result)
@@ -118,6 +119,10 @@ class BaseHenuTool(Tool):
 
     def _prepare_delivery_result(self, result: Any) -> None:
         """Hook for tool-specific summaries before the generic size budget applies."""
+        return
+
+    async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> None:
+        """Presentation hook before model payload compaction."""
         return
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:

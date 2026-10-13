@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: EventListener
+metadata:
+  name: qq_cards
+  label:
+    en_US: Campus result cards
+    zh_Hans: 校园结果卡片
+spec:
+execution:
+  python:
+    path: qq_cards.py
+    attr: QQCardsListener

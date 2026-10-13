@@ -14,6 +14,7 @@ import unicodedata
 import uuid
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+from henu_plugin.qq_cards import reply_card
 from langbot_plugin.entities.io.errors import ActionCallError
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
 from henu_plugin.confirmation import (
@@ -1049,9 +1050,8 @@ class KitBindingCoordinator:
         )
         return cleaned or "当前账号"
 
-    @staticmethod
-    async def _reply(ctx, text):
-        return await ctx.reply(MessageChain([Plain(text=text)]))
+    async def _reply(self, ctx, text):
+        return await reply_card(ctx, "HENU KIT 绑定", text, plugin=self.listener.plugin)
 
     async def _stop_reply(self, ctx, text):
         ctx.prevent_default()

@@ -19,6 +19,7 @@ from henu_plugin.food_drafts import (
     publication_receipt,
 )
 from henu_plugin.kit_client import KitError, kit_request, kit_settings
+from henu_plugin.qq_cards import PRIVATE_NOTICE, cache, card_chain, is_page_request, reply_card, scope as card_scope, stage_card, text_card
 
 ACTIONS = {
     "create": (
@@ -41,7 +42,21 @@ ACTIONS = {
 
 
 class HenuFood(Tool):
-    async def call(
+    async def call(self, params: dict[str, Any], session, query_id: int) -> dict[str, Any]:
+        kind = getattr(session.launcher_type, "value", session.launcher_type)
+        action = params.get("action") if isinstance(params, dict) else None
+        if kind == "group" and action in {"create", "mine"}:
+            result = self._failure(PRIVATE_NOTICE)
+        else:
+            result = await self._call(params, session, query_id)
+        if action != "create" or result.get("success") is not True:
+            try:
+                await stage_card(self.plugin, session, query_id, {**result, "cli": {"resolved_tool": "food"}})
+            except Exception:
+                pass
+        return result
+
+    async def _call(
         self, params: dict[str, Any], session, query_id: int
     ) -> dict[str, Any]:
         action = params.get("action")
@@ -83,13 +98,8 @@ class HenuFood(Tool):
                     variables.get("_henu_food_source"),
                     arguments,
                 )
-                await proxy.reply(pm.MessageChain([pm.Plain(text=text)]))
-                await asyncio.to_thread(
-                    FoodDrafts().delivered,
-                    scope,
-                    variables.get("_henu_food_source"),
-                    text,
-                )
+                owner = card_scope(bot, session)
+                await self._send_preview(proxy.reply, owner, scope, variables.get("_henu_food_source"), text)
                 return {
                     "success": True,
                     "reply_text": text,
@@ -134,6 +144,13 @@ class HenuFood(Tool):
         text = "".join(
             item.text for item in chain if isinstance(item, pm.Plain)
         ).strip()
+        if is_page_request(text):
+            return  # Read-only paging must not dirty a pending Food draft.
+        kind = getattr(event.launcher_type, "value", event.launcher_type)
+        if kind != "person":
+            if text in {CONFIRM, CANCEL}:
+                await self._reply(ctx, PRIVATE_NOTICE)
+            return
         try:
             settings = food_settings()
         except ValueError:
@@ -205,9 +222,11 @@ class HenuFood(Tool):
                     )
                 await asyncio.to_thread(store.complete, scope, nonce, reply)
             if reply:
-                await self._reply(ctx, reply)
                 if not claim and reply.startswith("美食草稿（尚未发布）"):
-                    await asyncio.to_thread(store.delivered, scope, source, reply)
+                    ctx.prevent_default()
+                    await self._send_preview(ctx.reply, card_scope(bot, event), scope, source, reply)
+                else:
+                    await self._reply(ctx, reply)
         except Exception:
             if text in {CONFIRM, CANCEL}:
                 await self._reply(
@@ -215,10 +234,19 @@ class HenuFood(Tool):
                     "无法验证当前草稿或消息来源，未执行新的发布；请查询“我的美食投稿”核验。",
                 )
 
-    @staticmethod
-    async def _reply(ctx, text):
+    async def _reply(self, ctx, text):
         ctx.prevent_default()
-        await ctx.reply(pm.MessageChain([pm.Plain(text=text)]))
+        return await reply_card(ctx, "美食投稿", text, plugin=self.plugin)
+
+    async def _send_preview(self, send, owner, draft_scope, source, text):
+        pages = text_card("美食草稿", text)
+        async def delivered():
+            await asyncio.to_thread(FoodDrafts().delivered, draft_scope, source, text)
+        if owner:
+            cache(self.plugin).put(owner, pages, on_read=delivered)
+        await send(card_chain(pages[0]))
+        if owner:
+            await cache(self.plugin).delivered(owner, pages[0])
 
     async def _identity(self, session, query_id: int) -> tuple[str, str]:
         proxy = QueryBasedAPIProxy(
