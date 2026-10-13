@@ -12,6 +12,7 @@ from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
+from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, set_card_reply, text_card
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -37,6 +38,12 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         "yuketang_account_set",
         "yuketang_login",
     }
+
+    async def _maybe_reply_account_status(self, ctx: context.EventContext) -> None:
+        if self._is_account_query(str(getattr(ctx.event, "text_message", "") or "")):
+            ctx.prevent_default()
+            ctx.prevent_postorder()
+            await ctx.reply(card_chain(text_card("账号与服务状态", PRIVATE_NOTICE, private=True)[0]))
 
     async def initialize(self):
         await super().initialize()
@@ -275,8 +282,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
                 ctx.query_id,
                 identity_hint,
             )
-        except Exception as exc:
-            self._reply_and_stop(ctx, f"敏感命令处理失败: {exc}")
+        except Exception:
+            self._reply_and_stop(ctx, "敏感命令处理失败，请稍后在私聊中重新核验状态。")
             return
 
         if isinstance(result, dict):
@@ -292,9 +299,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
     @staticmethod
     def _reply_and_stop(ctx: context.EventContext, text: str) -> None:
         ctx.prevent_default()
-        ctx.event.reply_message_chain = platform_message.MessageChain(
-            [platform_message.Plain(text=str(text or "操作失败"))]
-        )
+        set_card_reply(ctx.event, text_card("校园账号与校准", str(text or "操作失败"))[0])
 
     def _prompt_has_runtime_marker(self, messages: list[Any]) -> bool:
         return any(self._RUNTIME_MARKER in self._message_text(message) for message in messages)

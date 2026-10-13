@@ -1,0 +1,26 @@
+--- a/libs/qq_official_api/api.py
++++ b/libs/qq_official_api/api.py
+@@ -499,4 +499,11 @@
+         required. Without either, the call costs the proactive-send quota.
+         """
++        from langbot.pkg.platform.sources.henu_qq_cards import is_card, send_card
++        if is_card(content):
++            return await send_card(
++                self, 'c2c', user_openid, content,
++                msg_id=msg_id, event_id=event_id, msg_seq=msg_seq,
++            )
++
+         if not await self.check_access_token():
+             await self.get_access_token()
+@@ -545,4 +552,11 @@
+         :meth:`send_private_text_msg` for the distinction).
+         """
++        from langbot.pkg.platform.sources.henu_qq_cards import is_card, send_card
++        if is_card(content):
++            return await send_card(
++                self, 'group', group_openid, content,
++                msg_id=msg_id, event_id=event_id, msg_seq=msg_seq,
++            )
++
+         if not await self.check_access_token():
+             await self.get_access_token()

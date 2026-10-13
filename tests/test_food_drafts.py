@@ -28,6 +28,50 @@ CONTENT = {
     "tier": "hang",
     "review_text": "真好吃真好吃",
 }
+
+
+def test_long_card_preview_cannot_publish_until_all_pages_are_delivered(monkeypatch, food_http, tmp_path):
+    from components.event_listener.qq_cards import QQCardsListener
+    from henu_plugin.qq_cards import cache, scope
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("整理长草稿")
+        await chat.prepare(review_text="好吃" * 900 + "最后一句也必须核对")
+        assert calls == []
+        await chat.message("确认发布")
+        assert calls == [] and "尚未送达" in chat.replies[-1]
+        await chat.message("重新整理长草稿")
+        await chat.prepare(review_text="好吃" * 900 + "最后一句也必须核对")
+        owner = scope(chat.bot, chat.session)
+        total = len(cache(chat.tool.plugin).entries[owner][1])
+        assert total > 1
+        pager = QQCardsListener.__new__(QQCardsListener)
+        pager.plugin = chat.tool.plugin
+        for number in range(2, total + 1):
+            request = await chat.message(f"卡片第 {number} 页")
+            request.prevent_postorder = lambda: None
+            assert await pager.paging(request)
+        assert "最后一句也必须核对" in "\n".join(chat.replies)
+        await chat.message("确认发布")
+        assert len(calls) == 1
+    asyncio.run(run())
+
+
+def test_paging_text_with_picture_cannot_publish_the_previous_preview(monkeypatch, food_http, tmp_path):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("整理草稿")
+        await chat.prepare()
+        await chat.message("下一页", images=[PNG])
+        await chat.message("确认发布")
+        assert calls == [] and "还有投稿内容" in chat.replies[-1]
+    asyncio.run(run())
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2S0AAAAASUVORK5CYII="
 
 

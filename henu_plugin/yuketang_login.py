@@ -7,6 +7,7 @@ import shlex
 import time
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+from henu_plugin.qq_cards import reply_card
 from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
 
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
@@ -210,6 +211,5 @@ class YuketangLoginCoordinator:
         return await self.listener._run_with_user_storage(session, hint,
             self.listener.plugin.service.run_tool, name, params, session, ctx.query_id, hint)
 
-    @staticmethod
-    async def reply(ctx, text):
-        await ctx.reply(MessageChain([Plain(text=text)]))
+    async def reply(self, ctx, text):
+        return await reply_card(ctx, "雨课堂登录", text, plugin=self.listener.plugin)

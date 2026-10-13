@@ -6,7 +6,8 @@ from typing import Any
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
 from components.cli_tools.henu_cli import HenuCli
-from henu_plugin.cli import redact_cli_command
+from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.qq_cards import PRIVATE_NOTICE, public_spec, stage_card
 
 
 class HenuCliSafe(HenuCli):
@@ -27,7 +28,29 @@ class HenuCliSafe(HenuCli):
         session: provider_session.Session,
         query_id: int,
     ) -> dict[str, Any]:
-        return await super().call(params, session, query_id)
+        kind = getattr(session.launcher_type, "value", session.launcher_type)
+        command = params.get("command", "") if isinstance(params, dict) else ""
+        if kind == "group" and not public_spec(inspect_cli_command(command)):
+            result = {"success": False, "error_code": "private_reply_required", "msg": PRIVATE_NOTICE, "reply_text": PRIVATE_NOTICE}
+        else:
+            result = await super().call(params, session, query_id)
+        # Normal service results were captured in full before compaction. Early
+        # confirmation/error branches and persistence warnings need this hook.
+        captured = result.pop("_henu_card_captured", False) if isinstance(result, dict) else False
+        if isinstance(result, dict) and (not captured or result.get("external_committed")):
+            await self._publish_delivery_result(result, session, query_id)
+        return result
+
+    async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> bool:
+        if not isinstance(result, dict):
+            return False
+        try:
+            await stage_card(self.plugin, session, query_id, result)
+            return True
+        except Exception:
+            # Query APIs are optional presentation infrastructure. The existing
+            # readable tool result remains the fallback, without logging data.
+            return False
 
     def _prepare_delivery_result(self, result: Any) -> None:
         if not isinstance(result, dict):

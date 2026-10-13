@@ -107,10 +107,13 @@ class BaseHenuTool(Tool):
 
         await sync_after_commit(self.plugin, storage_key, result)
 
+        card_captured = await self._publish_delivery_result(result, session, query_id)
         self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)
         self._strip_internal_fields(result)
         self._normalize_for_qq_delivery(result)
+        if card_captured and isinstance(result, dict):
+            result["_henu_card_captured"] = True
         return result
 
     def should_preload_runtime_context(self, params: dict[str, Any]) -> bool:
@@ -119,6 +122,10 @@ class BaseHenuTool(Tool):
     def _prepare_delivery_result(self, result: Any) -> None:
         """Hook for tool-specific summaries before the generic size budget applies."""
         return
+
+    async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> bool:
+        """Presentation hook before model payload compaction."""
+        return False
 
     async def _load_identity_hint(self, query_id: int) -> dict[str, Any]:
         handler = getattr(self.plugin, "plugin_runtime_handler", None)
