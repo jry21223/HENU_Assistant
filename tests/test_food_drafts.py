@@ -154,8 +154,10 @@ class Chat:
             reply=reply,
             prevent_default=lambda: None,
             is_prevent_default=False,
+            is_prevent_postorder=False,
         )
         ctx.prevent_default = lambda: setattr(ctx, "is_prevent_default", True)
+        ctx.prevent_postorder = lambda: setattr(ctx, "is_prevent_postorder", True)
         for handler in self.listener.registered_handlers[events.PersonMessageReceived]:
             await handler(ctx)
         return ctx
