@@ -9,7 +9,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+from langbot_plugin.api.entities.builtin.platform.message import At, MessageChain, Plain, Source
 
 from henu_plugin.cli import redact_cli_command
 
@@ -22,6 +22,13 @@ PRIVATE_NOTICE = "个人信息仅在私聊中展示。请私聊机器人继续�
 
 def is_page_request(text: str) -> bool:
     return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页", text))
+
+
+def page_request_text(chain: list) -> str:
+    if any(not isinstance(item, (Source, Plain, At)) for item in chain):
+        return ""  # Attachments are new input, never a read-only control.
+    text = "".join(item.text for item in chain if isinstance(item, Plain)).strip()
+    return text if is_page_request(text) else ""
 
 # Every service dispatch route has a deliberate presentation title.
 TOOL_TITLES = {
@@ -121,14 +128,18 @@ class Card:
 def _row(item: Any) -> str:
     if not isinstance(item, dict):
         return "- " + escape(item, 250)
-    name = _first(item, "course", "course_name", "courseName", "nameMerge", "room_name", "roomName", "classroomName", "seat_no", "seatNo", "no", "name", "title", "taskName", "displayName", "location", "group_name", "resource_id", "id") or "条目"
+    name = _first(item, "course", "course_name", "courseName", "nameMerge", "room_name", "roomName", "classroomName", "seat_no", "seatNo", "no", "name", "title", "taskName", "displayName", "campusName", "buildingName", "typeName", "termName", "location", "group_name", "resource_id", "id") or ("选课方案" if "plan" in item or "courses" in item else "条目")
     fields = [
-        ("时间", _first(item, "show_time", "showTime", "time", "time_range", "clock_start", "begin_time", "start_time", "startTime", "sign_at", "period")),
+        ("时间", _first(item, "show_time", "showTime", "time", "time_range", "time_summary", "sectionText", "clock_start", "begin_time", "start_time", "startTime", "sign_at", "period")),
         ("结束", _first(item, "clock_end", "end_time", "endTime")),
-        ("位置", _first(item, "classroom", "place", "location", "campusName", "buildingName", "area_name", "areaName")),
+        ("位置", _first(item, "classroom", "place", "room", "location", "campusName", "buildingName", "area_name", "areaName")),
         ("状态", _first(item, "status_name", "statusName", "status_text", "status", "state")),
-        ("编号", _first(item, "area_id", "areaId", "record_id", "recordId", "roomId", "resourceId", "id")),
+        ("编号", _first(item, "area_id", "areaId", "record_id", "recordId", "roomId", "resourceId", "section_id", "course_code", "campusCode", "buildingCode", "typeCode", "termCode", "id")),
         ("人数/容量", _first(item, "member_count", "capacity")),
+        ("教学周", _first(item, "weekExpr", "week_range", "week")),
+        ("价格", _first(item, "price_reference", "price")),
+        ("营业时间", _first(item, "hours_reference")),
+        ("评分/档位", _first(item, "tier", "score")),
     ]
     slots = item.get("available_slots")
     if isinstance(slots, list):
@@ -137,7 +148,35 @@ def _row(item: Any) -> str:
     return "- **" + escape(name, 100) + "**" + ("\n  " + " · ".join(parts) if parts else "")
 
 
-LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "candidates", "groups", "data", "commands", "tips", "examples")
+def _row_lines(item: Any, depth: int = 0) -> list[str]:
+    lines = [_row(item)]
+    if not isinstance(item, dict):
+        return lines
+    for key, label in (("review_text", "锐评"), ("reason", "推荐理由")):
+        if isinstance(item.get(key), str):
+            lines.append(f"{label}：{escape(item[key], 4000)}")
+    if depth >= 3:
+        return lines
+    for key in ("plan", "courses", "selected_courses", "options", "dishes"):
+        value = item.get(key)
+        if isinstance(value, list):
+            for row in value:
+                lines.extend(_row_lines(row, depth + 1))
+    for meeting in item.get("meetings", []) if isinstance(item.get("meetings"), list) else []:
+        if isinstance(meeting, dict):
+            weekday = _first(meeting, "weekday", "weekday_name", "day")
+            periods = meeting.get("periods") if isinstance(meeting.get("periods"), list) else []
+            weeks = meeting.get("weeks") if isinstance(meeting.get("weeks"), list) else []
+            label = f"星期{weekday} · 第{'、'.join(str(p) for p in periods)}节 · 第{'、'.join(str(w) for w in weeks)}周 · {_first(meeting, 'room', 'location')}"
+            lines.append(escape(label, 500))
+    for block in item.get("time_blocks", []) if isinstance(item.get("time_blocks"), list) else []:
+        if isinstance(block, dict):
+            label = " · ".join(_first(block, *keys) for keys in (("weekday_name",), ("section_text",), ("week_range",), ("location",)) if _first(block, *keys))
+            lines.append(escape(label, 500))
+    return lines
+
+
+LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "course_options", "candidates", "groups", "data", "commands", "tips", "examples", "titles", "categories", "date_options", "date_rows")
 
 
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
@@ -159,11 +198,13 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
                 if not isinstance(item, dict):
                     continue
                 shop = item.get("shop") if isinstance(item.get("shop"), dict) else {}
-                food_rows.append({"name": item.get("venue_name") or item.get("name") or shop.get("name") or "美食", "location": item.get("campus"), "status": "、".join(str(tag) for tag in item.get("tags", [])[:5])})
+                public = {key: item[key] for key in ("review_text", "price_reference", "hours_reference", "tier", "dishes") if key in item}
+                food_rows.append({**public, "name": item.get("venue_name") or item.get("name") or shop.get("name") or "美食", "location": {"jinming": "金明", "minglun": "明伦", "longzihu": "龙子湖"}.get(item.get("campus"), item.get("campus")), "status": "、".join(str(tag) for tag in item.get("tags", [])[:5])})
             msg = f"查询完成，共 {len(food_rows)} 项。"
         except (ValueError, TypeError, AttributeError):
             msg = "服务返回的数据格式暂时无法展示，请重新查询核验。"
     code = str(result.get("error_code") or "")
+    freshness = result.get("freshness") if isinstance(result.get("freshness"), dict) else {}
     status = "已完成" if result.get("success") else "未完成"
     if result.get("confirmation_required"):
         status = "待本人确认 · 尚未提交"
@@ -177,12 +218,14 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         status = "静态参考 · 未核验实时可用性"
     elif result.get("source") == "live_empty":
         status = "实时接口返回空数据 · 无法确认可用性"
-    elif result.get("stale") or result.get("is_stale"):
+    elif result.get("stale") or result.get("is_stale") or freshness.get("stale"):
         status = "缓存已过期 · 仅供参考"
     elif tool.startswith("yuketang") and result.get("bridge") == "pending":
         status = "本地已保存 · 远端待同步"
     lines = []
-    query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else {}
+    query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else result.get("query", {})
+    if not isinstance(query, dict):
+        query = {}
     for label, keys in (("日期", ("date", "target_date")), ("位置", ("area", "location", "room_name")), ("时段", ("time_window", "preferred_time", "start_time"))):
         value = _first(result, *keys) or _first(query, *keys)
         if value:
@@ -191,6 +234,22 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         value = _first(result, key)
         if value:
             lines.append(f"**{label}**：{escape(value, 120)}")
+    for key, label in (("source", "数据来源"), ("fetchedAt", "来源获取时间"), ("ageSeconds", "缓存年龄（秒）"), ("note", "数据说明")):
+        if _first(freshness, key):
+            lines.append(f"**{label}**：{escape(_first(freshness, key), 300)}")
+    if freshness.get("liveChecked") is False:
+        lines.append("本次读取缓存，未请求上游核验。")
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if tool.startswith("empty_classroom"):
+        for key, label in (("termCode", "学期"), ("week", "教学周"), ("dayOfWeek", "星期"), ("period", "大节"), ("updatedAt", "更新时间"), ("roomCount", "教室数")):
+            value = _first(result, key) or _first(data, key) or _first(query, key)
+            if value:
+                lines.append(f"**{label}**：{escape(value, 100)}")
+        if data.get("periods") or data.get("courses") is not None:
+            if not freshness:
+                lines.append("此视图未返回缓存时间；仅反映已登记的课程/占用，不保证现场空闲。")
+        if data.get("roomName"):
+            lines.append(_row(data))
     if msg and not msg.lstrip().startswith(("{", "[")):
         lines.extend(escape(line, 900) for line in msg.splitlines() if line.strip())
     if tool == "system_status":
@@ -203,16 +262,23 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))
     # Whitelisted nested data: never dump credentials, raw provider records or
     # local file paths just because a service adds another result field.
-    for section in ("filters", "statistics", "detail", "room", "area", "library_defaults"):
+    for section in ("filters", "statistics", "detail", "room", "area", "library_defaults", "constraints"):
         value = result.get(section)
         if isinstance(value, dict):
             safe = {key: item for key, item in value.items() if key in {"name", "room_name", "roomName", "nameMerge", "location", "seat_no", "capacity", "id", "area_id", "start_time", "end_time", "status", "available_slots", "total", "count", "finished", "pending"}}
             if safe:
                 lines.append(_row(safe))
-            collections_in_section = [(key, item) for key, item in value.items() if key in {"libraries", "floors", "categories", "boutiques", "items"} and isinstance(item, list)]
+            if section == "statistics":
+                lines.extend(f"{escape(key, 60)}：{item}" for key, item in value.items() if isinstance(item, (int, float)) and not isinstance(item, bool))
+            if section == "constraints":
+                for key, label in (("min_person", "最少人数"), ("max_person", "最多人数"), ("readonly_title", "要求预设主题")):
+                    if _first(value, key):
+                        lines.append(f"{label}：{escape(_first(value, key))}")
+            collections_in_section = [(key, item) for key, item in value.items() if key in {"libraries", "library", "floors", "floor", "categories", "category", "boutiques", "boutique", "items"} and isinstance(item, list)]
             for key, rows in collections_in_section:
                 lines.append("**筛选项 · " + escape(key) + "**")
-                lines.extend(_row(row) for row in rows)
+                for row in rows:
+                    lines.extend(_row_lines(row))
     collections = []
     for key in ("current_courses", "next_course", "day_schedule", "schedule"):
         value = result.get(key)
@@ -225,15 +291,29 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
                 collections.extend((str(day), rows) for day, rows in value.items() if isinstance(rows, list))
     if not collections:
         collections = [(key, result[key]) for key in LIST_FIELDS if isinstance(result.get(key), list)]
+    if data:
+        if isinstance(data.get("courses"), list):
+            collections.append(("courses", data["courses"]))
+        for period in data.get("periods", []) if isinstance(data.get("periods"), list) else []:
+            if isinstance(period, dict) and isinstance(period.get("rooms"), list):
+                label = str(period.get("periodName") or f"第{period.get('period')}大节")
+                lines.append(f"**{escape(label)} · 空闲 {period.get('total', len(period['rooms']))} 间**")
+                for row in period["rooms"]:
+                    lines.extend(_row_lines(row))
+        if tool == "resource_registry_query":
+            for key, value in data.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    lines.append(f"{escape(key, 60)}：{value}")
     if food_rows is not None:
         collections = [("items", food_rows)]
     if result.get("success") and collections and all(not rows for _, rows in collections):
-        status = "查询完成 · 没有符合条件的结果"
+        status = "查询完成 · 没有符合条件的结果" if status == "已完成" else status + " · 无符合结果"
     for key, rows in collections:
         if rows:
-            label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天课程", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约"}.get(key, key)
+            label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天课程", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
             lines.append(f"**{escape(label, 60)} · {len(rows)} 项**")
-            lines.extend(_row(row) for row in rows)
+            for row in rows:
+                lines.extend(_row_lines(row))
     if result.get("week_filter_applied") is False and "未按教学周过滤" not in msg:
         lines.append("课表未按教学周过滤，请核对实际教学周。")
     if tool.startswith("yuketang") and tool != "yuketang_exam_list":
@@ -289,16 +369,34 @@ class CardCache:
     def __init__(self):
         self.entries: OrderedDict[tuple, tuple[float, list[str], int]] = OrderedDict()
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
+        self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
         self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
         self.preview_receipts.pop(key, None)
+        self.request_results.pop(key, None)
         if on_read is not None:
             self.preview_receipts[key] = (set(), on_read)
         self.entries.move_to_end(key)
         while len(self.entries) > 128:
             expired, _ = self.entries.popitem(last=False)
             self.preview_receipts.pop(expired, None)
+            self.request_results.pop(expired, None)
+
+    def stage(self, key: tuple, query_id: int, result_id: str, pages: list[str]) -> list[str]:
+        previous = self.request_results.get(key)
+        groups = previous[1] if previous and previous[0] == query_id else OrderedDict()
+        groups[result_id] = pages
+        combined = [page for group in groups.values() for page in group]
+        omitted = len(combined) > MAX_PAGES
+        combined = combined[:MAX_PAGES]
+        if len(groups) > 1:
+            combined = [re.sub(r"\n第 \d+/\d+ 页 · [^\n]+", "", page) + f"\n\n本轮第 {index}/{len(combined)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”" for index, page in enumerate(combined, 1)]
+        if omitted:
+            combined[-1] += "\n本轮结果超过20页，请分开查询剩余功能。"
+        self.put(key, combined)
+        self.request_results[key] = (query_id, groups)
+        return combined
 
     async def delivered(self, key: tuple, page: str) -> None:
         entry = self.entries.get(key)
@@ -309,6 +407,7 @@ class CardCache:
         viewed.add(entry[1].index(page))
         if len(viewed) == len(entry[1]):
             self.preview_receipts.pop(key, None)
+            self.request_results.pop(key, None)
             await callback()
 
     def page(self, key: tuple, request: str) -> str:
@@ -316,6 +415,7 @@ class CardCache:
         if not entry or entry[0] <= time.monotonic():
             self.entries.pop(key, None)
             self.preview_receipts.pop(key, None)
+            self.request_results.pop(key, None)
             return text_card("卡片已过期", "卡片已过期或当前会话没有可翻页内容，请重新查询。")[0]
         expires, pages, current = entry
         if request == "下一页":
@@ -343,8 +443,9 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     key = scope(bot, session)
     if key is None:
         return
-    pages = result_card(result).pages()
-    cache(plugin).put(key, pages)
+    cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+    result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
+    pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
     await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
 
 

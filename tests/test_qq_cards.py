@@ -129,3 +129,83 @@ def test_food_json_uses_public_summary_without_raw_actor_metadata():
     page = result_card({"success": True, "reply_text": '我的投稿: {"posts":[{"shop":{"name":"面馆"},"campus":"金明","author":"secret-actor"}]}'}, "food").pages()[0]
     assert "面馆" in page and "金明" in page
     assert "secret-actor" not in page and '"posts"' not in page
+
+
+def test_same_request_multiple_tools_are_preserved_and_next_request_replaces():
+    cards = CardCache()
+    owner = ("bot", "person", "alice", "alice")
+    cards.stage(owner, 1, "schedule day", [PREFIX + "课表\n课程A"])
+    cards.stage(owner, 1, "library seats", [PREFIX + "座位\n座位B"])
+    assert "课程A" in cards.page(owner, "卡片第 1 页")
+    assert "座位B" in cards.page(owner, "下一页")
+    cards.stage(owner, 2, "library current", [PREFIX + "预约\n记录C"])
+    assert "记录C" in cards.page(owner, "卡片第 1 页")
+    assert "共 1 页" in cards.page(owner, "下一页")
+
+
+def test_paging_with_attachment_is_new_input_and_send_timeout_is_not_retried():
+    from langbot_plugin.api.entities.builtin.platform.message import Image, Plain
+    from components.event_listener.qq_cards import QQCardsListener
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", message_chain=SimpleNamespace(root=[Plain(text="下一页"), Image(base64="fixture-image")]))
+    ctx = SimpleNamespace(event=event, get_bot_uuid=AsyncMock(return_value="bot"), prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock(side_effect=TimeoutError("unknown delivery")))
+    assert asyncio.run(listener.paging(ctx)) is False
+    ctx.reply.assert_not_awaited()
+    event.message_chain.root.pop()
+    assert asyncio.run(listener.paging(ctx)) is True
+    assert ctx.reply.await_count == 1
+
+
+def test_real_help_keeps_all_commands_before_compacting(monkeypatch):
+    from components.cli_tools.henu_cli import HenuCli
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    from henu_plugin.cli import build_help_payload
+    from henu_plugin.qq_cards import cache, scope, stage_card
+    proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=AsyncMock())
+    monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+    plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+    session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+    async def base_call(self, params, session, query_id):
+        result = {"success": True, "cli": {"mode": "help", "command": "help yunfz", "topic": "yunfz"}, **build_help_payload("yunfz")}
+        await stage_card(plugin, session, query_id, result)
+        self._prepare_delivery_result(result)
+        self._normalize_for_qq_delivery(result)
+        result["_henu_card_captured"] = True
+        return result
+    monkeypatch.setattr(HenuCli, "call", base_call)
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    tool.plugin = plugin
+    delivered = asyncio.run(tool.call({"command": "help yunfz"}, session, 1))
+    assert "_henu_card_captured" not in delivered
+    all_pages = "\n".join(cache(plugin).entries[scope("bot", session)][1])
+    assert "yunfz collection statistics" in all_pages
+
+
+def test_actual_course_planner_schema_keeps_courses_meetings_and_ids():
+    from henu_mcp.core.course_planner import generate_ranked_plans
+    result = generate_ranked_plans([[{"id": "math-a", "name": "高等数学", "meetings": [{"weekday": 2, "periods": [1, 2], "weeks": [4, 5], "room": "十号楼101"}]}]], [], {}, 1)
+    all_pages = "\n".join(result_card(result, "course_selection_plan").pages())
+    for expected in ("高等数学", "math-a", "星期2", "第1、2节", "第4、5周", "十号楼101"):
+        assert expected in all_pages
+
+
+def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
+    from campus_core.empty_classroom.models import Freshness
+    freshness = Freshness(strategy="cache_only", source="xk_room_schedule", fetched_at="2026-10-12T10:00:00+08:00", parsed_at="2026-10-12T10:01:00+08:00", ttl_seconds=300, age_seconds=86400, stale=True, live_checked=False).to_dict()
+    old = result_card({"success": True, "rooms": [{"roomName": "十号楼101"}], "freshness": freshness}, "empty_classroom_query").pages()[0]
+    assert "缓存已过期" in old and "2026-10-12" in old and "未请求上游" in old
+    matrix = {"success": True, "data": {"week": 8, "dayOfWeek": 2, "periods": [{"period": 2, "periodName": "第二大节", "total": 1, "rooms": [{"roomName": "十号楼102", "roomId": "room-102", "capacity": 60}]}]}}
+    page = result_card(matrix, "empty_classroom_query").pages()[0]
+    assert "第二大节" in page and "十号楼102" in page and "room-102" in page and "教学周" in page
+    occupancy = {"success": True, "data": {"roomName": "十号楼103", "week": 8, "period": 3, "status": "occupied", "courses": [{"courseName": "大学英语", "sectionText": "5-6节", "weekExpr": "第1-18周"}]}}
+    page = result_card(occupancy, "empty_classroom_query").pages()[0]
+    assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
+
+
+def test_food_detail_keeps_existing_public_description_and_dishes():
+    detail = {"post": {"shop": {"name": "面馆"}, "campus": "jinming", "tier": "hang", "review_text": "面筋道汤清爽", "price_reference": "12元", "hours_reference": "10:00–21:00", "dishes": [{"name": "刀削面", "price": "12元", "reason": "汤清爽"}], "author": "hidden-author", "images": ["https://private-image.test"]}}
+    page = "\n".join(result_card({"success": True, "reply_text": "详情：" + json.dumps(detail, ensure_ascii=False)}, "food").pages())
+    for expected in ("面筋道汤清爽", "12元", "10:00–21:00", "刀削面", "汤清爽"):
+        assert expected in page
+    assert "hidden-author" not in page and "private-image" not in page

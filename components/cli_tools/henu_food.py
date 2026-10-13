@@ -19,7 +19,7 @@ from henu_plugin.food_drafts import (
     publication_receipt,
 )
 from henu_plugin.kit_client import KitError, kit_request, kit_settings
-from henu_plugin.qq_cards import PRIVATE_NOTICE, cache, card_chain, is_page_request, reply_card, scope as card_scope, stage_card, text_card
+from henu_plugin.qq_cards import PRIVATE_NOTICE, cache, card_chain, page_request_text, reply_card, scope as card_scope, stage_card, text_card
 
 ACTIONS = {
     "create": (
@@ -144,7 +144,7 @@ class HenuFood(Tool):
         text = "".join(
             item.text for item in chain if isinstance(item, pm.Plain)
         ).strip()
-        if is_page_request(text):
+        if page_request_text(chain):
             return  # Read-only paging must not dirty a pending Food draft.
         kind = getattr(event.launcher_type, "value", event.launcher_type)
         if kind != "person":

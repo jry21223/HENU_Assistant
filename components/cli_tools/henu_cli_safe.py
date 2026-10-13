@@ -36,20 +36,21 @@ class HenuCliSafe(HenuCli):
             result = await super().call(params, session, query_id)
         # Normal service results were captured in full before compaction. Early
         # confirmation/error branches and persistence warnings need this hook.
-        cli = result.get("cli", {}) if isinstance(result, dict) else {}
-        if isinstance(result, dict) and (cli.get("mode") != "exec" or result.get("external_committed")):
+        captured = result.pop("_henu_card_captured", False) if isinstance(result, dict) else False
+        if isinstance(result, dict) and (not captured or result.get("external_committed")):
             await self._publish_delivery_result(result, session, query_id)
         return result
 
-    async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> None:
+    async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> bool:
         if not isinstance(result, dict):
-            return
+            return False
         try:
             await stage_card(self.plugin, session, query_id, result)
+            return True
         except Exception:
             # Query APIs are optional presentation infrastructure. The existing
             # readable tool result remains the fallback, without logging data.
-            return
+            return False
 
     def _prepare_delivery_result(self, result: Any) -> None:
         if not isinstance(result, dict):

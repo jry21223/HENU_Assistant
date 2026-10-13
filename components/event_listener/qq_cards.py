@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from langbot_plugin.api.definition.components.common.event_listener import EventListener
 from langbot_plugin.api.entities import events
-from langbot_plugin.api.entities.builtin.platform.message import Plain
-
-from henu_plugin.qq_cards import cache, card_chain, is_page_request, scope, text_card
+from henu_plugin.qq_cards import cache, card_chain, page_request_text, scope, text_card
 
 
 class QQCardsListener(EventListener):
@@ -41,17 +39,24 @@ class QQCardsListener(EventListener):
 
     async def paging(self, ctx):
         chain = getattr(getattr(ctx.event, "message_chain", None), "root", [])
-        text = "".join(item.text for item in chain if isinstance(item, Plain)).strip()
-        if not is_page_request(text):
+        text = page_request_text(chain)
+        if not text:
             return False
         ctx.prevent_default()
         ctx.prevent_postorder()
         try:
             key = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
             page = cache(self.plugin).page(key, text) if key else text_card("无法翻页", "无法确认当前会话，请重新查询。")[0]
-            await ctx.reply(card_chain(page))
-            if key:
-                await cache(self.plugin).delivered(key, page)
         except Exception:
-            await ctx.reply(card_chain("卡片读取失败，请重新查询。"))
+            key = None
+            page = "卡片读取失败，请重新查询。"
+        try:
+            await ctx.reply(card_chain(page))
+        except Exception:
+            return True  # The first send may already have arrived; never repeat.
+        if key:
+            try:
+                await cache(self.plugin).delivered(key, page)
+            except Exception:
+                pass  # No complete-preview acknowledgment, so confirmation stays blocked.
         return True

@@ -58,6 +58,20 @@ def test_long_card_preview_cannot_publish_until_all_pages_are_delivered(monkeypa
         await chat.message("确认发布")
         assert len(calls) == 1
     asyncio.run(run())
+
+
+def test_paging_text_with_picture_cannot_publish_the_previous_preview(monkeypatch, food_http, tmp_path):
+    settings, calls = food_http
+    monkeypatch.setenv("HENU_FOOD_DRAFT_DB", str(tmp_path / "drafts.sqlite3"))
+    monkeypatch.setattr("components.cli_tools.henu_food.kit_settings", lambda: None)
+    async def run():
+        chat = await Chat().start(monkeypatch, settings)
+        await chat.message("整理草稿")
+        await chat.prepare()
+        await chat.message("下一页", images=[PNG])
+        await chat.message("确认发布")
+        assert calls == [] and "还有投稿内容" in chat.replies[-1]
+    asyncio.run(run())
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2S0AAAAASUVORK5CYII="
 
 
