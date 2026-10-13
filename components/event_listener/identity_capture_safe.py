@@ -12,7 +12,7 @@ from henu_plugin.cli import inspect_cli_command
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
-from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, set_card_reply, text_card
+from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, handle_card_page, present_card, set_card_reply, text_card
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -53,6 +53,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if await handle_card_page(self.plugin, ctx):
+                return
             if await self._kit_binding.handle(ctx, is_group=False):
                 return
             if await self._confirmation_shortcut.handle(ctx):
@@ -61,6 +63,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if await handle_card_page(self.plugin, ctx):
+                return
             if await self._kit_binding.handle(ctx, is_group=True):
                 return
             if await self._confirmation_shortcut.handle(ctx):
@@ -74,6 +78,11 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         @self.handler(events.GroupNormalMessageReceived)
         async def on_group_sensitive_command(ctx: context.EventContext):
             await self._maybe_handle_sensitive_command(ctx, is_group=True)
+
+        @self.handler(events.NormalMessageResponded)
+        async def on_campus_reply(ctx: context.EventContext):
+            # SDK 0.4.13 invokes only the first matching listener component.
+            await present_card(ctx)
 
     async def _alter_user_message(self, ctx: context.EventContext) -> None:
         # Do not persist wall-clock time, account state, QQ IDs, or credentials in

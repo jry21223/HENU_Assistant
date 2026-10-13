@@ -2,6 +2,7 @@ from langbot_plugin.api.definition.components.common.event_listener import Event
 from langbot_plugin.api.entities import events
 
 from components.cli_tools.henu_food import HenuFood
+from henu_plugin.qq_cards import handle_card_page
 
 
 class FoodCaptureListener(EventListener):
@@ -14,8 +15,12 @@ class FoodCaptureListener(EventListener):
 
         @self.handler(events.PersonMessageReceived)
         async def private_message(ctx):
+            if await handle_card_page(self.plugin, ctx):
+                return
             await food.receive_message(ctx)
 
         @self.handler(events.GroupMessageReceived)
         async def group_message(ctx):
+            if await handle_card_page(self.plugin, ctx):
+                return
             await food.receive_message(ctx)
