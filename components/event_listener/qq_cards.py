@@ -24,6 +24,8 @@ class QQCardsListener(EventListener):
             await self.paging(ctx)
 
     async def present(self, ctx):
+        if getattr(ctx.event, "funcs_called", []) or getattr(ctx.event, "finish_reason", "") in {"tool_calls", "function_call"}:
+            return
         try:
             variables = await ctx.get_query_vars()
             card = variables.get("_henu_card")
@@ -33,6 +35,9 @@ class QQCardsListener(EventListener):
             if owner is None or card.get("owner") != list(owner):
                 return
             set_card_reply(ctx.event, card["page"])
+            setter = getattr(ctx, "set_query_var", None)
+            if callable(setter):
+                await setter("_henu_card", None)
         except Exception:
             # Preserve the pipeline's original text response on API failure.
             return

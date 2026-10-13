@@ -108,6 +108,34 @@ def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
     ctx.prevent_default.assert_not_called()
 
 
+def test_card_does_not_replace_intermediate_tool_call_response():
+    from components.event_listener.qq_cards import QQCardsListener
+    event = SimpleNamespace(reply=None, funcs_called=["henu_cli"], finish_reason="stop")
+    ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock())
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    asyncio.run(listener.present(ctx))
+    assert event.reply is None
+    ctx.get_query_vars.assert_not_awaited()
+
+
+def test_terminal_card_is_consumed_once_per_query():
+    from components.event_listener.qq_cards import QQCardsListener
+    variables = {"_henu_card": {"owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "结果"}}
+    async def set_var(key, value):
+        variables[key] = value
+    event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", reply=None)
+    ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables),
+        get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    asyncio.run(listener.present(ctx))
+    assert event.reply[0]["text"] == PREFIX + "结果"
+    event.reply = None
+    asyncio.run(listener.present(ctx))
+    assert event.reply is None
+
+
 def test_full_tool_card_is_captured_before_model_compaction(monkeypatch):
     from henu_plugin.qq_cards import stage_card
     variables = {}
