@@ -159,9 +159,9 @@ def test_multi_tool_confirmation_buttons_stay_on_their_own_preview():
     pages = cards.stage(owner, 10, 'reservation', ['# 河大助手 · 预约\npending'])
     cards.set_controls(owner, 'reservation', keyboard, 'library_reserve')
     assert cards.keyboard(owner, pages[0], plugin) != keyboard
-    assert cards.keyboard(owner, pages[1], plugin) == keyboard
+    assert cards.keyboard(owner, pages[1], plugin)['content']['rows'][0] == keyboard['content']['rows'][0]
     pages = cards.stage(owner, 10, 'third-read', ['# 河大助手 · 课表\nread-only'])
-    assert cards.keyboard(owner, pages[1], plugin) == keyboard
+    assert cards.keyboard(owner, pages[1], plugin)['content']['rows'][0] == keyboard['content']['rows'][0]
     assert cards.keyboard(owner, pages[0], plugin) != keyboard
 
 

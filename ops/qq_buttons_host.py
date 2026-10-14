@@ -109,10 +109,13 @@ async def try_reply_buttons(adapter, message_source, chain):
     if not -30 <= age < 300:
         raise ValueError('expired passive HENU keyboard source')
     keyboard = chain[0].keyboard if native and adapter.config.get('enable-henu-buttons') is True else None
+    if native and not keyboard:
+        content = chain[0].text
     if keyboard:
         actor = getattr(message_source.sender, 'id', '')
         validate_keyboard(keyboard, scene, actor)
-    receipt = await send_card(adapter.bot, scene, target, content, msg_id=msg_id, event_id=event_id, keyboard=keyboard)
+    receipt = await send_card(adapter.bot, scene, target, content, msg_id=msg_id, event_id=event_id, keyboard=keyboard,
+                              fallback_content=chain[0].text if native else None)
     if scene == 'c2c':
         from langbot.libs.qq_official_api.api import normalize_qq_c2c_send_receipt
         normalized = normalize_qq_c2c_send_receipt(receipt)

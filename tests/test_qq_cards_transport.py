@@ -74,3 +74,20 @@ def test_native_keyboard_preserves_receipt_and_only_one_passive_anchor(monkeypat
         assert 'msg_id' not in wire[0]
         assert wire[0]['event_id'] == 'synthetic-ws-event'
     asyncio.run(run())
+
+
+def test_keyboard_rejection_uses_original_text_controls_without_invisible_buttons(monkeypatch):
+    async def run():
+        async def post(client, url, **kwargs):
+            return httpx.Response(403, json={'code': 304037})
+        monkeypatch.setattr(httpx.AsyncClient, 'post', post)
+        fallback = AsyncMock(return_value={'id': 'synthetic-plain'})
+        client = SimpleNamespace(base_url='https://api.sgroup.qq.com', access_token='synthetic',
+            check_access_token=AsyncMock(return_value=True), next_reply_msg_seq=AsyncMock(return_value=1), send_private_text_msg=fallback)
+        original = transport.PREFIX + '雨课堂状态\n发送“查看雨课堂状态”刷新。'
+        native = transport.PREFIX + '雨课堂状态\n点击下方按钮刷新。'
+        await transport.send_card(client, 'c2c', 'alice', native, msg_id='synthetic-source', fallback_content=original)
+        assert '发送“查看雨课堂状态”' in fallback.call_args.args[1]
+        assert '点击下方' not in fallback.call_args.args[1]
+        fallback.assert_awaited_once()
+    asyncio.run(run())

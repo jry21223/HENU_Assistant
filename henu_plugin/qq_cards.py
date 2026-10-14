@@ -180,6 +180,41 @@ def _row_lines(item: Any, depth: int = 0) -> list[str]:
 LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "course_options", "candidates", "groups", "data", "commands", "tips", "examples", "titles", "categories", "date_options", "date_rows")
 
 
+def _rain_status_card(result):
+    config = result.get('yuketang') if isinstance(result.get('yuketang'), dict) else {}
+    bridge = result.get('bridge') if isinstance(result.get('bridge'), dict) else {}
+    configured = config.get('enabled')
+    monitoring = bridge.get('monitoring_state')
+    if configured is False and monitoring == 'running':
+        status = '本地未启用 · 远端待核对'
+        lines = ['本地监听开关已关闭，但远端报告仍在运行；请刷新状态核对。']
+    elif configured is False:
+        status = '监听未启用'
+        lines = ['当前没有启用雨课堂监听。课堂设置暂不代表正在运行。']
+    elif monitoring == 'running':
+        status = '监听运行中'
+        lines = ['当前身份已注册，配置一致且执行器心跳有效。']
+    elif monitoring == 'stopped':
+        status = '监听已停用'
+        lines = ['远端已确认当前身份停止监听。']
+    else:
+        status = '已启用配置 · 运行未核验' if configured is True else '监听状态未核验'
+        lines = ['本地监听配置已启用，尚不能确认远端正在运行。' if configured is True else '服务未返回监听开关，请刷新状态核验。']
+    if monitoring not in {'running', 'stopped'}:
+        lines.append('桥服务暂不可达，未核验远端监听状态。' if bridge.get('status') == 'unreachable' else '本次未核验远端监听状态。')
+    message = str(result.get('reply_text') or '')
+    login = '已登录' if re.search(r'(?m)^登录状态：已登录', message) else '未登录' if re.search(r'(?m)^登录状态：未登录', message) else '未核验'
+    lines.append('**登录**：' + login)
+    lines.append('**设置**：课堂与考试的详细开关可在“查看设置”中核对。')
+    return Card('雨课堂状态', status, tuple(lines), '发送“查看雨课堂状态”刷新，或发送“查看雨课堂设置”核对详细开关。')
+
+
+def rain_commands(result):
+    logged_in = re.search(r'(?m)^登录状态：已登录', str(result.get('reply_text') or ''))
+    return [('刷新状态', 'yuketang status'), ('查看设置', 'yuketang config show'),
+            ('我的课程', 'yuketang courses') if logged_in else ('登录帮助', 'help yuketang')]
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -190,6 +225,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
+    if tool == 'yuketang_status' and result.get('success') is True and not result.get('confirmation_required'):
+        return _rain_status_card(result)
     msg = str(result.get("reply_text") or result.get("msg") or "")
     food_rows = None
     if tool == "food" and "{" in msg:
@@ -322,14 +359,22 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if tool.startswith("yuketang") and tool != "yuketang_exam_list":
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
-    next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    from henu_plugin.cli import inspect_cli_command
+    next_labels = []
+    for command in next_commands[:2] if isinstance(next_commands, list) else []:
+        spec = inspect_cli_command(command)
+        if spec.is_help:
+            next_labels.append('查看使用帮助')
+        elif not spec.error and spec.resolved_tool in TOOL_TITLES and (spec.resolved_tool.endswith('_query') or spec.resolved_tool in {'system_status', 'yuketang_status', 'yuketang_courses', 'yuketang_exam_list', 'yuketang_config_show'}):
+            next_labels.append('查看' + TOOL_TITLES[spec.resolved_tool])
+    next_step = '可继续' + '或'.join(dict.fromkeys(next_labels)) + '。' if next_labels else ''
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
         next_step = "先查询当前记录核验，不要重复提交。"
     elif status == "需要绑定或登录":
-        next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
-    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "可发送 help 查看当前功能和命令。")
+        next_step = '私聊发送“' + ('雨课堂登录帮助' if tool.startswith('yuketang') else '校园账号绑定帮助') + '”，按提示绑定并登录。'
+    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or '可直接描述下一步需求，或发送“使用帮助”查看当前功能。')
 
 
 def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
@@ -361,7 +406,14 @@ def card_chain(text: str, *, keyboard=None) -> MessageChain:
     from langbot_plugin.api.entities.builtin.platform import message as pm
     component = getattr(pm, 'HenuMarkdown', None)
     if keyboard and component is not None:
-        return MessageChain([component(text=text, markdown=text, keyboard=keyboard)])
+        controls = [button for row in keyboard.get('content', {}).get('rows', []) for button in row.get('buttons', [])]
+        has_paging = any(str(button.get('action', {}).get('data', '')).startswith('卡片翻页 ') for button in controls)
+        markdown = re.sub(r'(第 \d+/\d+ 页) · 回复[^\n]+', r'\1 · 点击下方按钮翻页', text) if has_paging else text
+        if text.startswith(PREFIX + '雨课堂状态'):
+            labels = [button.get('render_data', {}).get('label', '') for button in controls]
+            next_step = '点击下方的“刷新状态”“查看设置”或“' + ('我的课程' if '我的课程' in labels else '登录帮助') + '”。'
+            markdown = markdown.replace('发送“查看雨课堂状态”刷新，或发送“查看雨课堂设置”核对详细开关。', next_step)
+        return MessageChain([component(text=text, markdown=markdown, keyboard=keyboard)])
     return MessageChain([Plain(text=text)])
 
 
@@ -499,8 +551,6 @@ class CardCache:
         if not enabled(plugin) or not entry or entry[0] <= time.monotonic() or page not in entry[1]:
             return None
         fixed = self.controls.get(key, {}).get(page)
-        if fixed:
-            return fixed
         tool = tool or self.tools.get(key, {}).get(page, '')
         commands = []
         index = entry[1].index(page)
@@ -508,6 +558,9 @@ class CardCache:
             commands.append(('上一页', f'卡片翻页 {self.control_ids[key]} {index}'))
         if index + 1 < len(entry[1]):
             commands.append(('下一页', f'卡片翻页 {self.control_ids[key]} {index + 2}'))
+        if fixed:
+            navigation = command_keyboard(key, commands)
+            return {'content': {'rows': [*fixed['content']['rows'], *(navigation['content']['rows'] if navigation else [])]}}
         if key[1] == 'person':
             if tool in {'schedule_query', 'sync_schedule'}:
                 commands += [('当前课程', 'schedule now'), ('本周课表', 'schedule week')]
@@ -516,7 +569,7 @@ class CardCache:
             elif tool.startswith('seminar'):
                 commands += [('我的预约', 'seminar records'), ('预约帮助', 'help seminar reserve')]
             elif tool.startswith('yuketang'):
-                commands += [('雨课堂状态', 'yuketang status'), ('查看课程', 'yuketang courses')]
+                commands += [('刷新状态', 'yuketang status'), ('查看设置', 'yuketang config show'), ('我的课程', 'yuketang courses')]
             elif tool == 'system_status':
                 commands += [('当前课程', 'schedule now'), ('当前预约', 'library current')]
         if not commands:
@@ -542,6 +595,10 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
     tool = str(cli.get('resolved_tool') or result.get('_resolved_tool_name') or '')
     keyboard = None
+    if tool == 'yuketang_status':
+        from henu_plugin.qq_buttons import command_keyboard, enabled
+        if enabled(plugin):
+            keyboard = command_keyboard(key, rain_commands(result))
     if result.get('confirmation_required'):
         from henu_plugin.qq_buttons import enabled, register_pending, pending_keyboard, _load
         if enabled(plugin) and key[1] == 'person':

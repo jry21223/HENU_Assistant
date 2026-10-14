@@ -52,18 +52,20 @@ def validate_keyboard(keyboard, target_type, actor=None):
             ids.add(identifier)
 
 
-async def send_card(client, target_type: str, target_id: str, content: str, *, msg_id=None, event_id=None, msg_seq=None, keyboard=None):
+async def send_card(client, target_type: str, target_id: str, content: str, *, msg_id=None, event_id=None, msg_seq=None, keyboard=None, fallback_content=None):
     """Use the same passive source/counter; retry only an explicit rejection."""
     if target_type not in {"c2c", "group"} or not is_card(content):
         raise ValueError("invalid HENU card target or content")
     if msg_id and event_id:
         raise ValueError('passive anchors are mutually exclusive')
+    if fallback_content is not None and not is_card(fallback_content):
+        raise ValueError('invalid HENU card fallback')
     if keyboard:
         validate_keyboard(keyboard, target_type, target_id if target_type == 'c2c' else None)
     if not msg_id and not event_id:
         # No automatic proactive Markdown attempt, and no new quota policy.
         sender = client.send_private_text_msg if target_type == 'c2c' else client.send_group_text_msg
-        return await sender(target_id, plain_card(content), msg_seq=msg_seq)
+        return await sender(target_id, plain_card(fallback_content or content), msg_seq=msg_seq)
     if not await client.check_access_token():
         await client.get_access_token()
     sequence = msg_seq if msg_seq is not None else await client.next_reply_msg_seq(msg_id or event_id)
@@ -98,7 +100,7 @@ async def send_card(client, target_type: str, target_id: str, content: str, *, m
         if fallback_sequence > limit:
             raise ValueError('passive fallback budget exhausted')
         sender = client.send_private_text_msg if target_type == 'c2c' else client.send_group_text_msg
-        return await sender(target_id, plain_card(content), msg_id=msg_id, event_id=event_id, msg_seq=fallback_sequence)
+        return await sender(target_id, plain_card(fallback_content or content), msg_id=msg_id, event_id=event_id, msg_seq=fallback_sequence)
     # Timeouts/network failures and 5xx have unknown delivery status. Do not
     # duplicate sends. Channel methods do not call this helper.
     raise ValueError(f"QQ card delivery failed: HTTP {response.status_code}")

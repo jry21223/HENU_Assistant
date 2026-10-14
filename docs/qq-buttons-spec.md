@@ -10,6 +10,10 @@ features, change school write permissions, send test QQ messages or deploy.
   same `group_id`, permission type 0 specifying the initiator. A callback is a
   choice for an exact stored pending operation, never a fresh reservation.
 - Read-only next steps and scoped pagination: type 2, `enter` only in C2C.
+- Rain status leads with disabled/running/unverified state, concise login and
+  configuration summaries, and read-only refresh/settings/course-or-login-help
+  buttons. Hide inactive switch dumps and CLI next-step instructions from the
+  default status card. Never turn screenshot text into answer/submit automation.
 - Rain classroom credential confirmation: existing pending credential flow.
 - KIT binding confirmation keeps exact QQ quote/receipt verification; use type 2
   with `reply=true`, preserving its source checks. Cancellation only discards

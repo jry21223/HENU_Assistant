@@ -14,6 +14,7 @@ which must be preserved during a future production overlay.
 | Seminar reserve/signin/cancel previews | Type 1 confirm/cancel | Exact owned pending action |
 | Rain settings enable/domain/lesson/exam/list/start-time previews | Type 1 confirm/cancel | Existing `WRITE_TOOL_NAMES` confirmation set; disabling remains existing immediate stop |
 | Rain account/token binding preview | Type 1 confirm/cancel | Encrypted existing pending credentials, private only, existing login coordinator |
+| Rain status | Refresh / settings / courses if logged in, otherwise login help | Disabled is prominent; enabled configuration differs from verified running; no answer/submit control added |
 | KIT account preview / unlink preview | Type 2 confirm/cancel, quote enabled | Current pending token, exact verified QQ source + receipt quote; no synthetic callback binds KIT |
 | Food unpublished preview | Type 2 confirm/cancel on last page | Exact nonce + revision; all preview pages delivered; new genuine message required |
 | Account/service tool status | Current course / current reservation | Private only |
@@ -59,3 +60,5 @@ The reviewed companion modules are `qq_buttons_host.py` (copy to
 The bridge keeps the exact callback event anchor on each query; it never uses
 another click's session cache. ACK uses `d.id` once; passive replies use the
 top-level WebSocket event id. C2C receipts retain their QQ reference metadata.
+Native pagination shows a short page count and button navigation; the readable
+fallback keeps the original reply-to-page text.
