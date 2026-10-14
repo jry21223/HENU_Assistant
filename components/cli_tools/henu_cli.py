@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+import weakref
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
@@ -21,9 +22,13 @@ class HenuCli(BaseHenuTool):
     tool_name = "henu_cli"
 
     def _confirmation_lock(self, storage_key):
-        if not hasattr(self.plugin, '_henu_confirmation_lock'):
-            self.plugin._henu_confirmation_lock = asyncio.Lock()
-        return self.plugin._henu_confirmation_lock
+        if not hasattr(self.plugin, '_henu_confirmation_locks'):
+            self.plugin._henu_confirmation_locks = weakref.WeakValueDictionary()
+        lock = self.plugin._henu_confirmation_locks.get(storage_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.plugin._henu_confirmation_locks[storage_key] = lock
+        return lock
 
     async def cancel_pending(self, key, token):
         identity = key.removeprefix('user:').removesuffix(':pending_operation')
@@ -169,6 +174,13 @@ class HenuCli(BaseHenuTool):
         query_id: int,
         conversation: dict[str, str],
     ) -> dict[str, Any]:
+        async with self._confirmation_lock(storage_key):
+            return await self._request_confirmation_locked(storage_key=storage_key,
+                canonical_command=canonical_command, action=action, parameter_summary=parameter_summary,
+                query_id=query_id, conversation=conversation)
+
+    async def _request_confirmation_locked(self, *, storage_key, canonical_command, action,
+                                           parameter_summary, query_id, conversation):
         pending = create_pending_operation(
             storage_key=storage_key,
             canonical_command=canonical_command,

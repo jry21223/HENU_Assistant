@@ -45,7 +45,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
     async def initialize(self):
         await super().initialize()
-        self._yuketang_login = coordinators(self.plugin).yuketang
+        self._yuketang_login = coordinators(self.plugin, listener=self).yuketang
         self._confirmation_shortcut = ConfirmationShortcut(self)
         self._kit_binding = coordinators(self.plugin).kit
 

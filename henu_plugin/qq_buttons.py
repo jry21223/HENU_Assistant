@@ -112,12 +112,18 @@ def command_keyboard(owner, commands):
     return {'content': {'rows': [{'buttons': buttons}]}} if buttons else None
 
 
-def coordinators(plugin):
+def coordinators(plugin, *, listener=None):
     if not hasattr(plugin, '_henu_button_coordinators'):
         from henu_plugin.kit_binding import KitBindingCoordinator
         from henu_plugin.yuketang_login import YuketangLoginCoordinator
-        listener = SimpleNamespace(plugin=plugin)
+        if listener is None:
+            from components.event_listener.identity_capture import IdentityCaptureListener
+            listener = IdentityCaptureListener()
+            listener.plugin = plugin
         plugin._henu_button_coordinators = SimpleNamespace(kit=KitBindingCoordinator(listener), yuketang=YuketangLoginCoordinator(listener))
+    elif listener is not None:
+        plugin._henu_button_coordinators.kit.listener = listener
+        plugin._henu_button_coordinators.yuketang.listener = listener
     return plugin._henu_button_coordinators
 
 

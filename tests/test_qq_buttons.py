@@ -271,3 +271,34 @@ def test_kit_button_preserves_real_quote_confirmation(monkeypatch):
         for task in flow.watchers.values():
             task.cancel()
     asyncio.run(run())
+
+
+def test_cancel_old_pending_cannot_erase_a_concurrent_replacement():
+    from components.cli_tools.henu_cli import HenuCli
+    from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
+    async def run():
+        plugin = Plugin()
+        tool = HenuCli(); tool.plugin = plugin
+        session = Session(sender_id='alice', launcher_id='alice', launcher_type=LauncherTypes.PERSON)
+        await tool.call({'command': 'yuketang enable'}, session, 1)
+        key = 'user:alice:pending_operation'
+        original = json.loads(plugin.storage[key])
+        started, release = asyncio.Event(), asyncio.Event()
+        original_get = plugin.get_plugin_storage
+        async def paused_get(storage_key):
+            snapshot = await original_get(storage_key)
+            if storage_key == key and not started.is_set():
+                started.set()
+                await release.wait()
+            return snapshot
+        plugin.get_plugin_storage = paused_get
+        cancel = asyncio.create_task(tool.cancel_pending(key, original['token']))
+        await started.wait()
+        replace = asyncio.create_task(tool.call({'command': 'yuketang lesson set --auto-enter off'}, session, 2))
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.gather(cancel, replace)
+        current = json.loads(plugin.storage[key])
+        assert current.get('command') == 'yuketang lesson set --auto-enter off'
+        assert current.get('token') != original['token']
+    asyncio.run(run())
