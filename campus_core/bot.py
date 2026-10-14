@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 
+from henu_mcp.core.cas_session import CAS_COOKIE_NAMES, apply_cas_cookies
+
 from .auth import AuthMixin
 from .hebao import HebaoMixin
 from .locations import LocationMixin
@@ -72,15 +74,16 @@ class HenuCampusBot(
         if saved_cookies:
             cookie_data = dict(saved_cookies)
             self.token = str(cookie_data.pop("_v4_token", "") or "")
-            castgc_value = cookie_data.pop("CASTGC", None)
+            saved_cas_cookies = {
+                name: cookie_data.pop(name)
+                for name in tuple(cookie_data)
+                if name in CAS_COOKIE_NAMES
+            }
             if cookie_data:
                 self.session.cookies.update(cookie_data)
-            if castgc_value:
-                self.session.cookies.set("CASTGC", castgc_value, domain="ids.henu.edu.cn")
+            apply_cas_cookies(self.session, saved_cas_cookies)
 
-        if cas_cookies:
-            for name, value in cas_cookies.items():
-                self.session.cookies.set(name, value, domain="ids.henu.edu.cn", path="/")
+        apply_cas_cookies(self.session, cas_cookies)
 
         self._set_auth_header()
         self._init_hebao(hebao_token, cas_cookies)

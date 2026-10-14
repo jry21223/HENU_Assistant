@@ -5,10 +5,12 @@ HENU Campus Assistant CLI for Agent Skill.
 """
 
 import argparse
+import getpass
 import json
 import sys
 from pathlib import Path
 
+from henu_mcp.core.response_contract import sanitize_public_result
 
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 from henu_campus_mcp import (  # noqa: E402
@@ -25,6 +27,9 @@ from henu_campus_mcp import (  # noqa: E402
     library_cancel,
     library_query,
     library_reserve,
+    preferences_clear,
+    preferences_get,
+    preferences_set,
     resource_registry_query,
     resource_registry_sync,
     schedule_query,
@@ -49,9 +54,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="河南大学校园助手")
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
-    setup_parser = subparsers.add_parser("setup_account", help="设置账号")
-    setup_parser.add_argument("--student_id", required=True, help="学号")
-    setup_parser.add_argument("--password", required=True, help="密码")
+    setup_parser = subparsers.add_parser(
+        "setup_account",
+        help="设置账号",
+        description="使用河南大学统一身份认证账号（通常为数字学号）和统一身份认证密码登录。",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例: python3 henu_cli.py setup_account --student_id 2024123456\n"
+            "默认安全读取密码，密码中的特殊字符不会进入命令行；"
+            "自动化可通过标准输入配合 --password-stdin。"
+        ),
+    )
+    setup_parser.add_argument("--student_id", required=True, help="统一身份认证账号，通常为纯数字学号")
+    password_group = setup_parser.add_mutually_exclusive_group()
+    password_group.add_argument(
+        "--password",
+        default=None,
+        help="兼容参数；明文可能暴露在 shell history/进程参数中，建议省略",
+    )
+    password_group.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="从标准输入读取一行密码，适合自动化且不进入 argv",
+    )
     setup_parser.add_argument("--library_location", default="", help="默认图书馆区域")
     setup_parser.add_argument("--library_seat_no", default="", help="默认座位号")
     setup_parser.add_argument("--no_verify_login", action="store_true", help="仅保存账号，不立即验证登录")
@@ -60,6 +85,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="初始化时不自动校准节次时间",
     )
+
+    preferences_parser = subparsers.add_parser("preferences", help="查看、设置或清空本地偏好")
+    preferences_actions = preferences_parser.add_subparsers(dest="preferences_action", required=True)
+    preferences_actions.add_parser("get", help="查看当前偏好")
+    preferences_set_parser = preferences_actions.add_parser("set", help="设置偏好")
+    preferences_set_parser.add_argument("--library_location", default=None, help="默认图书馆区域")
+    preferences_set_parser.add_argument("--library_seat_no", default=None, help="默认座位号")
+    preferences_clear_parser = preferences_actions.add_parser("clear", help="显式清空偏好")
+    preferences_clear_parser.add_argument("--library_location", action="store_true", help="清空默认图书馆区域")
+    preferences_clear_parser.add_argument("--library_seat_no", action="store_true", help="清空默认座位号")
 
     sync_parser = subparsers.add_parser("sync_schedule", help="同步课表")
     sync_parser.add_argument("--xn", default=None, help="学年")
@@ -136,9 +171,15 @@ def build_parser() -> argparse.ArgumentParser:
     library_reserve_parser.add_argument("--location", default="", help="区域名")
     library_reserve_parser.add_argument("--seat_no", default="", help="座位号")
     library_reserve_parser.add_argument("--resource_id", default="", help="资源 ID，优先级高于 location/seat_no")
-    library_reserve_parser.add_argument("--target_date", default="", help="日期 YYYY-MM-DD")
-    library_reserve_parser.add_argument("--preferred_time", default="08:00", help="首选时间 HH:MM")
+    library_reserve_parser.add_argument("--target_date", default="", help="预约日期 YYYY-MM-DD（写操作必须明确提供）")
+    library_reserve_parser.add_argument("--preferred_time", default="", help="预约开始时间 HH:MM（写操作必须明确提供）")
     library_reserve_parser.add_argument("--preferred_end_time", default="", help="最晚结束时间 HH:MM，用于限制预约时间窗口")
+    library_reserve_parser.add_argument(
+        "--end_policy",
+        choices=["ask", "server_full_slot"],
+        default="ask",
+        help="未提供结束时间时：ask=拒绝并追问，server_full_slot=显式采用服务端完整时段",
+    )
     library_reserve_parser.add_argument("--retry_until", default="", help="自动抢约截止时间 HH:MM 或 ISO 日期时间")
     library_reserve_parser.add_argument("--retry_interval_seconds", type=int, default=2, help="抢约重试间隔秒数")
     library_reserve_parser.add_argument("--max_attempts", type=int, default=1, help="最大尝试次数")
@@ -299,14 +340,38 @@ def main() -> None:
 
     try:
         if args.command == "setup_account":
+            if args.password is not None:
+                print(
+                    "警告: --password 可能暴露在 shell history/进程参数中；建议省略以安全输入，"
+                    "或使用 --password-stdin。",
+                    file=sys.stderr,
+                )
+                password = args.password
+            elif args.password_stdin:
+                password = sys.stdin.readline().rstrip("\r\n")
+            else:
+                password = getpass.getpass("统一身份认证密码: ")
             result = setup_account(
                 student_id=args.student_id,
-                password=args.password,
+                password=password,
                 library_location=args.library_location,
                 library_seat_no=args.library_seat_no,
                 verify_login=not args.no_verify_login,
                 calibrate_period_time=not args.no_calibrate_period_time,
             )
+        elif args.command == "preferences":
+            if args.preferences_action == "get":
+                result = preferences_get()
+            elif args.preferences_action == "set":
+                result = preferences_set(
+                    library_location=args.library_location,
+                    library_seat_no=args.library_seat_no,
+                )
+            else:
+                result = preferences_clear(
+                    library_location=args.library_location,
+                    library_seat_no=args.library_seat_no,
+                )
         elif args.command == "sync_schedule":
             result = sync_schedule(
                 xn=args.xn,
@@ -386,6 +451,7 @@ def main() -> None:
                 target_date=args.target_date,
                 preferred_time=args.preferred_time,
                 preferred_end_time=args.preferred_end_time,
+                end_policy=args.end_policy,
                 resource_id=args.resource_id,
                 retry_until=args.retry_until,
                 retry_interval_seconds=args.retry_interval_seconds,
@@ -533,11 +599,11 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(sanitize_public_result(result), ensure_ascii=False, indent=2))
     except Exception as exc:
         print(
             json.dumps(
-                {"success": False, "msg": f"执行失败: {exc}"},
+                sanitize_public_result({"success": False, "msg": f"执行失败: {exc}"}),
                 ensure_ascii=False,
                 indent=2,
             )

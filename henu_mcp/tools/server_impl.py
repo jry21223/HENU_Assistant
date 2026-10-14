@@ -14,6 +14,10 @@ from zoneinfo import ZoneInfo
 import requests
 from mcp.server.fastmcp import FastMCP
 
+from henu_mcp.core.cas_session import (
+    extract_cas_cookies as _extract_ids_cas_cookies,
+    merge_cas_cookies as _merge_cas_cookies,
+)
 from henu_mcp.core.course_schedule import (
     COOKIE_FILE,
     DEFAULT_HOME_URL,
@@ -24,6 +28,7 @@ from henu_mcp.core.course_schedule import (
     run_fetch,
     save_json,
 )
+from henu_mcp.core.kingo_auth import KINGO_WARNING
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
     DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
@@ -41,6 +46,14 @@ from henu_mcp.core.course_monitor import (
     test_notification,
 )
 from henu_mcp.core.course_selection import HenuCourseSelectionClient
+from henu_mcp.core.period_times import (
+    extract_period_times_from_text as _extract_period_times_from_text,
+    extract_period_times_from_xiqueer_json as _extract_period_times_from_xiqueer_json,
+    is_hhmm as _is_hhmm,
+    minutes_to_hhmm as _minutes_to_hhmm,
+    normalize_teaching_period_times as _normalize_teaching_period_times,
+    to_minutes as _to_minutes,
+)
 from henu_mcp.core.schedule_cleaner import clean_schedule_grid_file, load_latest_clean_schedule
 from henu_mcp.core.secure_storage import (
     encrypt_value,
@@ -130,75 +143,6 @@ def _now_dt(timezone: str = "Asia/Shanghai") -> datetime:
         return datetime.now(ZoneInfo("Asia/Shanghai"))
 
 
-def _is_hhmm(text: str) -> bool:
-    return bool(re.fullmatch(r"[0-2]\d:[0-5]\d", text or ""))
-
-
-def _to_minutes(hhmm: str) -> int:
-    hour, minute = hhmm.split(":")
-    return int(hour) * 60 + int(minute)
-
-
-def _normalize_teaching_period_times(
-    period_times: dict[str, dict[str, str]],
-) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
-    """
-    规范化节次配置：
-    1) 按开始时间排序
-    2) 强制剔除中午短节次(12:00-14:10 且时长 20-35 分钟，常见为原 6/7 节)
-    3) 重编号为连续 1..N（去掉中午短节后得到 13 节体系）
-    """
-    items: list[tuple[int, str, str]] = []
-    for key, cfg in (period_times or {}).items():
-        if not isinstance(cfg, dict):
-            continue
-        start = str(cfg.get("start", "")).strip()
-        end = str(cfg.get("end", "")).strip()
-        if not (_is_hhmm(start) and _is_hhmm(end)):
-            continue
-        if _to_minutes(start) >= _to_minutes(end):
-            continue
-        try:
-            period_no = int(str(key))
-        except Exception:
-            period_no = 999
-        items.append((period_no, start, end))
-
-    if not items:
-        return {}, {"applied": False, "removed_midday_count": 0}
-
-    items.sort(key=lambda x: (_to_minutes(x[1]), x[0]))
-
-    removed_midday: list[tuple[int, str, str]] = []
-    kept_items: list[tuple[int, str, str]] = []
-    for period_no, start, end in items:
-        start_min = _to_minutes(start)
-        duration = _to_minutes(end) - start_min
-        is_midday_short = 12 * 60 <= start_min <= (14 * 60 + 10) and 20 <= duration <= 35
-        if is_midday_short:
-            removed_midday.append((period_no, start, end))
-            continue
-        kept_items.append((period_no, start, end))
-
-    # 至少保留 10 节时才执行过滤，避免异常数据误删。
-    if removed_midday and len(kept_items) >= 10:
-        items = kept_items
-    else:
-        removed_midday = []
-
-    normalized: dict[str, dict[str, str]] = {}
-    for idx, (_, start, end) in enumerate(items, start=1):
-        normalized[str(idx)] = {"start": start, "end": end}
-
-    return normalized, {
-        "applied": True,
-        "removed_midday_count": len(removed_midday),
-        "removed_midday_periods": [
-            {"period": p, "start": s, "end": e} for p, s, e in removed_midday
-        ],
-    }
-
-
 def _load_period_times() -> dict[str, dict[str, str]]:
     if PERIOD_TIME_FILE.exists():
         try:
@@ -261,12 +205,6 @@ def _decode_resp_text(resp: requests.Response) -> str:
     return content.decode("utf-8", errors="ignore")
 
 
-def _minutes_to_hhmm(value: int) -> str:
-    hour = max(0, value) // 60
-    minute = max(0, value) % 60
-    return f"{hour:02d}:{minute:02d}"
-
-
 def _load_xiqueer_request_config() -> dict[str, Any]:
     if not XIQUEER_REQUEST_FILE.exists():
         return {}
@@ -295,50 +233,6 @@ def _xiqueer_config_summary(config: dict[str, Any]) -> dict[str, Any]:
         "has_cookie": "Cookie" in headers or "cookie" in headers,
         "data_length": len(data_text),
     }
-
-
-def _extract_period_times_from_xiqueer_json(text: str) -> dict[str, dict[str, str]]:
-    try:
-        payload = json.loads(text)
-    except Exception:
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-
-    rows = payload.get("sksj")
-    if not isinstance(rows, list):
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        jieci = str(row.get("jieci", "") or "")
-        start_raw = str(row.get("time", "") or "").strip()
-        duration_raw = str(row.get("shichang", "") or "").strip()
-
-        m = re.search(r"第\s*(\d+)\s*节", jieci)
-        if not m:
-            continue
-        period = str(int(m.group(1)))
-
-        if not _is_hhmm(start_raw.zfill(5)):
-            continue
-        start_hhmm = start_raw.zfill(5)
-
-        try:
-            duration = int(duration_raw)
-        except Exception:
-            continue
-        if duration <= 0 or duration > 180:
-            continue
-
-        end_hhmm = _minutes_to_hhmm(_to_minutes(start_hhmm) + duration)
-        if not _is_hhmm(end_hhmm):
-            continue
-
-        result[period] = {"start": start_hhmm, "end": end_hhmm}
-    return result
 
 
 def _fetch_xiqueer_period_times() -> dict[str, Any]:
@@ -376,37 +270,6 @@ def _fetch_xiqueer_period_times() -> dict[str, Any]:
         }
     except Exception as exc:
         return {"success": False, "msg": f"xiqueer 请求失败: {exc}"}
-
-
-def _extract_period_times_from_text(text: str) -> dict[str, dict[str, str]]:
-    clean = text or ""
-    candidates: dict[str, dict[str, str]] = {}
-
-    # 形如：第3节 10:00-10:45
-    p1 = re.compile(
-        r"第?\s*(\d{1,2})\s*节[^0-9]{0,30}([0-2]?\d:[0-5]\d)\s*(?:-|~|—|–|至)\s*([0-2]?\d:[0-5]\d)",
-        re.I,
-    )
-    for m in p1.finditer(clean):
-        period = str(int(m.group(1)))
-        start = m.group(2).zfill(5)
-        end = m.group(3).zfill(5)
-        if _is_hhmm(start) and _is_hhmm(end) and _to_minutes(start) < _to_minutes(end):
-            candidates[period] = {"start": start, "end": end}
-
-    # 形如：10:00-10:45 第3节
-    p2 = re.compile(
-        r"([0-2]?\d:[0-5]\d)\s*(?:-|~|—|–|至)\s*([0-2]?\d:[0-5]\d)[^第]{0,30}第?\s*(\d{1,2})\s*节",
-        re.I,
-    )
-    for m in p2.finditer(clean):
-        period = str(int(m.group(3)))
-        start = m.group(1).zfill(5)
-        end = m.group(2).zfill(5)
-        if _is_hhmm(start) and _is_hhmm(end) and _to_minutes(start) < _to_minutes(end):
-            candidates[period] = {"start": start, "end": end}
-
-    return candidates
 
 
 def _fetch_timetable_text_candidates(sid: str, pwd: str) -> list[tuple[str, str]]:
@@ -724,6 +587,87 @@ def _save_profile_fields(fields: dict[str, Any]) -> None:
     profile = load_encrypted_profile(PROFILE_FILE)
     profile.update(fields)
     save_encrypted_profile(PROFILE_FILE, profile)
+
+
+def _library_preferences() -> dict[str, str]:
+    location, seat_no = _resolve_library_defaults()
+    return {
+        "library_location": location,
+        "library_seat_no": seat_no,
+    }
+
+
+def preferences_get() -> dict[str, Any]:
+    """读取可持久化的用户偏好，不返回账号密码。"""
+    return {
+        "success": True,
+        "preferences": _library_preferences(),
+    }
+
+
+def preferences_set(
+    library_location: str | None = None,
+    library_seat_no: str | None = None,
+) -> dict[str, Any]:
+    """设置显式提供的偏好；清空字段必须使用 preferences_clear。"""
+    fields: dict[str, str] = {}
+    for name, value in (
+        ("library_location", library_location),
+        ("library_seat_no", library_seat_no),
+    ):
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if not normalized:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "msg": f"{name} 不能为空；如需清空请使用 preferences clear",
+            }
+        fields[name] = normalized
+
+    if not fields:
+        return {
+            "success": False,
+            "code": "missing_params",
+            "missing_params": ["library_location", "library_seat_no"],
+            "msg": "请至少提供一个要设置的偏好字段",
+        }
+
+    _save_profile_fields(fields)
+    return {
+        "success": True,
+        "msg": "偏好已保存",
+        "preferences": _library_preferences(),
+    }
+
+
+def preferences_clear(
+    library_location: bool = False,
+    library_seat_no: bool = False,
+) -> dict[str, Any]:
+    """显式清空选中的偏好字段，同时移除旧版兼容字段。"""
+    if not library_location and not library_seat_no:
+        return {
+            "success": False,
+            "code": "missing_params",
+            "missing_params": ["library_location", "library_seat_no"],
+            "msg": "请明确指定要清空的偏好字段",
+        }
+
+    profile = load_encrypted_profile(PROFILE_FILE)
+    if library_location:
+        profile.pop("library_location", None)
+        profile.pop("location", None)
+    if library_seat_no:
+        profile.pop("library_seat_no", None)
+        profile.pop("seat_no", None)
+    save_encrypted_profile(PROFILE_FILE, profile)
+    return {
+        "success": True,
+        "msg": "偏好已清空",
+        "preferences": _library_preferences(),
+    }
 
 
 def _resolve_library_defaults() -> tuple[str, str]:
@@ -1581,9 +1525,10 @@ def _save_library_cookies(cookies: dict[str, Any]) -> None:
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load this user's IDS CAS cookie jar for cross-service login reuse."""
-    cookies = load_json(CAS_COOKIE_FILE)
-    cookies.update(_extract_ids_cas_cookies(load_json(COOKIE_FILE)))
-    return cookies
+    return _merge_cas_cookies(
+        load_json(CAS_COOKIE_FILE),
+        load_json(COOKIE_FILE),
+    )
 
 
 def _save_cas_cookies(cookies: dict[str, Any]) -> None:
@@ -1593,25 +1538,38 @@ def _save_cas_cookies(cookies: dict[str, Any]) -> None:
         save_json(CAS_COOKIE_FILE, clean)
 
 
-def _extract_ids_cas_cookies(cookies: dict[str, Any] | None) -> dict[str, Any]:
-    ids_cookie_names = {"CASTGC", "TGC", "happyVoyage", "platformMultilingual"}
-    source = cookies or {}
+def _load_xk_cookies() -> dict[str, Any]:
     return {
-        str(name): value
-        for name, value in source.items()
-        if str(name) in ids_cookie_names and value not in (None, "")
+        **load_json(COOKIE_FILE),
+        **_load_cas_cookies(),
     }
 
 
-def _load_xk_cookies() -> dict[str, Any]:
-    cookies = load_json(COOKIE_FILE)
-    cookies.update(_load_cas_cookies())
-    return cookies
-
-
 def _save_xk_cookies(cookies: dict[str, Any]) -> None:
-    save_json(COOKIE_FILE, cookies)
-    _save_cas_cookies(cookies)
+    mode = str(cookies.get("_auth_mode") or "")
+    persisted = cookies
+    if mode == "xk_kingo":
+        persisted = {
+            key: value
+            for key, value in cookies.items()
+            if key not in _extract_ids_cas_cookies(cookies)
+        }
+    save_json(COOKIE_FILE, persisted)
+    if mode == "ids_cas":
+        _save_cas_cookies(cookies)
+
+
+def _saved_xk_auth_info() -> dict[str, Any]:
+    mode = str(load_json(COOKIE_FILE).get("_auth_mode") or "")
+    return {
+        "mode": mode,
+        "degraded": mode == "xk_kingo",
+        "error_code": "",
+        "message": "已保存登录态" if mode else "尚无已保存的认证模式",
+        "warning": KINGO_WARNING if mode == "xk_kingo" else "",
+        "ids_error_code": "",
+        "ids_message": "",
+    }
 
 
 def _set_library_login_error(message: str) -> None:
@@ -1640,11 +1598,6 @@ def _build_library_bot(student_id: str, password: str):
     cas_cookies = _load_cas_cookies()
     bot = HenuCampusBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
 
-    # 自动从该用户的 IDS CAS cookie jar 注入 CASTGC，实现免密复用。
-    castgc = str(cas_cookies.get("CASTGC", "") or "")
-    if castgc:
-        bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
-
     if bot.login():
         _save_library_cookies(bot.get_cookies())
         _save_cas_cookies(bot.get_cas_cookies())
@@ -1654,8 +1607,6 @@ def _build_library_bot(student_id: str, password: str):
     first_error = str(getattr(bot, "get_last_error", lambda: "")() or "").strip()
     if stored:
         fresh_bot = HenuCampusBot(student_id, password, None, cas_cookies or None)  # type: ignore
-        if castgc:
-            fresh_bot.session.cookies.set("CASTGC", castgc, domain="ids.henu.edu.cn")
         if fresh_bot.login():
             _save_library_cookies(fresh_bot.get_cookies())
             _save_cas_cookies(fresh_bot.get_cas_cookies())
@@ -1886,15 +1837,30 @@ def save_account(
     sid = str(student_id or "").strip()
     pwd = str(password or "")
     if not sid or not pwd:
-        return {"success": False, "msg": "student_id/password 不能为空"}
+        return {
+            "success": False,
+            "code": "missing_params",
+            "missing_params": [
+                name
+                for name, value in (("student_id", sid), ("password", pwd))
+                if not value
+            ],
+            "msg": "请提供统一身份认证账号（通常为数字学号）和统一身份认证密码",
+        }
 
     context: dict[str, Any] = {}
+    auth: dict[str, Any] = _saved_xk_auth_info()
     if verify_login:
         client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
         if not client.login():
-            return {"success": False, "msg": "登录失败，账号或密码可能错误"}
+            return {
+                "success": False,
+                "msg": client.auth_result.message,
+                "auth": client.get_auth_info(),
+            }
         _save_xk_cookies(client.get_cookies())
         context = client.fetch_user_context()
+        auth = client.get_auth_info()
 
     fields: dict[str, Any] = {"student_id": sid, "password": pwd}
     if str(library_location or "").strip():
@@ -1906,6 +1872,7 @@ def save_account(
         "success": True,
         "msg": "账号已保存",
         "account": _mask_profile(_effective_profile()),
+        "auth": auth,
         "context": {
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
@@ -1937,7 +1904,8 @@ def check_login(
 
     return {
         "success": ok,
-        "msg": "登录成功" if ok else "登录失败",
+        "msg": "登录成功" if ok else client.auth_result.message,
+        "auth": client.get_auth_info(),
         "login_id": context.get("login_id", ""),
         "user_type": context.get("user_type", ""),
         "current_xn": context.get("current_xn", ""),
@@ -2214,8 +2182,9 @@ def _library_reserve_impl(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
+    end_policy: str = "ask",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
@@ -2228,6 +2197,35 @@ def _library_reserve_impl(
     重要：不要假装预约成功，必须调用此工具执行真实的预约操作。
     预约结果会返回成功或失败的详细信息。
     """
+    normalized_end_policy = str(end_policy or "ask").strip().lower()
+    if normalized_end_policy not in {"ask", "server_full_slot"}:
+        return {
+            "success": False,
+            "code": "invalid_params",
+            "msg": "end_policy 必须是 ask 或 server_full_slot",
+        }
+
+    missing_params = [
+        name
+        for name, value in (
+            ("target_date", target_date),
+            ("preferred_time", preferred_time),
+        )
+        if not str(value or "").strip()
+    ]
+    if not str(preferred_end_time or "").strip() and normalized_end_policy != "server_full_slot":
+        missing_params.append("preferred_end_time")
+    if missing_params:
+        return {
+            "success": False,
+            "code": "missing_params",
+            "missing_params": missing_params,
+            "msg": (
+                "预约写操作必须明确提供日期、开始时间和结束时间；"
+                "若确需采用服务端完整时段，请显式设置 end_policy=server_full_slot"
+            ),
+        }
+
     if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
     
@@ -2243,10 +2241,6 @@ def _library_reserve_impl(
     if not target_location or not target_seat:
         return {"success": False, "msg": "请提供 location/seat_no 或在 setup_account 中设置默认值"}
     
-    # 日期默认为明天
-    if not target_date:
-        target_date = (_now_dt().date() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
     bot = _build_library_bot(sid, pwd)
     if not bot:
         return _library_login_failed()
@@ -2255,7 +2249,7 @@ def _library_reserve_impl(
         target_location,
         target_seat,
         target_date,
-        preferred_time=str(preferred_time or "08:00"),
+        preferred_time=str(preferred_time or ""),
         preferred_end_time=str(preferred_end_time or ""),
         retry_until=str(retry_until or ""),
         retry_interval_seconds=retry_interval_seconds,
@@ -3173,14 +3167,26 @@ def setup_account(
     if not result.get("success"):
         return result
 
-    calibration: dict[str, Any] = {}
-    if calibrate_period_time:
+    verified = bool(verify_login)
+    if not verified:
+        calibration: dict[str, Any] = {
+            "skipped": True,
+            "reason": "login_not_verified",
+        }
+    elif calibrate_period_time:
         calibration = auto_calibrate_period_time(force=True)
+    else:
+        calibration = {
+            "skipped": True,
+            "reason": "disabled",
+        }
 
     return {
         "success": True,
-        "msg": "账号初始化完成",
+        "verified": verified,
+        "msg": "账号初始化完成" if verified else "账号已保存，尚未验证登录",
         "account": result.get("account", {}),
+        "auth": result.get("auth", {}),
         "login_context": result.get("context", {}),
         "period_time_calibration": calibration,
     }
@@ -3448,8 +3454,9 @@ def library_reserve(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
+    end_policy: str = "ask",
     resource_id: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
@@ -3468,9 +3475,10 @@ def library_reserve(
     - location: 图书馆区域名称（如"一楼东"）
     - seat_no: 座位号（如"001"）
     - resource_id: 资源ID（如 henu:library:seat:...），优先级高于 location/seat_no
-    - target_date: 预约日期（格式：YYYY-MM-DD，默认明天）
-    - preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）
-    - preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）
+    - target_date: 预约日期（格式：YYYY-MM-DD；写操作必须明确提供）
+    - preferred_time: 首选/最早时间（格式：HH:MM；写操作必须明确提供）
+    - preferred_end_time: 最晚结束时间（格式：HH:MM）
+    - end_policy: ask 或 server_full_slot；未给结束时间时默认 ask 并拒绝预约，只有显式 server_full_slot 才采用服务端完整时段
     - retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）
     - retry_interval_seconds: 抢约重试间隔秒数（1-60）
     - max_attempts: 最大尝试次数（1-120）
@@ -3496,6 +3504,7 @@ def library_reserve(
         target_date=target_date,
         preferred_time=preferred_time,
         preferred_end_time=preferred_end_time,
+        end_policy=end_policy,
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
@@ -3895,6 +3904,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
         "success": True,
         "server_time": get_server_time(timezone=timezone),
         "account": show_account(),
+        "auth": _saved_xk_auth_info(),
         "period_time_config": get_period_time_config(),
         "library_defaults": {
             "location": _resolve_library_defaults()[0],

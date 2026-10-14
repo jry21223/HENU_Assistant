@@ -9,7 +9,8 @@ description: 河南大学校园助手，支持课表查询、选课状态/规划
 
 ## 功能
 
-- 课表：`setup_account`、`sync_schedule`、`schedule_query`
+- 账号与偏好：`setup_account`、`preferences get/set/clear`
+- 课表：`sync_schedule`、`schedule_query`
 - 选课：`smart_course_selection`、`course_selection_query`、`course_selection_plan`、`course_selection_submit`、`course_monitor_config`、`course_monitor_once`、`course_monitor_run`、`course_monitor_notify_test`
 - 空教室：`empty_classroom_query`、`empty_classroom_sync`
 - 资源映射：`resource_registry_query`、`resource_registry_sync`
@@ -28,7 +29,11 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 
 常用命令：
 
-- `setup_account --student_id "<学号>" --password "<密码>"`
+- `setup_account --student_id "<学号>"`（推荐；随后由终端安全读取密码）
+- `setup_account --student_id "<学号>" --password-stdin`（自动化时从标准输入读取一行密码）
+- `preferences get`
+- `preferences set --library_location "<区域>" --library_seat_no "<座位号>"`
+- `preferences clear --library_location --library_seat_no`
 - `sync_schedule`
 - `schedule_query --view current`
 - `schedule_query --view day --target_date "2026-03-19"`
@@ -49,7 +54,8 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 - `library_query --view seats --location "<区域>" --target_date "2026-03-19" --preferred_time "08:00"`
 - `library_query --view current`
 - `library_query --view records --record_type 1 --page 1 --limit 20`
-- `library_reserve --location "<区域>" --seat_no "<座位号>" --preferred_time "10:30"`
+- `library_reserve --location "<区域>" --seat_no "<座位号>" --target_date "2026-03-19" --preferred_time "10:30" --preferred_end_time "12:00"`
+- `library_reserve --location "<区域>" --seat_no "<座位号>" --target_date "2026-03-19" --preferred_time "10:30" --end_policy server_full_slot`（仅当用户明确同意采用服务端完整时段）
 - `library_auto_signin [--record_id "<记录ID>"]`
 - `library_cancel --record_id "<记录ID>"`
 - `seminar_group --action save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>" [--note "<备注>"]`
@@ -74,12 +80,15 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 
 ## 注意
 
-- 首次使用先执行 `setup_account`
+- 首次使用先执行 `setup_account`；省略 `--password` 时会安全提示输入，避免密码进入 shell history/进程参数
+- `--password` 仅为兼容入口，会产生明文暴露风险；自动化优先使用 `--password-stdin`
+- `--no_verify_login` 只保存账号，不验证且不执行节次校准；返回 `verified=false`，不可表述为“登录成功”
 - 如 `.venv/bin/python` 不存在，先执行 `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 - 涉及“现在/今天/明天/当前预约/待签到”等相对时间时，先执行 `system_status`
 - 课表里 `current` 只查“当前正在上的课 + 下一节课”；查某一天课程请用 `schedule_query --view day --target_date "YYYY-MM-DD"`
 - `course_selection_query` 只读查询 xk 选课状态，会走统一认证与 frame 菜单入口；`course_monitor_*` 只读监控余量并提醒；`course_selection_submit` 当前不执行真实提交
 - 图书馆预约前先用 `library_query --view locations` 确认区域，可用 `library_query --view seats` 查看当前可用座位
+- 图书馆预约必须明确日期、开始时间和结束时间；若用户明确接受服务端完整时段，才可使用 `--end_policy server_full_slot`
 - 图书馆查看当前预约或历史记录时，用 `library_query --view current` / `library_query --view records`
 - 研讨室通常先按 `seminar_query --view filters` -> `seminar_query --view rooms` -> `seminar_query --view detail` 逐步查询
 - 研讨室 `group` 保存的是同行成员学号，不含自己；建议保存 3-9 个学号，预约时会自动去重并排除当前账号
@@ -88,4 +97,6 @@ cd ~/.openclaw/workspace/skills/henu_campus_assistant && .venv/bin/python henu_c
 - 研讨室可先用 `seminar_query --view records` 查记录，再用 `seminar_cancel` 取消
 - 河宝社区相关查询前先执行 `system_status`
 - 请假详情使用 `yunfz_leave_query --view detail --leave_id "..."`
-- 账号与 Cookie 仅本地保存；同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），失败后再回退密码登录
+- 账号与 Cookie 仅本地保存；教务登录优先复用或登录 IDS（`CASTGC`/`TGC`），仅在凭据提交前确认 IDS 技术不可用时才允许尝试一次 xk Kingo 独立登录
+- IDS 模式可跨服务复用；Kingo 降级模式只保证课表、选课状态、空教室等 xk 能力，不生成或覆盖 CAS Jar
+- IDS/Kingo 遇到验证码、额外验证、账号锁定、限流或认证结果未知时立即失败关闭，禁止继续降级、识别、绕过或循环重试；提示用户先在浏览器完成验证或稍后重试
