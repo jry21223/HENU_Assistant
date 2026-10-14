@@ -234,7 +234,7 @@ class FoodDrafts:
             return None
         return draft
 
-    def receive(self, scope, source, stamp, query_id, text, images, image_error=""):
+    def receive(self, scope, source, stamp, query_id, text, images, image_error="", *, expected_draft=None):
         """Record trusted ingress; return a reply or one durable publication claim."""
         now = time.time()
         if (
@@ -248,6 +248,10 @@ class FoodDrafts:
         ):
             raise ValueError("无法验证消息来源或消息已过期，美食草稿尚未发布。")
         with self._state(scope) as state:
+            if expected_draft is not None:
+                draft = self._active(state)
+                if not draft or (draft.get('nonce'), draft.get('preview_source')) != tuple(expected_draft):
+                    return '原美食草稿已更新或失效，请核对最新预览，本次未执行。', None
             previous = state.get("current", {})
             if source in state.get("seen", []) or stamp < previous.get("stamp", 0):
                 return (
@@ -407,6 +411,13 @@ class FoodDrafts:
             draft.update(
                 preview_delivered=True, preview_at=time.time(), pending_source=None
             )
+
+    def button_snapshot(self, scope):
+        with self._state(scope) as state:
+            draft = self._active(state)
+            if not draft or draft.get('status') != 'ready':
+                return {}
+            return {key: draft.get(key) for key in ('nonce', 'preview_source', 'expires', 'preview_delivered', 'pending_source', 'image_error')}
 
     def complete(self, scope, nonce, reply):
         with self._state(scope) as state:

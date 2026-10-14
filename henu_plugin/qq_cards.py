@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 import unicodedata
 from collections import OrderedDict
@@ -21,7 +22,7 @@ PRIVATE_NOTICE = "个人信息仅在私聊中展示。请私聊机器人继续�
 
 
 def is_page_request(text: str) -> bool:
-    return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页", text))
+    return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页|卡片翻页 [A-Za-z0-9_-]{24} [1-9]\d{0,2}", text))
 
 
 def page_request_text(chain: list) -> str:
@@ -335,7 +336,9 @@ def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     if private:
         return result_card({}, private=True).pages()
     status = "服务回执"
-    if "尚未发布" in text or "尚未提交" in text or "待确认" in text:
+    if '已取消' in text:
+        status = '已取消 · 尚未提交'
+    elif "尚未发布" in text or "尚未提交" in text or "待确认" in text:
         status = "待本人核对 · 尚未提交"
     elif "过期" in text or "失效" in text:
         status = "已过期或失效 · 请重新核验"
@@ -354,13 +357,17 @@ def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     return Card(title, status, tuple(lines)).pages()
 
 
-def card_chain(text: str) -> MessageChain:
+def card_chain(text: str, *, keyboard=None) -> MessageChain:
+    from langbot_plugin.api.entities.builtin.platform import message as pm
+    component = getattr(pm, 'HenuMarkdown', None)
+    if keyboard and component is not None:
+        return MessageChain([component(text=text, markdown=text, keyboard=keyboard)])
     return MessageChain([Plain(text=text)])
 
 
-def set_card_reply(event: Any, text: str) -> None:
+def set_card_reply(event: Any, text: str, *, keyboard=None) -> None:
     """Use the real reply contract of either supported LangBot SDK generation."""
-    chain = card_chain(text)
+    chain = card_chain(text, keyboard=keyboard)
     if hasattr(event, "reply_message_chain"):
         event.reply_message_chain = chain
     else:
@@ -381,11 +388,19 @@ class CardCache:
         self.entries: OrderedDict[tuple, tuple[float, list[str], int]] = OrderedDict()
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
+        self.control_ids: dict[tuple, str] = {}
+        self.controls: dict[tuple, dict[str, Any]] = {}
+        self.tools: dict[tuple, dict[str, str]] = {}
+        self.group_controls: dict[tuple, tuple[int, dict]] = {}
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
         self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
+        self.control_ids[key] = secrets.token_urlsafe(18)
+        self.controls.pop(key, None)
+        self.tools.pop(key, None)
+        self.group_controls.pop(key, None)
         if on_read is not None:
             self.preview_receipts[key] = (set(), on_read)
         self.entries.move_to_end(key)
@@ -393,6 +408,10 @@ class CardCache:
             expired, _ = self.entries.popitem(last=False)
             self.preview_receipts.pop(expired, None)
             self.request_results.pop(expired, None)
+            self.control_ids.pop(expired, None)
+            self.controls.pop(expired, None)
+            self.tools.pop(expired, None)
+            self.group_controls.pop(expired, None)
 
     def stage(self, key: tuple, query_id: int, result_id: str, pages: list[str]) -> list[str]:
         previous = self.request_results.get(key)
@@ -413,9 +432,26 @@ class CardCache:
                 retained[identifier] = group[:remaining]
                 remaining -= len(retained[identifier])
             groups = retained
+        metadata = self.group_controls.get(key)
+        controls = metadata[1] if metadata and metadata[0] == query_id else {}
         self.put(key, combined)
         self.request_results[key] = (query_id, groups)
+        self.group_controls[key] = (query_id, controls)
+        self.set_controls(key, result_id, *controls.get(result_id, (None, '')))
         return combined
+
+    def set_controls(self, key, result_id, keyboard, tool):
+        _, metadata = self.group_controls[key]
+        metadata[result_id] = (keyboard, tool)
+        self.controls[key], self.tools[key] = {}, {}
+        offset = 0
+        for identifier, group in self.request_results[key][1].items():
+            control, title = metadata.get(identifier, (None, ''))
+            for page in self.entries[key][1][offset:offset + len(group)]:
+                self.tools[key][page] = title
+            if control and offset < len(self.entries[key][1]):
+                self.controls[key][self.entries[key][1][offset]] = control
+            offset += len(group)
 
     async def delivered(self, key: tuple, page: str) -> None:
         entry = self.entries.get(key)
@@ -435,9 +471,18 @@ class CardCache:
             self.entries.pop(key, None)
             self.preview_receipts.pop(key, None)
             self.request_results.pop(key, None)
+            self.control_ids.pop(key, None)
+            self.controls.pop(key, None)
+            self.tools.pop(key, None)
+            self.group_controls.pop(key, None)
             return text_card("卡片已过期", "卡片已过期或当前会话没有可翻页内容，请重新查询。")[0]
         expires, pages, current = entry
-        if request == "下一页":
+        if request.startswith('卡片翻页 '):
+            _, identifier, number = request.split()
+            if identifier != self.control_ids.get(key):
+                return text_card('卡片已失效', '此按钮对应的卡片已失效，请使用最新卡片或重新查询。')[0]
+            selected = int(number) - 1
+        elif request == "下一页":
             selected = current + 1
         elif request == "上一页":
             selected = current - 1
@@ -447,6 +492,36 @@ class CardCache:
             return text_card("翻页范围", f"当前卡片共 {len(pages)} 页，请发送“卡片第 N 页”。")[0]
         self.entries[key] = (expires, pages, selected)
         return pages[selected]
+
+    def keyboard(self, key, page, plugin, *, tool=''):
+        from henu_plugin.qq_buttons import enabled, command_keyboard
+        entry = self.entries.get(key)
+        if not enabled(plugin) or not entry or entry[0] <= time.monotonic() or page not in entry[1]:
+            return None
+        fixed = self.controls.get(key, {}).get(page)
+        if fixed:
+            return fixed
+        tool = tool or self.tools.get(key, {}).get(page, '')
+        commands = []
+        index = entry[1].index(page)
+        if index > 0:
+            commands.append(('上一页', f'卡片翻页 {self.control_ids[key]} {index}'))
+        if index + 1 < len(entry[1]):
+            commands.append(('下一页', f'卡片翻页 {self.control_ids[key]} {index + 2}'))
+        if key[1] == 'person':
+            if tool in {'schedule_query', 'sync_schedule'}:
+                commands += [('当前课程', 'schedule now'), ('本周课表', 'schedule week')]
+            elif tool.startswith('library'):
+                commands += [('当前预约', 'library current'), ('预约帮助', 'help library reserve')]
+            elif tool.startswith('seminar'):
+                commands += [('我的预约', 'seminar records'), ('预约帮助', 'help seminar reserve')]
+            elif tool.startswith('yuketang'):
+                commands += [('雨课堂状态', 'yuketang status'), ('查看课程', 'yuketang courses')]
+            elif tool == 'system_status':
+                commands += [('当前课程', 'schedule now'), ('当前预约', 'library current')]
+        if not commands:
+            commands = [('使用帮助', 'help')]
+        return command_keyboard(key, commands)
 
 
 def cache(plugin: Any) -> CardCache:
@@ -465,10 +540,22 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
     pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
+    tool = str(cli.get('resolved_tool') or result.get('_resolved_tool_name') or '')
+    keyboard = None
+    if result.get('confirmation_required'):
+        from henu_plugin.qq_buttons import enabled, register_pending, pending_keyboard, _load
+        if enabled(plugin) and key[1] == 'person':
+            storage_key = 'user:' + re.sub(r'[^0-9A-Za-z._-]+', '_', key[3]).strip('._-') + ':pending_operation'
+            pending = await _load(plugin, storage_key)
+            if pending.get('schema') == 'henu.pending-operation.v1':
+                action = await register_pending(plugin, key, 'operation', storage_key, pending)
+                keyboard = pending_keyboard(action, key[3])
+    cache(plugin).set_controls(key, result_id, keyboard, tool)
+    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0],
+        'keyboard': cache(plugin).keyboard(key, pages[0], plugin)})
 
 
-async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
+async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None, button_pending=None):
     kind = str(getattr(getattr(ctx.event, "launcher_type", ""), "value", getattr(ctx.event, "launcher_type", "")))
     pages = text_card(title, text, private=private and kind != "person")
     if plugin is not None and callable(getattr(ctx, "get_bot_uuid", None)):
@@ -478,7 +565,14 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
                 cache(plugin).put(key, pages)
         except Exception:
             pass
-    return await ctx.reply(card_chain(pages[0]))
+    keyboard = None
+    if plugin is not None and kind == 'person':
+        from henu_plugin.qq_buttons import direct_keyboard
+        try:
+            keyboard = await direct_keyboard(plugin, ctx, title, text, pending=button_pending)
+        except Exception:
+            keyboard = None  # An optional control failure must preserve the preview.
+    return await ctx.reply(card_chain(pages[0], keyboard=keyboard))
 
 
 async def present_card(ctx):
@@ -492,7 +586,7 @@ async def present_card(ctx):
         owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
         if owner is None or card.get("owner") != list(owner):
             return
-        set_card_reply(ctx.event, card["page"])
+        set_card_reply(ctx.event, card["page"], keyboard=card.get('keyboard'))
         setter = getattr(ctx, "set_query_var", None)
         if callable(setter):
             await setter("_henu_card", None)
@@ -517,7 +611,8 @@ async def handle_card_page(plugin: Any, ctx):
         key = None
         page = "卡片读取失败，请重新查询。"
     try:
-        await ctx.reply(card_chain(page))
+        keyboard = cache(plugin).keyboard(key, page, plugin) if key else None
+        await ctx.reply(card_chain(page, keyboard=keyboard))
     except Exception:
         return True  # The first send may already have arrived; never repeat.
     if key:

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 from typing import Any
 
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
-from henu_plugin.cli import inspect_cli_command, redact_cli_command
+from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import (
     conversation_context,
     WRITE_TOOL_NAMES,
@@ -18,6 +19,20 @@ from henu_plugin.confirmation import (
 
 class HenuCli(BaseHenuTool):
     tool_name = "henu_cli"
+
+    def _confirmation_lock(self, storage_key):
+        if not hasattr(self.plugin, '_henu_confirmation_lock'):
+            self.plugin._henu_confirmation_lock = asyncio.Lock()
+        return self.plugin._henu_confirmation_lock
+
+    async def cancel_pending(self, key, token):
+        identity = key.removeprefix('user:').removesuffix(':pending_operation')
+        async with self._confirmation_lock(identity):
+            pending = await self._load_pending(identity)
+            if pending.get('schema') == 'henu.pending-operation.v1' and pending.get('token') == token and not pending.get('consumed'):
+                await self.plugin.set_plugin_storage(key, b'{}')
+                return True
+            return False
 
     def should_preload_runtime_context(self, params):
         command = params.get("command") if isinstance(params, dict) else ""
@@ -159,6 +174,15 @@ class HenuCli(BaseHenuTool):
             canonical_command=canonical_command,
             query_id=query_id,
         )
+        handler = getattr(self.plugin, 'plugin_runtime_handler', None)
+        if handler is not None:
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            try:
+                pending['bot'] = str(await QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=handler).get_bot_uuid() or '')
+            except Exception:
+                # Text confirmation remains available; native choices require
+                # a verified bot identity recorded at creation time.
+                pass
         key = pending_storage_key(storage_key)
         pending['conversation'] = conversation
         try:
@@ -227,8 +251,22 @@ class HenuCli(BaseHenuTool):
         query_id: int,
         pending: Any = None,
     ) -> dict[str, Any]:
-        if pending is None:
-            pending = await self._load_pending(storage_key)
+        async with self._confirmation_lock(storage_key):
+            return await self._execute_pending_locked(token=token, storage_key=storage_key,
+                canonical_command=canonical_command, session=session, query_id=query_id)
+
+    async def _execute_pending_locked(self, *, token, storage_key, canonical_command, session, query_id):
+        pending = await self._load_pending(storage_key)
+        if pending.get('conversation') != conversation_context(session):
+            return {'success': False, 'error_code': 'confirmation_invalid', 'msg': '原确认已处理或会话不一致，本次未执行。'}
+        if pending.get('bot'):
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            try:
+                bot = await QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=self.plugin.plugin_runtime_handler).get_bot_uuid()
+            except Exception:
+                bot = None
+            if bot != pending['bot']:
+                return {'success': False, 'error_code': 'confirmation_invalid', 'msg': '请回到发起操作的原机器人私聊确认，本次未执行。'}
         check = validate_pending_operation(
             pending,
             token=token,
@@ -252,20 +290,13 @@ class HenuCli(BaseHenuTool):
                 "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
             }
 
-        result = await super().call({"command": canonical_command}, session, query_id)
-        result = self._mark_storage_commit_state(result)
-        if isinstance(result, dict) and (
-            result.get("success") or result.get("external_committed")
-        ):
-            try:
-                await self.plugin.set_plugin_storage(
-                    pending_storage_key(storage_key), b"{}"
-                )
-            except Exception:
-                # The Tool result already distinguishes an external commit from
-                # local persistence. Do not mask a completed campus operation.
-                result.setdefault("confirmation_cleanup_failed", True)
-        return result
+        try:
+            await self.plugin.set_plugin_storage(pending_storage_key(storage_key), b"{}")
+        except Exception:
+            return {'success': False, 'error_code': 'confirmation_storage_failed', 'msg': '无法保存执行状态，本次未提交。'}
+        # An ambiguous external response is also consumed: a later click/plain
+        # confirmation must not repeat an operation that may already have succeeded.
+        return self._mark_storage_commit_state(await super().call({"command": canonical_command}, session, query_id))
 
     async def _load_pending(self, storage_key: str) -> dict[str, Any]:
         try:

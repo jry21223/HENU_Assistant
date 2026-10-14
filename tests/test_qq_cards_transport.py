@@ -52,3 +52,25 @@ def test_timeout_does_not_send_duplicate(monkeypatch):
     with pytest.raises(httpx.ReadTimeout):
         asyncio.run(transport.send_card(client, "c2c", "receiver", transport.PREFIX + "状态", msg_id="source"))
     sender.assert_not_awaited()
+def test_native_keyboard_preserves_receipt_and_only_one_passive_anchor(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    async def run():
+        wire = []
+        async def post(client, url, **kwargs):
+            wire.append(kwargs['json'])
+            return httpx.Response(200, json={'id': 'synthetic-reply', 'ext_info': {'ref_idx': 'synthetic-ref'}})
+        monkeypatch.setattr(httpx.AsyncClient, 'post', post)
+        client = SimpleNamespace(base_url='https://api.sgroup.qq.com', access_token='synthetic',
+            check_access_token=AsyncMock(return_value=True), next_reply_msg_seq=AsyncMock(return_value=1))
+        keyboard = {'content': {'rows': [{'buttons': [{'id': 'confirm', 'render_data': {'label': '确认'},
+            'action': {'type': 1, 'data': 'henu-btn:v1:operation:confirm:ABCDEFGHIJKLMNOPQRSTUVWX',
+                       'permission': {'type': 0, 'specify_user_ids': ['alice']}}}]}]}}
+        receipt = await transport.send_card(client, 'c2c', 'alice', transport.PREFIX + '待确认',
+            event_id='synthetic-ws-event', keyboard=keyboard)
+        assert receipt['ext_info']['ref_idx'] == 'synthetic-ref'
+        assert wire[0]['keyboard'] == keyboard
+        assert 'msg_id' not in wire[0]
+        assert wire[0]['event_id'] == 'synthetic-ws-event'
+    asyncio.run(run())

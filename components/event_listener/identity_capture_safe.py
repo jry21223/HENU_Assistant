@@ -3,16 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from langbot_plugin.api.entities import context, events
-from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider import message as provider_message
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.cli import inspect_cli_command
-from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
-from henu_plugin.kit_binding import KitBindingCoordinator
 from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, handle_card_page, present_card, set_card_reply, text_card
+from henu_plugin.qq_buttons import handle_button, coordinators
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -47,12 +45,14 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
     async def initialize(self):
         await super().initialize()
-        self._yuketang_login = YuketangLoginCoordinator(self)
+        self._yuketang_login = coordinators(self.plugin).yuketang
         self._confirmation_shortcut = ConfirmationShortcut(self)
-        self._kit_binding = KitBindingCoordinator(self)
+        self._kit_binding = coordinators(self.plugin).kit
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if await handle_button(self.plugin, ctx):
+                return
             if await handle_card_page(self.plugin, ctx):
                 return
             if await self._kit_binding.handle(ctx, is_group=False):
@@ -63,6 +63,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if await handle_button(self.plugin, ctx):
+                return
             if await handle_card_page(self.plugin, ctx):
                 return
             if await self._kit_binding.handle(ctx, is_group=True):
