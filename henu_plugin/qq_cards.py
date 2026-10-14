@@ -559,7 +559,7 @@ class CardCache:
         if index + 1 < len(entry[1]):
             commands.append(('下一页', f'卡片翻页 {self.control_ids[key]} {index + 2}'))
         if fixed:
-            navigation = command_keyboard(key, commands)
+            navigation = command_keyboard(key, commands, id_prefix='page')
             return {'content': {'rows': [*fixed['content']['rows'], *(navigation['content']['rows'] if navigation else [])]}}
         if key[1] == 'person':
             if tool in {'schedule_query', 'sync_schedule'}:

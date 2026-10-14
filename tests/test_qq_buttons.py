@@ -302,3 +302,23 @@ def test_cancel_old_pending_cannot_erase_a_concurrent_replacement():
         assert current.get('command') == 'yuketang lesson set --auto-enter off'
         assert current.get('token') != original['token']
     asyncio.run(run())
+
+
+def test_rain_query_buttons_and_pagination_share_a_valid_unique_keyboard():
+    import importlib.util
+    from pathlib import Path
+    from henu_plugin.qq_cards import cache, rain_commands
+    from henu_plugin.qq_buttons import command_keyboard
+    spec = importlib.util.spec_from_file_location('rain_transport', Path(__file__).parents[1] / 'ops/qq_cards_transport.py')
+    transport = importlib.util.module_from_spec(spec); spec.loader.exec_module(transport)
+    owner = ('bot-a', 'person', 'alice', 'alice')
+    plugin = Plugin()
+    cards = cache(plugin)
+    cards.stage(owner, 10, 'rain', ['# 河大助手 · 雨课堂状态\nsummary'])
+    fixed = command_keyboard(owner, rain_commands({'reply_text': '登录状态：未登录'}))
+    cards.set_controls(owner, 'rain', fixed, 'yuketang_status')
+    pages = cards.stage(owner, 10, 'schedule', ['# 河大助手 · 课表\nread-only'])
+    keyboard = cards.keyboard(owner, pages[0], plugin)
+    transport.validate_keyboard(keyboard, 'c2c', 'alice')
+    identifiers = [button['id'] for row in keyboard['content']['rows'] for button in row['buttons']]
+    assert len(identifiers) == len(set(identifiers)) == 4

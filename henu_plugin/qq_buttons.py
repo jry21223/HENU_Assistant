@@ -101,10 +101,10 @@ def pending_keyboard(action, sender):
     return {'content': {'rows': [{'buttons': buttons}]}}
 
 
-def command_keyboard(owner, commands):
+def command_keyboard(owner, commands, *, id_prefix='next'):
     buttons = []
     for index, (label, command) in enumerate(commands[:5]):
-        buttons.append({'id': 'next-' + str(index), 'render_data': {'label': label[:10], 'style': 0},
+        buttons.append({'id': id_prefix + '-' + str(index), 'render_data': {'label': label[:10], 'style': 0},
                         'action': {'type': 2, 'data': command,
                                    'permission': {'type': 0, 'specify_user_ids': [owner[3]]},
                                    'enter': owner[1] == 'person', 'reply': False,
