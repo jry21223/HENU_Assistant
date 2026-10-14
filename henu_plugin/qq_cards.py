@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 import unicodedata
 from collections import OrderedDict
@@ -21,7 +22,7 @@ PRIVATE_NOTICE = "个人信息仅在私聊中展示。请私聊机器人继续�
 
 
 def is_page_request(text: str) -> bool:
-    return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页", text))
+    return bool(re.fullmatch(r"下一页|上一页|卡片第\s*[1-9]\d{0,2}\s*页|卡片翻页 [A-Za-z0-9_-]{24} [1-9]\d{0,2}", text))
 
 
 def page_request_text(chain: list) -> str:
@@ -179,6 +180,41 @@ def _row_lines(item: Any, depth: int = 0) -> list[str]:
 LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "course_options", "candidates", "groups", "data", "commands", "tips", "examples", "titles", "categories", "date_options", "date_rows")
 
 
+def _rain_status_card(result):
+    config = result.get('yuketang') if isinstance(result.get('yuketang'), dict) else {}
+    bridge = result.get('bridge') if isinstance(result.get('bridge'), dict) else {}
+    configured = config.get('enabled')
+    monitoring = bridge.get('monitoring_state')
+    if configured is False and monitoring == 'running':
+        status = '本地未启用 · 远端待核对'
+        lines = ['本地监听开关已关闭，但远端报告仍在运行；请刷新状态核对。']
+    elif configured is False:
+        status = '监听未启用'
+        lines = ['当前没有启用雨课堂监听。课堂设置暂不代表正在运行。']
+    elif monitoring == 'running':
+        status = '监听运行中'
+        lines = ['当前身份已注册，配置一致且执行器心跳有效。']
+    elif monitoring == 'stopped':
+        status = '监听已停用'
+        lines = ['远端已确认当前身份停止监听。']
+    else:
+        status = '已启用配置 · 运行未核验' if configured is True else '监听状态未核验'
+        lines = ['本地监听配置已启用，尚不能确认远端正在运行。' if configured is True else '服务未返回监听开关，请刷新状态核验。']
+    if monitoring not in {'running', 'stopped'}:
+        lines.append('桥服务暂不可达，未核验远端监听状态。' if bridge.get('status') == 'unreachable' else '本次未核验远端监听状态。')
+    message = str(result.get('reply_text') or '')
+    login = '已登录' if re.search(r'(?m)^登录状态：已登录', message) else '未登录' if re.search(r'(?m)^登录状态：未登录', message) else '未核验'
+    lines.append('**登录**：' + login)
+    lines.append('**设置**：课堂与考试的详细开关可在“查看设置”中核对。')
+    return Card('雨课堂状态', status, tuple(lines), '发送“查看雨课堂状态”刷新，或发送“查看雨课堂设置”核对详细开关。')
+
+
+def rain_commands(result):
+    logged_in = re.search(r'(?m)^登录状态：已登录', str(result.get('reply_text') or ''))
+    return [('刷新状态', 'yuketang status'), ('查看设置', 'yuketang config show'),
+            ('我的课程', 'yuketang courses') if logged_in else ('登录帮助', 'help yuketang')]
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -189,6 +225,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
+    if tool == 'yuketang_status' and result.get('success') is True and not result.get('confirmation_required'):
+        return _rain_status_card(result)
     msg = str(result.get("reply_text") or result.get("msg") or "")
     food_rows = None
     if tool == "food" and "{" in msg:
@@ -321,21 +359,31 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if tool.startswith("yuketang") and tool != "yuketang_exam_list":
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
-    next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    from henu_plugin.cli import inspect_cli_command
+    next_labels = []
+    for command in next_commands[:2] if isinstance(next_commands, list) else []:
+        spec = inspect_cli_command(command)
+        if spec.is_help:
+            next_labels.append('查看使用帮助')
+        elif not spec.error and spec.resolved_tool in TOOL_TITLES and (spec.resolved_tool.endswith('_query') or spec.resolved_tool in {'system_status', 'yuketang_status', 'yuketang_courses', 'yuketang_exam_list', 'yuketang_config_show'}):
+            next_labels.append('查看' + TOOL_TITLES[spec.resolved_tool])
+    next_step = '可继续' + '或'.join(dict.fromkeys(next_labels)) + '。' if next_labels else ''
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
         next_step = "先查询当前记录核验，不要重复提交。"
     elif status == "需要绑定或登录":
-        next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
-    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "可发送 help 查看当前功能和命令。")
+        next_step = '私聊发送“' + ('雨课堂登录帮助' if tool.startswith('yuketang') else '校园账号绑定帮助') + '”，按提示绑定并登录。'
+    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or '可直接描述下一步需求，或发送“使用帮助”查看当前功能。')
 
 
 def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     if private:
         return result_card({}, private=True).pages()
     status = "服务回执"
-    if "尚未发布" in text or "尚未提交" in text or "待确认" in text:
+    if '已取消' in text:
+        status = '已取消 · 尚未提交'
+    elif "尚未发布" in text or "尚未提交" in text or "待确认" in text:
         status = "待本人核对 · 尚未提交"
     elif "过期" in text or "失效" in text:
         status = "已过期或失效 · 请重新核验"
@@ -354,13 +402,24 @@ def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     return Card(title, status, tuple(lines)).pages()
 
 
-def card_chain(text: str) -> MessageChain:
+def card_chain(text: str, *, keyboard=None) -> MessageChain:
+    from langbot_plugin.api.entities.builtin.platform import message as pm
+    component = getattr(pm, 'HenuMarkdown', None)
+    if keyboard and component is not None:
+        controls = [button for row in keyboard.get('content', {}).get('rows', []) for button in row.get('buttons', [])]
+        has_paging = any(str(button.get('action', {}).get('data', '')).startswith('卡片翻页 ') for button in controls)
+        markdown = re.sub(r'(第 \d+/\d+ 页) · 回复[^\n]+', r'\1 · 点击下方按钮翻页', text) if has_paging else text
+        if text.startswith(PREFIX + '雨课堂状态'):
+            labels = [button.get('render_data', {}).get('label', '') for button in controls]
+            next_step = '点击下方的“刷新状态”“查看设置”或“' + ('我的课程' if '我的课程' in labels else '登录帮助') + '”。'
+            markdown = markdown.replace('发送“查看雨课堂状态”刷新，或发送“查看雨课堂设置”核对详细开关。', next_step)
+        return MessageChain([component(text=text, markdown=markdown, keyboard=keyboard)])
     return MessageChain([Plain(text=text)])
 
 
-def set_card_reply(event: Any, text: str) -> None:
+def set_card_reply(event: Any, text: str, *, keyboard=None) -> None:
     """Use the real reply contract of either supported LangBot SDK generation."""
-    chain = card_chain(text)
+    chain = card_chain(text, keyboard=keyboard)
     if hasattr(event, "reply_message_chain"):
         event.reply_message_chain = chain
     else:
@@ -381,11 +440,19 @@ class CardCache:
         self.entries: OrderedDict[tuple, tuple[float, list[str], int]] = OrderedDict()
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
+        self.control_ids: dict[tuple, str] = {}
+        self.controls: dict[tuple, dict[str, Any]] = {}
+        self.tools: dict[tuple, dict[str, str]] = {}
+        self.group_controls: dict[tuple, tuple[int, dict]] = {}
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
         self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
+        self.control_ids[key] = secrets.token_urlsafe(18)
+        self.controls.pop(key, None)
+        self.tools.pop(key, None)
+        self.group_controls.pop(key, None)
         if on_read is not None:
             self.preview_receipts[key] = (set(), on_read)
         self.entries.move_to_end(key)
@@ -393,6 +460,10 @@ class CardCache:
             expired, _ = self.entries.popitem(last=False)
             self.preview_receipts.pop(expired, None)
             self.request_results.pop(expired, None)
+            self.control_ids.pop(expired, None)
+            self.controls.pop(expired, None)
+            self.tools.pop(expired, None)
+            self.group_controls.pop(expired, None)
 
     def stage(self, key: tuple, query_id: int, result_id: str, pages: list[str]) -> list[str]:
         previous = self.request_results.get(key)
@@ -413,9 +484,26 @@ class CardCache:
                 retained[identifier] = group[:remaining]
                 remaining -= len(retained[identifier])
             groups = retained
+        metadata = self.group_controls.get(key)
+        controls = metadata[1] if metadata and metadata[0] == query_id else {}
         self.put(key, combined)
         self.request_results[key] = (query_id, groups)
+        self.group_controls[key] = (query_id, controls)
+        self.set_controls(key, result_id, *controls.get(result_id, (None, '')))
         return combined
+
+    def set_controls(self, key, result_id, keyboard, tool):
+        _, metadata = self.group_controls[key]
+        metadata[result_id] = (keyboard, tool)
+        self.controls[key], self.tools[key] = {}, {}
+        offset = 0
+        for identifier, group in self.request_results[key][1].items():
+            control, title = metadata.get(identifier, (None, ''))
+            for page in self.entries[key][1][offset:offset + len(group)]:
+                self.tools[key][page] = title
+            if control and offset < len(self.entries[key][1]):
+                self.controls[key][self.entries[key][1][offset]] = control
+            offset += len(group)
 
     async def delivered(self, key: tuple, page: str) -> None:
         entry = self.entries.get(key)
@@ -435,9 +523,18 @@ class CardCache:
             self.entries.pop(key, None)
             self.preview_receipts.pop(key, None)
             self.request_results.pop(key, None)
+            self.control_ids.pop(key, None)
+            self.controls.pop(key, None)
+            self.tools.pop(key, None)
+            self.group_controls.pop(key, None)
             return text_card("卡片已过期", "卡片已过期或当前会话没有可翻页内容，请重新查询。")[0]
         expires, pages, current = entry
-        if request == "下一页":
+        if request.startswith('卡片翻页 '):
+            _, identifier, number = request.split()
+            if identifier != self.control_ids.get(key):
+                return text_card('卡片已失效', '此按钮对应的卡片已失效，请使用最新卡片或重新查询。')[0]
+            selected = int(number) - 1
+        elif request == "下一页":
             selected = current + 1
         elif request == "上一页":
             selected = current - 1
@@ -447,6 +544,37 @@ class CardCache:
             return text_card("翻页范围", f"当前卡片共 {len(pages)} 页，请发送“卡片第 N 页”。")[0]
         self.entries[key] = (expires, pages, selected)
         return pages[selected]
+
+    def keyboard(self, key, page, plugin, *, tool=''):
+        from henu_plugin.qq_buttons import enabled, command_keyboard
+        entry = self.entries.get(key)
+        if not enabled(plugin) or not entry or entry[0] <= time.monotonic() or page not in entry[1]:
+            return None
+        fixed = self.controls.get(key, {}).get(page)
+        tool = tool or self.tools.get(key, {}).get(page, '')
+        commands = []
+        index = entry[1].index(page)
+        if index > 0:
+            commands.append(('上一页', f'卡片翻页 {self.control_ids[key]} {index}'))
+        if index + 1 < len(entry[1]):
+            commands.append(('下一页', f'卡片翻页 {self.control_ids[key]} {index + 2}'))
+        if fixed:
+            navigation = command_keyboard(key, commands, id_prefix='page')
+            return {'content': {'rows': [*fixed['content']['rows'], *(navigation['content']['rows'] if navigation else [])]}}
+        if key[1] == 'person':
+            if tool in {'schedule_query', 'sync_schedule'}:
+                commands += [('当前课程', 'schedule now'), ('本周课表', 'schedule week')]
+            elif tool.startswith('library'):
+                commands += [('当前预约', 'library current'), ('预约帮助', 'help library reserve')]
+            elif tool.startswith('seminar'):
+                commands += [('我的预约', 'seminar records'), ('预约帮助', 'help seminar reserve')]
+            elif tool.startswith('yuketang'):
+                commands += [('刷新状态', 'yuketang status'), ('查看设置', 'yuketang config show'), ('我的课程', 'yuketang courses')]
+            elif tool == 'system_status':
+                commands += [('当前课程', 'schedule now'), ('当前预约', 'library current')]
+        if not commands:
+            commands = [('使用帮助', 'help')]
+        return command_keyboard(key, commands)
 
 
 def cache(plugin: Any) -> CardCache:
@@ -465,10 +593,26 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
     pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
+    tool = str(cli.get('resolved_tool') or result.get('_resolved_tool_name') or '')
+    keyboard = None
+    if tool == 'yuketang_status':
+        from henu_plugin.qq_buttons import command_keyboard, enabled
+        if enabled(plugin):
+            keyboard = command_keyboard(key, rain_commands(result))
+    if result.get('confirmation_required'):
+        from henu_plugin.qq_buttons import enabled, register_pending, pending_keyboard, _load
+        if enabled(plugin) and key[1] == 'person':
+            storage_key = 'user:' + re.sub(r'[^0-9A-Za-z._-]+', '_', key[3]).strip('._-') + ':pending_operation'
+            pending = await _load(plugin, storage_key)
+            if pending.get('schema') == 'henu.pending-operation.v1':
+                action = await register_pending(plugin, key, 'operation', storage_key, pending)
+                keyboard = pending_keyboard(action, key[3])
+    cache(plugin).set_controls(key, result_id, keyboard, tool)
+    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0],
+        'keyboard': cache(plugin).keyboard(key, pages[0], plugin)})
 
 
-async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
+async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None, button_pending=None):
     kind = str(getattr(getattr(ctx.event, "launcher_type", ""), "value", getattr(ctx.event, "launcher_type", "")))
     pages = text_card(title, text, private=private and kind != "person")
     if plugin is not None and callable(getattr(ctx, "get_bot_uuid", None)):
@@ -478,7 +622,14 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
                 cache(plugin).put(key, pages)
         except Exception:
             pass
-    return await ctx.reply(card_chain(pages[0]))
+    keyboard = None
+    if plugin is not None and kind == 'person':
+        from henu_plugin.qq_buttons import direct_keyboard
+        try:
+            keyboard = await direct_keyboard(plugin, ctx, title, text, pending=button_pending)
+        except Exception:
+            keyboard = None  # An optional control failure must preserve the preview.
+    return await ctx.reply(card_chain(pages[0], keyboard=keyboard))
 
 
 async def present_card(ctx):
@@ -492,7 +643,7 @@ async def present_card(ctx):
         owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
         if owner is None or card.get("owner") != list(owner):
             return
-        set_card_reply(ctx.event, card["page"])
+        set_card_reply(ctx.event, card["page"], keyboard=card.get('keyboard'))
         setter = getattr(ctx, "set_query_var", None)
         if callable(setter):
             await setter("_henu_card", None)
@@ -517,7 +668,8 @@ async def handle_card_page(plugin: Any, ctx):
         key = None
         page = "卡片读取失败，请重新查询。"
     try:
-        await ctx.reply(card_chain(page))
+        keyboard = cache(plugin).keyboard(key, page, plugin) if key else None
+        await ctx.reply(card_chain(page, keyboard=keyboard))
     except Exception:
         return True  # The first send may already have arrived; never repeat.
     if key:

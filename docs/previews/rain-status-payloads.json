@@ -1,0 +1,155 @@
+{
+  "title": "雨课堂 · 先看状态，再选择下一步",
+  "notice": "合成示意，非真实 QQ 截图，无个人信息，未发送 QQ 消息。",
+  "footer": "此处仅提供状态和设置查询按钮；未新增答题、提交或启用操作。",
+  "cards": [
+    {
+      "name": "监听关闭 · 不罗列未运行开关",
+      "markdown": "# 河大助手 · 雨课堂状态\n\n**监听未启用**\n\n当前没有启用雨课堂监听。课堂设置暂不代表正在运行。\n本次未核验远端监听状态。\n**登录**：未核验\n**设置**：课堂与考试的详细开关可在“查看设置”中核对。\n\n**下一步**\n点击下方的“刷新状态”“查看设置”或“登录帮助”。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "next-0",
+                  "render_data": {
+                    "label": "刷新状态",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "yuketang status",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：yuketang status"
+                  }
+                },
+                {
+                  "id": "next-1",
+                  "render_data": {
+                    "label": "查看设置",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "yuketang config show",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：yuketang config show"
+                  }
+                },
+                {
+                  "id": "next-2",
+                  "render_data": {
+                    "label": "登录帮助",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "help yuketang",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：help yuketang"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "配置启用 · 区分真实运行状态",
+      "markdown": "# 河大助手 · 雨课堂状态\n\n**已启用配置 · 运行未核验**\n\n本地监听配置已启用，尚不能确认远端正在运行。\n本次未核验远端监听状态。\n**登录**：未核验\n**设置**：课堂与考试的详细开关可在“查看设置”中核对。\n\n**下一步**\n点击下方的“刷新状态”“查看设置”或“登录帮助”。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "next-0",
+                  "render_data": {
+                    "label": "刷新状态",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "yuketang status",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：yuketang status"
+                  }
+                },
+                {
+                  "id": "next-1",
+                  "render_data": {
+                    "label": "查看设置",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "yuketang config show",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：yuketang config show"
+                  }
+                },
+                {
+                  "id": "next-2",
+                  "render_data": {
+                    "label": "登录帮助",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "help yuketang",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：help yuketang"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

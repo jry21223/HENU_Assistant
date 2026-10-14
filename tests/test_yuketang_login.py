@@ -23,6 +23,22 @@ def context(query_id, text, sender='user-a'):
         prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
 
 
+def test_buttons_disabled_preserves_real_identity_storage_service_boundary():
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    async def run():
+        plugin = Plugin()
+        plugin.get_config = lambda: {'qq_cards_buttons': False}
+        plugin.service = SimpleNamespace(run_tool=Mock())
+        listener = SafeIdentityCaptureListener(); listener.plugin = plugin
+        listener._run_with_user_storage = AsyncMock(return_value={'success': False, 'msg': 'synthetic storage service reached'})
+        await listener.initialize()
+        ctx = context(90, 'yuketang login')
+        result = await listener._yuketang_login.process(ctx, ctx.event.text_message, 'user-a')
+        assert result == 'synthetic storage service reached'
+        listener._run_with_user_storage.assert_awaited_once()
+    asyncio.run(run())
+
+
 def test_credentials_confirmed_privately_encrypted_and_not_cross_user():
     async def run():
         plugin = Plugin()

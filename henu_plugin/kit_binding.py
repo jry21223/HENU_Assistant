@@ -13,7 +13,6 @@ import time
 import unicodedata
 import uuid
 
-from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
 from henu_plugin.qq_cards import reply_card
 from langbot_plugin.entities.io.errors import ActionCallError
 from henu_mcp.core.secure_storage import encrypt_value, decrypt_value
@@ -58,6 +57,18 @@ class KitBindingCoordinator:
         self.listener = listener
         self.locks = {}
         self.watchers = {}
+
+    async def cancel_pending(self, key, token):
+        async with self.locks.setdefault(key, asyncio.Lock()):
+            pending = await self._read(key)
+            if not pending or pending.get('token') != token or pending.get('terminal'):
+                return False
+            pending.update(terminal=True, cancelled=True)
+            await self._save(key, pending)
+            watcher = self.watchers.pop(key, None)
+            if watcher is not None:
+                watcher.cancel()
+            return True
 
     async def _get_optional_storage(self, key):
         try:
@@ -530,6 +541,7 @@ class KitBindingCoordinator:
                     reply_result = await self._reply(
                         ctx,
                         "解绑后，Bot 后续操作不再使用此 HENU KIT 账号。请在下一条私聊回复“确认”（五分钟内有效）。",
+                        button_pending=pending,
                     )
                     pending["confirmation_receipt"] = self._reply_receipt(
                         reply_result, require_ref_idx=False
@@ -601,6 +613,7 @@ class KitBindingCoordinator:
                     pending = await self._read(key)
                     if (
                         not pending
+                        or pending.get('terminal')
                         or pending.get("request_id") != request_id
                         or pending.get("previewed")
                         or pending.get("expires_at", 0) <= time.time()
@@ -618,6 +631,7 @@ class KitBindingCoordinator:
                             "即将绑定 HENU KIT："
                             + self._name(result)
                             + "。请核对，确认是本人账号后引用这条提示回复“确认”。",
+                            button_pending=pending,
                         )
                         pending["previewed"] = True
                         pending["preview_query_id"] = ctx.query_id
@@ -710,6 +724,7 @@ class KitBindingCoordinator:
                     "即将绑定 HENU KIT："
                     + self._name(result)
                     + "。请核对，确认是本人账号后引用这条提示回复“确认”。",
+                    button_pending=pending,
                 )
                 pending["previewed"] = True
                 pending["preview_query_id"] = ctx.query_id
@@ -1050,8 +1065,8 @@ class KitBindingCoordinator:
         )
         return cleaned or "当前账号"
 
-    async def _reply(self, ctx, text):
-        return await reply_card(ctx, "HENU KIT 绑定", text, plugin=self.listener.plugin)
+    async def _reply(self, ctx, text, *, button_pending=None):
+        return await reply_card(ctx, "HENU KIT 绑定", text, plugin=self.listener.plugin, button_pending=button_pending)
 
     async def _stop_reply(self, ctx, text):
         ctx.prevent_default()

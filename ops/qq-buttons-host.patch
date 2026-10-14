@@ -1,0 +1,23 @@
+--- a/pkg/platform/sources/qqofficial.py
++++ b/pkg/platform/sources/qqofficial.py
+@@ -303,6 +303,10 @@
+         message: platform_message.MessageChain,
+         quote_origin: bool = False,
+     ):
++        from .henu_qq_buttons import try_reply_buttons
++        handled, receipt = await try_reply_buttons(self, message_source, message)
++        if handled:
++            return receipt
+         from .henu_cards import try_reply_card
+         if await try_reply_card(self, message_source, message):
+             return
+@@ -1023,6 +1027,9 @@
+             data.resolved.button_data  what we set as ``action.data``
+             data.resolved.button_id    ``id`` field on the button row
+         """
++        from .henu_qq_buttons import handle_interaction
++        if await handle_interaction(self, event_data, ws_event_id):
++            return
+         import langbot_plugin.api.entities.builtin.provider.session as provider_session
+ 
+         if self.ap is not None:

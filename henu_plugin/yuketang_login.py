@@ -6,7 +6,6 @@ import json
 import shlex
 import time
 
-from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
 from henu_plugin.qq_cards import reply_card
 from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
 
@@ -100,6 +99,29 @@ class YuketangLoginCoordinator:
                 self.tasks = {key: value for key, value in self.tasks.items() if not value.done()}
 
     async def process(self, ctx, text, sender):
+        if not hasattr(self, 'pending_locks'):
+            self.pending_locks = {}
+        async with self.pending_locks.setdefault(sender, asyncio.Lock()):
+            return await self._process_locked(ctx, text, sender)
+
+    async def cancel_pending(self, sender, token):
+        active = self.users.get(sender)
+        if active is not None and not active.done():
+            return False
+        if not hasattr(self, 'pending_locks'):
+            self.pending_locks = {}
+        async with self.pending_locks.setdefault(sender, asyncio.Lock()):
+            key = f'user:{sender}:yuketang_pending_credentials'
+            raw = await self.listener.plugin.get_plugin_storage(key)
+            if not raw:
+                return False
+            pending = json.loads(decrypt_value(raw.decode() if isinstance(raw, bytes) else raw))
+            if pending.get('token') != token:
+                return False
+            await self.listener.plugin.set_plugin_storage(key, b'')
+            return True
+
+    async def _process_locked(self, ctx, text, sender):
         plugin = self.listener.plugin
         key = f'user:{sender}:yuketang_pending_credentials'
         parts = shlex.split(text)
@@ -110,6 +132,8 @@ class YuketangLoginCoordinator:
                 if isinstance(raw, bytes):
                     raw = raw.decode('utf-8')
                 pending = json.loads(decrypt_value(str(raw)))
+                if pending.get('bot') and pending['bot'] != str(await ctx.get_bot_uuid() or ''):
+                    return '请回到原机器人私聊确认雨课堂绑定，本次未执行。'
                 command = pending['command']
                 check = validate_pending_operation(pending, token=parts[2], storage_key=sender,
                     canonical_command=command, query_id=ctx.query_id)
@@ -126,6 +150,8 @@ class YuketangLoginCoordinator:
                 pending = create_pending_operation(storage_key=sender, canonical_command=text,
                                                    query_id=ctx.query_id)
                 pending['conversation'] = conversation_context(ctx.event)
+                if callable(getattr(ctx, 'get_bot_uuid', None)):
+                    pending['bot'] = str(await ctx.get_bot_uuid() or '')
                 await plugin.set_plugin_storage(key, encrypt_value(json.dumps(pending)).encode())
                 return ('请先在雨课堂设置密码，再使用雨课堂绑定手机号和该密码登录；不是学校 IDS 密码。'
                         '将保存并向雨课堂桥服务传递你的凭据；账号密码绑定确认后将验证登录。'

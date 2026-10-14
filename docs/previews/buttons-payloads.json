@@ -1,0 +1,202 @@
+{
+  "notice": "合成示意，非真实 QQ 截图；无个人信息，未发送 QQ 消息。",
+  "cards": [
+    {
+      "name": "查询 · 只读下一步",
+      "markdown": "# 河大助手 · 我的课表\n\n**已完成**\n\n**当天课程 · 1 项**\n- **示例课程 A**\n  时间：14:00–15:40 · 位置：示例教学楼 101 · 状态：待上课\n\n**下一步**\n可发送 help 查看当前功能和命令。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "next-0",
+                  "render_data": {
+                    "label": "当前课程",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "schedule now",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：schedule now"
+                  }
+                },
+                {
+                  "id": "next-1",
+                  "render_data": {
+                    "label": "本周课表",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "schedule week",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：schedule week"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "待确认 · 本人选择",
+      "markdown": "# 河大助手 · 座位预约\n\n**待本人确认 · 尚未提交**\n\n**日期**：2026-10-15\n**位置**：示例图书馆 · 二层\n**时段**：14:00–18:00\n座位：示例 018 号\n本次尚未提交，5 分钟内有效。\n\n**下一步**\n核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "confirm-ABCDEFGHIJKLMNOPQRSTUVWX",
+                  "render_data": {
+                    "label": "确认",
+                    "visited_label": "已选择确认",
+                    "style": 1
+                  },
+                  "action": {
+                    "type": 1,
+                    "data": "henu-btn:v1:operation:confirm:ABCDEFGHIJKLMNOPQRSTUVWX",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "unsupport_tips": "请使用卡片内的文字提示继续。"
+                  },
+                  "group_id": "ABCDEFGHIJKLMNOPQRSTUVWX"
+                },
+                {
+                  "id": "cancel-ABCDEFGHIJKLMNOPQRSTUVWX",
+                  "render_data": {
+                    "label": "取消",
+                    "visited_label": "已选择取消",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 1,
+                    "data": "henu-btn:v1:operation:cancel:ABCDEFGHIJKLMNOPQRSTUVWX",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "unsupport_tips": "请使用卡片内的文字提示继续。"
+                  },
+                  "group_id": "ABCDEFGHIJKLMNOPQRSTUVWX"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "取消 · 不执行预约",
+      "markdown": "# 河大助手 · 按钮操作\n\n**已取消 · 尚未提交**\n\n待确认操作已取消，尚未提交。\n已完成的操作不受影响。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "confirm-ABCDEFGHIJKLMNOPQRSTUVWX",
+                  "render_data": {
+                    "label": "确认",
+                    "visited_label": "已选择确认",
+                    "style": 1
+                  },
+                  "action": {
+                    "type": 1,
+                    "data": "henu-btn:v1:operation:confirm:ABCDEFGHIJKLMNOPQRSTUVWX",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "unsupport_tips": "请使用卡片内的文字提示继续。"
+                  },
+                  "group_id": "ABCDEFGHIJKLMNOPQRSTUVWX"
+                },
+                {
+                  "id": "cancel-ABCDEFGHIJKLMNOPQRSTUVWX",
+                  "render_data": {
+                    "label": "取消",
+                    "visited_label": "已选择取消",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 1,
+                    "data": "henu-btn:v1:operation:cancel:ABCDEFGHIJKLMNOPQRSTUVWX",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "unsupport_tips": "请使用卡片内的文字提示继续。"
+                  },
+                  "group_id": "ABCDEFGHIJKLMNOPQRSTUVWX"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "disabled": true
+    },
+    {
+      "name": "过期 · 拒绝旧操作",
+      "markdown": "# 河大助手 · 按钮操作\n\n**已过期或失效 · 请重新核验**\n\n按钮已过期，本次未执行。\n请重新发起并核对最新预览。",
+      "keyboard": {
+        "content": {
+          "rows": [
+            {
+              "buttons": [
+                {
+                  "id": "next-0",
+                  "render_data": {
+                    "label": "使用帮助",
+                    "style": 0
+                  },
+                  "action": {
+                    "type": 2,
+                    "data": "help",
+                    "permission": {
+                      "type": 0,
+                      "specify_user_ids": [
+                        "preview-user"
+                      ]
+                    },
+                    "enter": true,
+                    "reply": false,
+                    "unsupport_tips": "请直接发送：help"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

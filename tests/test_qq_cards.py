@@ -43,6 +43,53 @@ def test_empty_failed_unbound_confirmation_and_partial_commit_are_distinct():
         assert expected in result_card(source).pages()[0]
 
 
+def test_rain_status_leads_with_disabled_summary_and_never_promotes_write_commands():
+    from henu_plugin import yuketang_config
+    source = yuketang_config.build_status_result({})
+    source['bridge'] = {'status': 'unverified', 'monitoring_state': 'unverified'}
+    source['next_commands'] = ['yuketang config show', 'yuketang lesson set --auto-answer on']
+    card = result_card(source, 'yuketang_status')
+    page = card.pages()[0]
+    assert card.status == '监听未启用'
+    assert len(card.pages()) == 1
+    assert '当前没有启用雨课堂监听' in page
+    assert '自动答题' not in page and '自动进班=' not in page
+    assert 'yuketang ' not in page
+    assert '--auto-answer' not in page
+    assert '未核验远端监听状态' in page
+    assert '点击' not in page
+
+
+def test_rain_enabled_setting_is_distinct_from_verified_running():
+    from henu_plugin import yuketang_config
+    config = yuketang_config.sanitize_config({})
+    config['enabled'] = True
+    source = yuketang_config.build_status_result(config)
+    source['bridge'] = {'status': 'ok', 'monitoring_state': 'unverified'}
+    assert result_card(source, 'yuketang_status').status == '已启用配置 · 运行未核验'
+    source['bridge']['monitoring_state'] = 'running'
+    assert result_card(source, 'yuketang_status').status == '监听运行中'
+
+
+def test_query_next_step_is_human_readable_without_a_suggested_write():
+    card = result_card({'success': True, 'seats': [], 'next_commands': ['help library reserve', 'library reserve --seat-no 18']}, 'library_query')
+    assert 'library ' not in card.next_step
+    assert '--seat' not in card.next_step
+
+
+def test_native_pagination_has_button_copy_and_keeps_plain_fallback():
+    from langbot_plugin.api.entities.builtin.platform import message as pm
+    if not hasattr(pm, 'HenuMarkdown'):
+        return  # Older SDK keeps its existing text-only interface.
+    from henu_plugin.qq_buttons import command_keyboard
+    text = PREFIX + '课表\n\n第 1/2 页 · 回复“下一页”“上一页”或“卡片第 N 页”'
+    keyboard = command_keyboard(('bot', 'person', 'alice', 'alice'), [('下一页', '卡片翻页 ABCDEFGHIJKLMNOPQRSTUVWX 2')])
+    component = card_chain(text, keyboard=keyboard)[0]
+    assert '点击下方按钮翻页' in component.markdown
+    assert '回复“下一页”' not in component.markdown
+    assert '回复“下一页”' in component.text
+
+
 def test_paging_is_scoped_and_expires(monkeypatch):
     cache = CardCache()
     now = [1.0]

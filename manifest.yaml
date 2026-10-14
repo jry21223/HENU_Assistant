@@ -13,7 +13,16 @@ metadata:
     zh_Hans: 河大校园助手
   icon: assets/01BA54CCD777C196C1826E2478DC03DB.jpg
 spec:
-  config: []
+  config:
+    - name: qq_cards_buttons
+      type: boolean
+      default: false
+      label:
+        en_US: QQ native buttons
+        zh_Hans: QQ 原生按钮
+      description:
+        en_US: Enable only after verifying bot keyboard capability and installing the reviewed host bridge.
+        zh_Hans: 核实机器人键盘能力并安装配套主机桥后启用。
   components:
     EventListener:
       fromDirs:

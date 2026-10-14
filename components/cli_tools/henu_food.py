@@ -141,12 +141,14 @@ class HenuFood(Tool):
         )
         return result
 
-    async def receive_message(self, ctx):
+    async def receive_message(self, ctx, *, button_action=None):
         event = ctx.event
         chain = getattr(getattr(event, "message_chain", None), "root", [])
         text = "".join(
             item.text for item in chain if isinstance(item, pm.Plain)
         ).strip()
+        if button_action:
+            text = CONFIRM if button_action['decision'] == 'confirm' else CANCEL
         if page_request_text(chain):
             return  # Read-only paging must not dirty a pending Food draft.
         kind = getattr(event.launcher_type, "value", event.launcher_type)
@@ -191,7 +193,8 @@ class HenuFood(Tool):
                     error = str(exc)
             store = FoodDrafts()
             reply, claim = await asyncio.to_thread(
-                store.receive, scope, source, stamp, ctx.query_id, text, images, error
+                store.receive, scope, source, stamp, ctx.query_id, text, images, error,
+                expected_draft=(button_action['pending_token'], button_action['revision']) if button_action else None,
             )
             await ctx.set_query_var("_henu_food_source", source)
             if claim:
@@ -247,7 +250,15 @@ class HenuFood(Tool):
             await asyncio.to_thread(FoodDrafts().delivered, draft_scope, source, text)
         if owner:
             cache(self.plugin).put(owner, pages, on_read=delivered)
-        await send(card_chain(pages[0]))
+            from henu_plugin.qq_buttons import enabled, register_pending, pending_keyboard
+            if enabled(self.plugin):
+                pending = await asyncio.to_thread(FoodDrafts().button_snapshot, draft_scope)
+                action = await register_pending(self.plugin, owner, 'food', draft_scope, pending, mode='command')
+                # Put confirmation on the last page; server-side delivery of all
+                # pages is still required, even if a user jumps directly here.
+                cache(self.plugin).controls.setdefault(owner, {})[pages[-1]] = pending_keyboard(action, owner[3])
+        keyboard = cache(self.plugin).keyboard(owner, pages[0], self.plugin) if owner else None
+        await send(card_chain(pages[0], keyboard=keyboard))
         if owner:
             await cache(self.plugin).delivered(owner, pages[0])
 
