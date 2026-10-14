@@ -28,6 +28,7 @@ from henu_mcp.core.course_schedule import (
     run_fetch,
     save_json,
 )
+from henu_mcp.core.kingo_auth import KINGO_WARNING
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
     DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
@@ -96,6 +97,16 @@ _SEMINAR_SIGNIN_TASK_LOCK = threading.Lock()
 _SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
 _SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
+PREFERENCE_KEYS = (
+    "library_location",
+    "library_seat_no",
+    "library_start_time",
+    "library_end_policy",
+    "empty_classroom_campus_code",
+    "empty_classroom_building_code",
+    "empty_classroom_term_code",
+)
+LIBRARY_END_POLICIES = {"ask", "server_full_slot"}
 
 # 尝试导入校园核心模块
 HenuCampusBot = None
@@ -601,6 +612,39 @@ def _resolve_library_defaults() -> tuple[str, str]:
         or ""
     ).strip()
     return location, seat_no
+
+
+def _preferences_snapshot() -> dict[str, str]:
+    profile = _effective_profile()
+    location, seat_no = _resolve_library_defaults()
+    return {
+        "library_location": location,
+        "library_seat_no": seat_no,
+        "library_start_time": str(profile.get("library_start_time") or "").strip(),
+        "library_end_policy": str(profile.get("library_end_policy") or "ask").strip(),
+        "empty_classroom_campus_code": str(
+            profile.get("empty_classroom_campus_code") or ""
+        ).strip(),
+        "empty_classroom_building_code": str(
+            profile.get("empty_classroom_building_code") or ""
+        ).strip(),
+        "empty_classroom_term_code": str(
+            profile.get("empty_classroom_term_code") or ""
+        ).strip(),
+    }
+
+
+def _clear_profile_fields(keys: list[str]) -> None:
+    profile = _effective_profile()
+    aliases = {
+        "library_location": ("location",),
+        "library_seat_no": ("seat_no",),
+    }
+    for key in keys:
+        profile.pop(key, None)
+        for alias in aliases.get(key, ()):
+            profile.pop(alias, None)
+    save_encrypted_profile(PROFILE_FILE, profile)
 
 
 def _parse_csv_text(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
@@ -1464,8 +1508,30 @@ def _load_xk_cookies() -> dict[str, Any]:
 
 
 def _save_xk_cookies(cookies: dict[str, Any]) -> None:
-    save_json(COOKIE_FILE, cookies)
-    _save_cas_cookies(cookies)
+    mode = str(cookies.get("_auth_mode") or "")
+    persisted = cookies
+    if mode == "xk_kingo":
+        persisted = {
+            key: value
+            for key, value in cookies.items()
+            if key not in _extract_ids_cas_cookies(cookies)
+        }
+    save_json(COOKIE_FILE, persisted)
+    if mode == "ids_cas":
+        _save_cas_cookies(cookies)
+
+
+def _saved_xk_auth_info() -> dict[str, Any]:
+    mode = str(load_json(COOKIE_FILE).get("_auth_mode") or "")
+    return {
+        "mode": mode,
+        "degraded": mode == "xk_kingo",
+        "error_code": "",
+        "message": "已保存登录态" if mode else "尚无已保存的认证模式",
+        "warning": KINGO_WARNING if mode == "xk_kingo" else "",
+        "ids_error_code": "",
+        "ids_message": "",
+    }
 
 
 def _set_library_login_error(message: str) -> None:
@@ -1733,15 +1799,27 @@ def save_account(
     sid = str(student_id or "").strip()
     pwd = str(password or "")
     if not sid or not pwd:
-        return {"success": False, "msg": "student_id/password 不能为空"}
+        return {
+            "success": False,
+            "code": "missing_credentials",
+            "msg": "student_id/password 不能为空",
+        }
 
     context: dict[str, Any] = {}
+    auth: dict[str, Any] = _saved_xk_auth_info()
     if verify_login:
         client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
         if not client.login():
-            return {"success": False, "msg": "登录失败，账号或密码可能错误"}
+            auth_info = client.get_auth_info()
+            return {
+                "success": False,
+                "msg": client.auth_result.message,
+                "code": str(auth_info.get("error_code") or "login_failed"),
+                "auth": auth_info,
+            }
         _save_xk_cookies(client.get_cookies())
         context = client.fetch_user_context()
+        auth = client.get_auth_info()
 
     fields: dict[str, Any] = {"student_id": sid, "password": pwd}
     if str(library_location or "").strip():
@@ -1753,6 +1831,7 @@ def save_account(
         "success": True,
         "msg": "账号已保存",
         "account": _mask_profile(_effective_profile()),
+        "auth": auth,
         "context": {
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
@@ -1784,7 +1863,8 @@ def check_login(
 
     return {
         "success": ok,
-        "msg": "登录成功" if ok else "登录失败",
+        "msg": "登录成功" if ok else client.auth_result.message,
+        "auth": client.get_auth_info(),
         "login_id": context.get("login_id", ""),
         "user_type": context.get("user_type", ""),
         "current_xn": context.get("current_xn", ""),
@@ -2019,7 +2099,7 @@ def _library_seats_impl(
     location: str = "",
     area_id: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
 ) -> dict[str, Any]:
     """
@@ -2035,6 +2115,9 @@ def _library_seats_impl(
 
     target_location = str(location or profile.get("library_location", "")).strip()
     target_area_id = str(area_id or "").strip()
+    query_start_time = str(
+        preferred_time or profile.get("library_start_time") or "08:00"
+    ).strip()
     if not target_area_id and not target_location:
         return {"success": False, "msg": "请提供 location 或 area_id，或在 setup_account 中设置默认图书馆区域", "seats": []}
 
@@ -2046,7 +2129,7 @@ def _library_seats_impl(
         location_name=target_location,
         area_id=target_area_id,
         target_date=str(target_date or ""),
-        preferred_time=str(preferred_time or "08:00"),
+        preferred_time=query_start_time,
         preferred_end_time=str(preferred_end_time or ""),
     )
     _save_library_cookies(bot.get_cookies())
@@ -2057,12 +2140,84 @@ def _library_seats_impl(
     return result
 
 
+def _validate_library_reservation_request(
+    *,
+    target_date: str,
+    preferred_time: str,
+    preferred_end_time: str,
+    end_policy: str,
+) -> dict[str, Any] | None:
+    day = str(target_date or "").strip()
+    start = str(preferred_time or "").strip()
+    end = str(preferred_end_time or "").strip()
+    policy = str(end_policy or "").strip().lower()
+
+    if not day:
+        return {
+            "success": False,
+            "code": "missing_target_date",
+            "msg": "预约写操作必须由用户明确提供 target_date（YYYY-MM-DD），不能默认明天",
+        }
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return {
+            "success": False,
+            "code": "invalid_target_date",
+            "msg": "target_date 必须为有效的 YYYY-MM-DD 日期，不能使用“明天”等相对词",
+        }
+    if not start:
+        return {
+            "success": False,
+            "code": "missing_preferred_time",
+            "msg": "预约写操作必须由用户明确提供 preferred_time（HH:MM）",
+        }
+    if not _is_hhmm(start):
+        return {
+            "success": False,
+            "code": "invalid_preferred_time",
+            "msg": "preferred_time 必须为 HH:MM；“随便”等自然语言不是时间，不能映射为 12:00",
+        }
+    if end and not _is_hhmm(end):
+        return {
+            "success": False,
+            "code": "invalid_preferred_end_time",
+            "msg": "preferred_end_time 必须为 HH:MM",
+        }
+    if end and _to_minutes(start) >= _to_minutes(end):
+        return {
+            "success": False,
+            "code": "invalid_time_range",
+            "msg": "preferred_time 必须早于 preferred_end_time",
+        }
+    if policy and policy not in LIBRARY_END_POLICIES:
+        return {
+            "success": False,
+            "code": "invalid_end_policy",
+            "msg": "end_policy 仅支持 ask/server_full_slot",
+        }
+    if not end and not policy:
+        return {
+            "success": False,
+            "code": "missing_end_strategy",
+            "msg": "请明确提供 preferred_end_time，或设置 end_policy=server_full_slot",
+        }
+    if not end and policy == "ask":
+        return {
+            "success": False,
+            "code": "end_time_confirmation_required",
+            "msg": "end_policy=ask：请先向用户确认结束时间，再提交预约",
+        }
+    return None
+
+
 def _library_reserve_impl(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
+    end_policy: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
@@ -2075,6 +2230,15 @@ def _library_reserve_impl(
     重要：不要假装预约成功，必须调用此工具执行真实的预约操作。
     预约结果会返回成功或失败的详细信息。
     """
+    validation_error = _validate_library_reservation_request(
+        target_date=target_date,
+        preferred_time=preferred_time,
+        preferred_end_time=preferred_end_time,
+        end_policy=end_policy,
+    )
+    if validation_error:
+        return validation_error
+
     if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
     
@@ -2090,10 +2254,6 @@ def _library_reserve_impl(
     if not target_location or not target_seat:
         return {"success": False, "msg": "请提供 location/seat_no 或在 setup_account 中设置默认值"}
     
-    # 日期默认为明天
-    if not target_date:
-        target_date = (_now_dt().date() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
     bot = _build_library_bot(sid, pwd)
     if not bot:
         return _library_login_failed()
@@ -2102,7 +2262,7 @@ def _library_reserve_impl(
         target_location,
         target_seat,
         target_date,
-        preferred_time=str(preferred_time or "08:00"),
+        preferred_time=str(preferred_time),
         preferred_end_time=str(preferred_end_time or ""),
         retry_until=str(retry_until or ""),
         retry_interval_seconds=retry_interval_seconds,
@@ -2901,6 +3061,104 @@ def _course_monitor_run_impl(
 # ===== MCP 精简对外工具 =====
 
 
+@mcp.tool()
+def preferences_get() -> dict[str, Any]:
+    """查看当前可配置偏好；不会返回账号密码，也不会触发任何校园系统请求。"""
+    return {
+        "success": True,
+        "msg": "偏好读取成功",
+        "preferences": _preferences_snapshot(),
+    }
+
+
+@mcp.tool()
+def preferences_set(
+    library_location: str = "",
+    library_seat_no: str = "",
+    library_start_time: str = "",
+    library_end_policy: str = "",
+    empty_classroom_campus_code: str = "",
+    empty_classroom_building_code: str = "",
+    empty_classroom_term_code: str = "",
+) -> dict[str, Any]:
+    """
+    设置查询偏好。只保存非空参数；清空旧值必须调用 preferences_clear。
+
+    - library_start_time 必须为 HH:MM。
+    - library_end_policy 仅支持 ask/server_full_slot。
+    - 这些偏好不构成图书馆预约授权；预约仍须显式提供日期、开始时间和结束策略。
+    """
+    values = {
+        "library_location": str(library_location or "").strip(),
+        "library_seat_no": str(library_seat_no or "").strip(),
+        "library_start_time": str(library_start_time or "").strip(),
+        "library_end_policy": str(library_end_policy or "").strip().lower(),
+        "empty_classroom_campus_code": str(empty_classroom_campus_code or "").strip(),
+        "empty_classroom_building_code": str(empty_classroom_building_code or "").strip(),
+        "empty_classroom_term_code": str(empty_classroom_term_code or "").strip(),
+    }
+    if values["library_start_time"] and not _is_hhmm(values["library_start_time"]):
+        return {
+            "success": False,
+            "code": "invalid_library_start_time",
+            "msg": "library_start_time 必须为 HH:MM，例如 08:00",
+        }
+    if (
+        values["library_end_policy"]
+        and values["library_end_policy"] not in LIBRARY_END_POLICIES
+    ):
+        return {
+            "success": False,
+            "code": "invalid_library_end_policy",
+            "msg": "library_end_policy 仅支持 ask/server_full_slot",
+        }
+
+    updates = {key: value for key, value in values.items() if value}
+    if not updates:
+        return {
+            "success": False,
+            "code": "no_preferences_provided",
+            "msg": "至少提供一个非空偏好；清空旧值请调用 preferences_clear",
+        }
+    _save_profile_fields(updates)
+    return {
+        "success": True,
+        "msg": "偏好已更新",
+        "preferences": _preferences_snapshot(),
+        "updated": list(updates),
+    }
+
+
+@mcp.tool()
+def preferences_clear(keys: list[str]) -> dict[str, Any]:
+    """
+    显式清空偏好。keys 只能使用 preferences_get 返回的字段名；不会清除账号密码。
+    """
+    normalized = list(dict.fromkeys(str(key or "").strip() for key in keys))
+    unknown = [key for key in normalized if key not in PREFERENCE_KEYS]
+    if unknown:
+        return {
+            "success": False,
+            "code": "unknown_preference_keys",
+            "msg": "存在不支持的偏好字段",
+            "unknown": unknown,
+            "allowed": list(PREFERENCE_KEYS),
+        }
+    if not normalized:
+        return {
+            "success": False,
+            "code": "no_preference_keys",
+            "msg": "keys 至少包含一个偏好字段",
+        }
+    _clear_profile_fields(normalized)
+    return {
+        "success": True,
+        "msg": "偏好已清空",
+        "preferences": _preferences_snapshot(),
+        "cleared": normalized,
+    }
+
+
 
 
 @mcp.tool()
@@ -3002,10 +3260,19 @@ def setup_account(
     2) 回复时必须基于本次返回中的 success/msg/account 字段，不得凭空补全。
     3) 若调用失败或未调用，必须明确说明未完成，禁止使用完成时态描述结果。
     
-    功能：
-    1) 保存学号和密码到本地
-    2) 验证登录河大教务系统
-    3) 自动校准节次时间
+    登录格式：
+    - student_id：河南大学完整学号，按字符串传入且不要带空格；不是姓名、手机号或 QQ 号。
+    - password：河南大学 IDS 统一身份认证密码；不是 QQ 密码、验证码或短信码。
+    - 示例：setup_account(student_id="你的完整学号", password="你的统一身份认证密码")。
+    - 默认 verify_login=true，会先尝试 IDS CAS；仅凭据提交前确认 IDS 不可用时，才至多降级一次 xk 独立登录。
+    - IDS 凭据一经提交，验证码/额外校验、密码错误、锁定、限流、5xx 或未知状态都会立即停止，绝不二次提交。
+    - verify_login=false 只加密保存账号，不代表已经登录成功，也不会执行节次校准。
+
+    返回：
+    - success=false 时查看 code、msg，以及 auth.error_code/auth.message（如有）。
+    - 认证错误码与其他交付形态一致，包括 additional_verification_required、account_locked、
+      rate_limited、invalid_credentials、auth_state_unknown、ids_unavailable。
+    - auth.mode=ids_cas 表示完整统一认证；xk_kingo 表示降级登录，不能保证图书馆等 IDS 服务。
     
     重要：不要编造账号信息，必须使用用户提供的真实学号和密码调用此工具。
     """
@@ -3020,14 +3287,22 @@ def setup_account(
     if not result.get("success"):
         return result
 
-    calibration: dict[str, Any] = {}
-    if calibrate_period_time:
+    calibration: dict[str, Any] = {
+        "success": False,
+        "skipped": True,
+        "msg": "未请求节次校准",
+    }
+    if calibrate_period_time and verify_login:
         calibration = auto_calibrate_period_time(force=True)
+    elif calibrate_period_time:
+        calibration["msg"] = "verify_login=false，仅保存账号，已跳过节次校准"
 
     return {
         "success": True,
-        "msg": "账号初始化完成",
+        "msg": "账号初始化完成" if verify_login else "账号已保存但尚未验证登录",
+        "verified": bool(verify_login),
         "account": result.get("account", {}),
+        "auth": result.get("auth", {}),
         "login_context": result.get("context", {}),
         "period_time_calibration": calibration,
     }
@@ -3077,7 +3352,7 @@ def library_query(
     target_date: str = "",
     location: str = "",
     area_id: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
 ) -> dict[str, Any]:
     """
@@ -3085,7 +3360,8 @@ def library_query(
 
     view:
     - locations: 图书馆区域列表（可传 target_date 获取指定日期实时可预约区域）
-    - seats: 当前可用座位列表（需传 location 或 area_id，可传 target_date/preferred_time）
+    - seats: 当前可用座位列表（需传 location 或 area_id，可传 target_date/preferred_time；
+      未传 preferred_time 时使用 preferences_set 保存的查询偏好，最后才回退 08:00）
     - current: 当前预约
     - records: 历史预约记录
 
@@ -3295,8 +3571,9 @@ def library_reserve(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
+    end_policy: str = "",
     resource_id: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
@@ -3315,9 +3592,10 @@ def library_reserve(
     - location: 图书馆区域名称（如"一楼东"）
     - seat_no: 座位号（如"001"）
     - resource_id: 资源ID（如 henu:library:seat:...），优先级高于 location/seat_no
-    - target_date: 预约日期（格式：YYYY-MM-DD，默认明天）
-    - preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）
-    - preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）
+    - target_date: 用户明确确认的预约日期（YYYY-MM-DD，必填；不会默认明天）
+    - preferred_time: 用户明确确认的开始时间（HH:MM，必填；“随便”不能映射为时间）
+    - preferred_end_time: 用户明确确认的结束时间（HH:MM）
+    - end_policy: 未提供结束时间时的明确策略；仅 server_full_slot 可直接提交，ask 会要求先追问
     - retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）
     - retry_interval_seconds: 抢约重试间隔秒数（1-60）
     - max_attempts: 最大尝试次数（1-120）
@@ -3343,6 +3621,7 @@ def library_reserve(
         target_date=target_date,
         preferred_time=preferred_time,
         preferred_end_time=preferred_end_time,
+        end_policy=end_policy,
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
@@ -3742,6 +4021,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
         "success": True,
         "server_time": get_server_time(timezone=timezone),
         "account": show_account(),
+        "auth": _saved_xk_auth_info(),
         "period_time_config": get_period_time_config(),
         "library_defaults": {
             "location": _resolve_library_defaults()[0],
@@ -4109,6 +4389,68 @@ def _resolve_campus_and_building(
     }
 
 
+def _resolve_building_in_campus(campus_code: str, building_text: str) -> dict[str, Any]:
+    if not _resource_registry_available:
+        return {
+            "success": False,
+            "code": "building_resolution_unavailable",
+            "msg": "资源 registry 不可用，请显式提供 building_code",
+        }
+    result = resolve_resource(
+        building_text,
+        resource_type="building",
+        campus_code=campus_code,
+        limit=5,
+    )
+    candidates = result.get("candidates", [])
+    if not candidates or candidates[0].get("score", 0) < 0.5:
+        return {
+            "success": False,
+            "code": "building_not_found_in_campus",
+            "msg": f"在校区 {campus_code} 中未找到匹配楼房: '{building_text}'",
+            "candidates": candidates,
+        }
+    parts = str(candidates[0].get("resourceId") or "").split(":")
+    return {
+        "success": True,
+        "building_code": parts[3] if len(parts) >= 4 else "",
+    }
+
+
+def _validate_building_in_campus(client: Any, campus_code: str, building_code: str) -> dict[str, Any] | None:
+    if not building_code:
+        return None
+    if not campus_code:
+        return {
+            "success": False,
+            "code": "building_requires_campus",
+            "msg": "提供 building_code 时必须同时明确 campus_code/campus_text",
+        }
+    try:
+        buildings = client.fetch_buildings(campus_code)
+    except Exception as exc:
+        return {
+            "success": False,
+            "code": "building_validation_failed",
+            "msg": f"无法核验楼栋是否属于校区 {campus_code}: {exc}",
+        }
+    valid_codes = {
+        str(
+            item.get("building_code", "")
+            if isinstance(item, dict)
+            else getattr(item, "building_code", "")
+        ).strip()
+        for item in buildings
+    }
+    if building_code not in valid_codes:
+        return {
+            "success": False,
+            "code": "building_not_in_campus",
+            "msg": f"楼栋 {building_code} 不属于校区 {campus_code}，请重新选择",
+        }
+    return None
+
+
 @mcp.tool()
 def empty_classroom_query(
     view: str = "free",
@@ -4149,6 +4491,8 @@ def empty_classroom_query(
     参数优先级（校区/楼房）：
     - campus_code/building_code 显式传入时优先
     - 否则使用 campus_text/building_text 通过资源 registry 解析
+    - 仅当本次完全没有校区/楼栋输入时，才使用 preferences_set 保存的默认值
+    - 任何 building_code 都会校验是否属于当前 campus_code，禁止跨校区沿用旧楼栋
     - 解析失败时返回候选列表供用户选择
 
     freshness 策略：
@@ -4163,6 +4507,19 @@ def empty_classroom_query(
             "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
         }
 
+    profile = _effective_profile()
+    term_code = str(term_code or profile.get("empty_classroom_term_code") or "").strip()
+    campus_code = str(campus_code or "").strip()
+    building_code = str(building_code or "").strip()
+    campus_text = str(campus_text or "").strip()
+    building_text = str(building_text or "").strip()
+    has_explicit_location = bool(
+        campus_code or building_code or campus_text or building_text
+    )
+    if not has_explicit_location:
+        campus_code = str(profile.get("empty_classroom_campus_code") or "").strip()
+        building_code = str(profile.get("empty_classroom_building_code") or "").strip()
+
     # ── 文本参数解析 ──
     resolution: dict[str, Any] = {}
     if not campus_code and campus_text:
@@ -4173,6 +4530,17 @@ def empty_classroom_query(
         campus_code = resolution["campus_code"]
         if not building_code and resolution.get("building_code"):
             building_code = resolution["building_code"]
+    elif building_text and campus_code and not building_code:
+        resolution = _resolve_building_in_campus(campus_code, building_text)
+        if not resolution.get("success"):
+            return resolution
+        building_code = str(resolution.get("building_code") or "").strip()
+    elif (building_code or building_text) and not campus_code:
+        return {
+            "success": False,
+            "code": "building_requires_campus",
+            "msg": "指定楼栋时必须同时明确校区，不能沿用另一个校区的默认值",
+        }
 
     client = _get_empty_classroom_client()
     if client is None:
@@ -4180,6 +4548,10 @@ def empty_classroom_query(
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
         }
+
+    building_error = _validate_building_in_campus(client, campus_code, building_code)
+    if building_error:
+        return building_error
 
     # ── 无登录态也能查的 view ──
     if view in ("terms", "campuses", "buildings", "classrooms", "types"):

@@ -1,22 +1,25 @@
-# 河大校园助手 MCP 服务器版
+# 河大校园助手 · MCP 服务器版
 
-把河大校园能力暴露为 MCP tools，适合 Cherry Studio 等支持 stdio MCP 的客户端。
+把河南大学校园能力暴露为 **MCP tools**（stdio），适合 Cherry Studio 等支持 MCP 的客户端。
+
+> 同能力的其他形态：[`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)（CLI / Skill）、[`langbot-plugin`](https://github.com/jry21223/HENU_Assistant/tree/langbot-plugin)（QQ 插件）。
 
 ## 安装与诊断
 
 ```bash
 git clone -b mcp-server https://github.com/jry21223/HENU_Assistant.git henu-mcp
 cd henu-mcp
+
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python3 diagnose_mcp.py
 ```
 
-Windows 将激活命令换成：
+也可用：
 
-```cmd
-venv\Scripts\activate
+```bash
+./install.sh
 ```
 
 ## 启动
@@ -27,7 +30,7 @@ python3 mcp_server.py --transport stdio
 ./run.sh
 ```
 
-Cherry Studio 示例：
+### Cherry Studio 配置示例
 
 ```json
 {
@@ -43,68 +46,75 @@ Cherry Studio 示例：
 }
 ```
 
-## 目录结构
-
-- `mcp_server.py`：MCP 启动入口和公开工具门面。
-- `henu_mcp/core/`：课表抓取、清洗、加密存储、选课状态和监控等共享核心。
-- `henu_mcp/tools/`：MCP 工具实现。
-- `henu_mcp/runtime.py`：本地文件路径和 Langbot per-user 路径切换。
-- `campus_core/`：图书馆、研讨室、河宝、空教室、资源映射等底层校园集成。
-
-## 工具
+## 工具一览
 
 | 类别 | 工具 |
 | --- | --- |
-| 账号/系统 | `setup_account`, `system_status` |
+| 账号 / 系统 | `setup_account`, `system_status` |
 | 课表 | `sync_schedule`, `schedule_query` |
 | 选课 | `smart_course_selection`, `smart_course_select`, `course_selection_query`, `course_selection_plan`, `course_selection_submit`, `course_monitor_config`, `course_monitor_once`, `course_monitor_run`, `course_monitor_notify_test` |
 | 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
 | 资源映射 | `resource_registry_query`, `resource_registry_sync` |
 | 图书馆 | `library_query`, `library_reserve`, `library_auto_signin`, `library_cancel` |
-| 空教室 | `empty_classroom_query`, `empty_classroom_sync` |
 | 研讨室 | `seminar_group`, `seminar_query`, `seminar_reserve`, `seminar_signin`, `seminar_cancel` |
 | 河宝社区 | `yunfz_leave_query`, `yunfz_signin_query`, `yunfz_checksleep_query`, `yunfz_activity_query`, `yunfz_collection_query` |
 | 节次校准 | `set_calibration_source` |
 
 ## 常用流程
 
-1. `setup_account` 绑定学号、密码，可保存默认图书馆区域和座位。
-2. 查询前先用 `system_status` 确认服务器时间。
-3. 图书馆预约前先查 `library_query(view="locations")`，可用 `library_query(view="seats")` 查看当前可用座位，预约后用 `library_query(view="current")` 核对。
-4. 空教室能力已支持；查询教室/自习室时用 `empty_classroom_query(view="free")`，不确定校区楼房时先查 `view="campuses"` / `view="buildings"`。
-5. 研讨室按 `filters -> rooms -> detail -> reserve` 查询和预约。
+1. `setup_account` 绑定学号、密码（可保存默认图书馆区域/座位）。  
+2. 涉及「今天 / 现在」时先 `system_status` 对齐服务器时间。  
+3. **图书馆**：`locations` → `seats` → `library_reserve` → `current`。  
+4. **空教室**：`empty_classroom_query(view="free")`；不确定校区/楼房时先 `campuses` / `buildings`。  
+5. **研讨室**：`filters` → `rooms` → `detail` → `seminar_reserve`。  
+6. **选课规划**：用 Excel/JSON + 偏好参数调用 `smart_course_selection`；监控用 `course_monitor_*`（只读）。
 
 ## 给 MCP 客户端 / LLM 的提示
 
-- 用户询问空教室、空闲教室、教室、自习室时，不要回复“系统不支持”，优先调用 `empty_classroom_query`。
-- 涉及“今天/现在/当前”等相对时间时，先调用 `system_status` 确认服务器时间，再把日期/周次/星期/大节传给查询工具。
-- 工具返回较大 JSON 时，最终回复用户应概括 `msg`、`rooms` 或 `data`，不要直接粘贴完整 JSON。
+- 用户问空教室、自习室时，**不要**回复「系统不支持」，优先调用 `empty_classroom_query`。  
+- 相对时间（今天/当前）先 `system_status`，再把具体日期/周次/节次传给查询工具。  
+- 工具返回大 JSON 时，对用户概括 `msg` / `rooms` / `data`，不要整段粘贴。
 
-账号、Cookie 和抓取结果都保存在本地。同一账号会复用本用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等），课表、选课、空教室、图书馆、研讨室、河宝优先免密换取各自业务登录态，失败后再回退密码登录。
+## 目录结构
+
+```text
+mcp_server.py          # 启动入口 + 公开工具门面
+diagnose_mcp.py        # 环境诊断
+henu_mcp/
+  core/                # 课表抓取、清洗、加密存储、选课监控等
+  tools/               # MCP 工具实现
+  runtime.py           # 本地路径 / per-user 路径切换
+campus_core/           # 图书馆、研讨室、河宝、空教室、资源映射、智能选课
+tests/                 # pytest
+```
+
+## 认证与数据
+
+- 账号、Cookie、抓取结果**仅本地保存**。  
+- 登录固定双通道：  
+  1. 优先 IDS CAS（`CASTGC` / `TGC`），可跨服务 SSO；  
+  2. IDS / Service 跳转 / 网络 / 验证码风控失败时，**只自动尝试一次** xk Kingo；  
+  3. 不识别验证码、不绕过风控、不循环重试。  
+- **IDS**：课表、选课、空教室、图书馆、研讨室、河宝可复用统一登录态。  
+- **Kingo（降级）**：主要保证 xk 相关能力；不生成/覆盖 CAS Cookie；其他服务仍需 IDS。  
+- 账号初始化、登录检查、课表同步、系统状态会返回 `auth`：`mode`（`ids_cas` / `xk_kingo`）、`degraded`、`error_code`、`warning`。
 
 ## 智能选课
 
-本版本包含通用智能选课模块 `campus_core.smart_course_selector`，三种接入形态复用同一套逻辑；同时保留 xk 只读状态查询入口：
+模块：`campus_core.smart_course_selector`（与其他交付形态共用逻辑）。
 
-- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。
-- 按班级筛选班级对应专业课、专业选课班 / 专业公共课、全年级公共课。
-- 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
-- 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
-- `course_selection_query` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
-- `course_monitor_*` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
+- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。  
+- 按班级筛选专业课 / 专业公共课 / 全年级公共课。  
+- 偏好规划：早八、集中上课天数、避免晚课、是否允许未排时间。  
+- 输出结构：`henu.smart_course_selection.v1`；`plans[].selection_actions` 可作为后续提交器的 dry-run 输入。  
+- `course_selection_query`：只读状态，不提交。  
+- `course_monitor_*`：只读余量监控，可飞书提醒；**不会**点击选课/提交/退选。
 
-MCP / Agent Skill 示例：
+## 测试
 
 ```bash
-python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
-python3 henu_cli.py course_monitor_config --config_json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
-python3 henu_cli.py course_monitor_once
-```
-
-Langbot CLI 示例：
-
-```text
-course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
-course filter --excel ./courses.xlsx --class 25软工1
-course schema
+source venv/bin/activate
+pytest
+# 或环境诊断
+python3 diagnose_mcp.py
 ```

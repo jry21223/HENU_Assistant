@@ -132,38 +132,77 @@ class LocationMixin:
         try:
             dt.date.fromisoformat(target_day)
         except ValueError:
-            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "locations": []}
+            return {
+                "success": False,
+                "error_code": "invalid_date",
+                "source": "validation",
+                "is_live": False,
+                "msg": "target_date 格式必须为 YYYY-MM-DD",
+                "locations": [],
+                "total": 0,
+                "returned_count": 0,
+                "truncated": False,
+            }
 
         if not self._is_token_valid() and not self.login():
+            fallback_locations = self.static_locations()
             return self._login_failed_result(
                 {
                     "date": target_day,
-                    "locations": self.static_locations(),
+                    "locations": fallback_locations,
+                    "fallback_locations": fallback_locations,
                     "source": "static_fallback",
                     "is_live": False,
+                    "error_code": "auth_failed",
+                    "total": len(fallback_locations),
+                    "returned_count": len(fallback_locations),
+                    "truncated": False,
                 }
             )
 
         try:
             areas = self._fetch_pick_areas(target_day)
             locations = self._summarize_areas(areas, source="live")
+            if not locations:
+                fallback_locations = self.static_locations()
+                return {
+                    "success": False,
+                    "error_code": "live_empty",
+                    "msg": "图书馆实时区域接口返回空列表，暂不能确认可预约区域",
+                    "date": target_day,
+                    "locations": [],
+                    "fallback_locations": fallback_locations,
+                    "total": 0,
+                    "returned_count": 0,
+                    "truncated": False,
+                    "source": "live_empty",
+                    "is_live": True,
+                }
             return {
                 "success": True,
                 "msg": "操作成功",
                 "date": target_day,
                 "locations": locations,
                 "total": len(locations),
+                "returned_count": len(locations),
+                "truncated": False,
                 "source": "live",
                 "is_live": True,
             }
         except Exception as exc:
+            fallback_locations = self.static_locations()
             return {
                 "success": False,
                 "msg": f"获取实时图书馆区域失败: {exc}",
                 "date": target_day,
-                "locations": self.static_locations(),
-                "source": "static_fallback",
-                "is_live": False,
+                "locations": fallback_locations,
+                "fallback_locations": fallback_locations,
+                "total": len(fallback_locations),
+                "returned_count": len(fallback_locations),
+                "truncated": False,
+                    "source": "static_fallback",
+                    "is_live": False,
+                    "error_code": "query_failed",
             }
 
     @classmethod
@@ -219,4 +258,3 @@ class LocationMixin:
         if areas_error:
             raise RuntimeError(f"获取实时区域列表失败，且配置映射中没有 '{location}': {areas_error}")
         raise RuntimeError(f"区域 '{location}' 未找到，请先查询 locations 确认实时区域名称")
-

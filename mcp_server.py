@@ -15,6 +15,9 @@ show_account = account.show_account
 check_login = account.check_login
 system_status = account.system_status
 get_server_time = account.get_server_time
+preferences_get = account.preferences_get
+preferences_set = account.preferences_set
+preferences_clear = account.preferences_clear
 
 sync_schedule = schedule.sync_schedule
 fetch_schedule = schedule.fetch_schedule

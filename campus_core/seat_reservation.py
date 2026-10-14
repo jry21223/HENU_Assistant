@@ -355,14 +355,44 @@ class SeatReservationMixin:
         try:
             dt.date.fromisoformat(target_day)
         except ValueError:
-            return {"success": False, "msg": "target_date 格式必须为 YYYY-MM-DD", "seats": []}
+            return {
+                "success": False,
+                "error_code": "invalid_date",
+                "source": "validation",
+                "msg": "target_date 格式必须为 YYYY-MM-DD",
+                "seats": [],
+                "total_count": 0,
+                "available_count": 0,
+                "returned_count": 0,
+                "truncated": False,
+            }
 
         location = str(area_id or location_name or "").strip()
         if not location:
-            return {"success": False, "msg": "请提供 location 或 area_id", "seats": []}
+            return {
+                "success": False,
+                "error_code": "missing_location",
+                "source": "validation",
+                "msg": "请提供 location 或 area_id",
+                "seats": [],
+                "total_count": 0,
+                "available_count": 0,
+                "returned_count": 0,
+                "truncated": False,
+            }
 
         if not self._is_token_valid() and not self.login():
-            return self._login_failed_result({"seats": []})
+            return self._login_failed_result(
+                {
+                    "seats": [],
+                    "error_code": "auth_failed",
+                    "source": "library_auth",
+                    "total_count": 0,
+                    "available_count": 0,
+                    "returned_count": 0,
+                    "truncated": False,
+                }
+            )
 
         try:
             resolved_area_id, area_name = self._resolve_area(location, target_day)
@@ -376,7 +406,17 @@ class SeatReservationMixin:
             )
             seats = self._query_seats(plan["seat_query"])
         except Exception as exc:
-            return {"success": False, "msg": f"查询可用座位失败: {exc}", "seats": []}
+            return {
+                "success": False,
+                "error_code": "query_failed",
+                "source": "library_api",
+                "msg": f"查询可用座位失败: {exc}",
+                "seats": [],
+                "total_count": 0,
+                "available_count": 0,
+                "returned_count": 0,
+                "truncated": False,
+            }
 
         status_counts: dict[str, int] = {}
         available_seats: list[dict[str, Any]] = []
@@ -396,6 +436,8 @@ class SeatReservationMixin:
             "time_window": plan.get("time_window", ""),
             "total_count": len(seats),
             "available_count": len(available_seats),
+            "returned_count": len(available_seats),
+            "truncated": False,
             "seats": available_seats,
             "status_counts": status_counts,
         }

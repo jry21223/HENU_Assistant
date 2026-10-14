@@ -44,7 +44,7 @@ def test_all_cas_clients_inject_the_shared_jar_on_the_ids_domain() -> None:
             for name in CAS_COOKIE_NAMES
         )
 
-    assert academic.get_cookies() == shared
+    assert academic.get_cookies() == {**shared, "JSESSIONID": "academic-private"}
     assert library.get_cas_cookies() == shared
     assert hebao.get_cas_cookies() == shared
     assert library.token == "library-token"
