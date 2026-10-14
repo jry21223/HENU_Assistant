@@ -1,6 +1,10 @@
-# 河大校园助手 Langbot 插件版
+# 河大校园助手 · Langbot 插件版
 
-将校园助手封装为 Langbot 插件，对外主要暴露统一 CLI 工具 `henu_cli`，并按 QQ 账号隔离保存数据。
+将校园助手封装为 **Langbot 插件**，对外主要暴露统一 CLI 工具 `henu_cli`，并按 **QQ 账号隔离** 保存数据。
+
+> 同能力的其他形态：[`mcp-server`](https://github.com/jry21223/HENU_Assistant/tree/mcp-server)、[`agent-skill`](https://github.com/jry21223/HENU_Assistant/tree/agent-skill)。
+
+当前版本见 `manifest.yaml`（如 `2.0.2`）。
 
 ## 安装与运行
 
@@ -20,19 +24,17 @@ cp .env.example .env
 
 ## CI 自动发布
 
-当前仓库已配置 GitHub Actions（`release-lbp.yaml`）：
+GitHub Actions（`release-lbp.yaml`）：
 
-- 当你推送形如 `v<version>` 的 tag 时，Actions 会自动执行 `lbp build`。
-- 打包后的 `dist/*.lbpkg` 会自动上传到对应 tag 的 GitHub Release。
-
-发布示例：
+- 推送 `v<version>` tag 时自动 `lbp build`
+- 将 `dist/*.lbpkg` 上传到对应 GitHub Release
 
 ```bash
-git tag v1.2.15
-git push origin v1.2.15
+git tag v2.0.2
+git push origin v2.0.2
 ```
 
-## 常用命令
+## 常用 CLI
 
 ```text
 help
@@ -41,7 +43,11 @@ account set --student-id 20230001 --password 'secret'
 schedule now
 schedule day --date 2026-03-30
 course status
-course plan --excel ./courses.xlsx --class 25软工1
+course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
+course filter --excel ./courses.xlsx --class 25软工1
+course schema
+course monitor config --config-json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
+course monitor once
 empty_classroom query --week 1 --day-of-week 1 --period 1 --building-text 十号楼
 empty_classroom query --view occupancy --classroom-text 十号楼101
 resource search 十号楼101
@@ -54,54 +60,64 @@ seminar signin --auto-scan
 
 ## 数据隔离
 
-插件按当前发消息的 QQ 身份选择存储目录：
+按当前发消息的 QQ 身份选择存储目录：
 
-- 群聊优先使用 `sender_id`
-- 私聊回退到 `launcher_id`
-- 用户数据位于 `data/users/<qq>/`
-- 共享节次校准文件位于 `data/shared/`
+| 场景 | 规则 |
+| --- | --- |
+| 群聊 | 优先 `sender_id` |
+| 私聊 | 回退 `launcher_id` |
+| 用户数据 | `data/users/<qq>/` |
+| 共享配置 | `data/shared/` |
 
-用户目录会保存账号配置、该 QQ 用户的 IDS CAS Cookie jar（`CASTGC`/`TGC` 等）、业务 Cookie/Token、研讨室签到任务、选课监控配置和课表抓取结果。同一用户的课表、选课、空教室、图书馆、研讨室、河宝会优先复用该用户的 IDS CAS 登录态，失败后才回退密码登录。
+**用户目录**：账号配置、该 QQ 的 IDS CAS Cookie jar、业务 Cookie/Token、研讨室签到任务、选课监控配置、课表抓取结果。  
 
-共享目录只保存公共校园配置和缓存，例如节次时间、节次校准状态和空教室公共请求参数；`shared:*` Storage key 不保存密码、`CASTGC`、业务 Token 或个人 Cookie。
+**共享目录**：公共校园配置与缓存（节次时间、校准状态、空教室公共参数等）。  
+`shared:*` Storage key **不**保存密码、`CASTGC`、业务 Token 或个人 Cookie。
 
-## 目录
+### 认证
 
-- `manifest.yaml`：插件清单
-- `main.py`：插件入口
-- `components/cli_tools/`：对 LLM 暴露的统一 CLI Tool
-- `henu_plugin/service.py`：工具分发和存储上下文
-- `henu_plugin/cli.py`：CLI 命令解析和帮助
-- `mcp_server.py`：兼容 MCP/Agent 公共工具函数的薄门面
-- `henu_mcp/`：复用的校园业务逻辑和运行时路径切换
-- `campus_core/`：底层校园集成模块
+- 优先 IDS；失败时仅自动一次 xk Kingo 降级；不识别验证码、不循环重试。  
+- IDS 可供课表、选课、空教室、图书馆、研讨室、河宝复用。  
+- Kingo 主要保证 xk 能力，不生成/覆盖 CAS Jar；其他服务仍需 IDS。  
+- 账号初始化 / 登录检查 / 课表同步 / 系统状态通过 `auth` 返回模式、降级状态、错误码与能力警告。
 
-账号与 Cookie 只保存在本地。插件版不会启动后台研讨室自动签到线程，需要时调用 `seminar signin --auto-scan` 或指定 `record_id`。
+## 目录结构
+
+```text
+manifest.yaml                 # 插件清单
+main.py                       # 插件入口
+components/cli_tools/         # 对 LLM 暴露的统一 CLI Tool
+henu_plugin/service.py        # 工具分发与存储上下文
+henu_plugin/cli.py            # CLI 解析与帮助
+mcp_server.py                 # 兼容 MCP/Agent 的薄门面
+henu_mcp/                     # 复用业务逻辑与路径切换
+campus_core/                  # 底层校园集成
+tests/                        # pytest
+docs/                         # 设计/计划文档
+```
+
+说明：插件版**不会**启动后台研讨室自动签到线程；需要时调用 `seminar signin --auto-scan` 或指定 `record_id`。
 
 ## 智能选课
 
-本版本包含通用智能选课模块 `campus_core.smart_course_selector`，三种接入形态复用同一套逻辑；同时保留 xk 只读状态查询入口：
+模块：`campus_core.smart_course_selector`（与 MCP / Agent Skill 共用逻辑）。
 
-- 从教务导出的 Excel 或清洗后的 JSON 读取课程选项。
-- 按班级筛选班级对应专业课、专业选课班 / 专业公共课、全年级公共课。
-- 根据偏好规划无冲突课表：早八偏好、集中上课天数、避免晚课、是否允许未排时间。
-- 输出统一结构 `henu.smart_course_selection.v1`，其中 `plans[].selection_actions` 可作为后续自动选课提交器的 dry-run 输入。
-- `course status` 会先走统一认证和 xk frame 菜单入口，只查询选课状态，不提交教务系统。
-- `course monitor` 只读监控指定教学班余量，检测到余量变化时可发飞书提醒；不会点击选课、提交或退选。
-
-MCP / Agent Skill 示例：
-
-```bash
-python3 henu_cli.py smart_course_selection --excel ./courses.xlsx --class 25软工1 --like_early8 --compact_days --target_days 3
-```
-
-Langbot CLI 示例：
+- 从 Excel 或清洗 JSON 读取选项；按班级筛选。  
+- 偏好规划无冲突课表；输出 `henu.smart_course_selection.v1`。  
+- `course status`：只读选课状态，不提交。  
+- `course monitor`：只读余量监控，可飞书提醒；**不会**选课/退选。
 
 ```text
 course plan --excel ./courses.xlsx --class 25软工1 --like-early8 --compact-days --target-days 3
 course filter --excel ./courses.xlsx --class 25软工1
 course schema
 course status
-course monitor config --config-json '{"targets":[{"course_id":"04500142","course_name":"数据结构","keywords":["25网工4"]}]}'
 course monitor once
+```
+
+## 测试
+
+```bash
+.venv/bin/pip install pytest   # 若环境中尚无
+.venv/bin/pytest
 ```

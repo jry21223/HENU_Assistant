@@ -213,10 +213,11 @@ class PluginStorageAdapter:
 
     async def _save_json(self, file_path: Path, storage_key: str) -> None:
         """Save local file content to Storage."""
-        if not file_path.exists():
-            return
         try:
-            data = file_path.read_bytes()
+            # Missing account-scoped files are deletions, not "unchanged".
+            # Persist an empty JSON tombstone so old Storage values cannot be
+            # resurrected on the next request after an account switch.
+            data = file_path.read_bytes() if file_path.exists() else b"{}"
             await self._plugin.set_plugin_storage(storage_key, data)
             logger.debug(f"Saved {len(data)} bytes to Storage: {storage_key}")
         except Exception as e:

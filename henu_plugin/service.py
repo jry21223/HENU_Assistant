@@ -24,8 +24,15 @@ from henu_plugin.cache import (
     get_cache_stats,
     invalidate_account_cache,
     invalidate_schedule_cache,
+    invalidate_user_cache,
 )
-from henu_plugin.cli import build_help_payload, build_next_commands, inspect_cli_command
+from henu_plugin.cli import (
+    build_help_payload,
+    build_next_commands,
+    inspect_cli_command,
+    redact_cli_command,
+    redact_cli_params,
+)
 from henu_plugin.storage_adapter import (
     SHARED_CALIBRATION_FILE,
     SHARED_PERIOD_TIME_FILE,
@@ -52,24 +59,6 @@ _CURRENT_USER_PATHS: contextvars.ContextVar["UserStoragePaths | None"] = context
     "henu_current_user_paths",
     default=None,
 )
-
-
-def _run_in_user_storage(
-    paths: "UserStoragePaths | None",
-    func: Callable[..., Any],
-    *args: Any,
-) -> Any:
-    """Execute a sync function under user storage paths.
-
-    This reuses HenuPluginService._activate_user_storage for the actual
-    global-path activation, including the shared _RUNTIME_STATE_LOCK logic.
-    """
-    if paths is None:
-        return func(*args)
-
-    service = HenuPluginService(Path(__file__).resolve().parent)
-    with service._activate_user_storage(paths):
-        return func(*args)
 
 
 def set_current_user_paths(paths: "UserStoragePaths | None") -> None:
@@ -136,6 +125,7 @@ class HenuPluginService:
         self._tool_dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "henu_cli": self._henu_cli,
             "setup_account": self._setup_account,
+            "preferences": self._preferences,
             "sync_schedule": self._sync_schedule,
             "smart_course_selection": self._smart_course_selection,
             "smart_course_select": self._smart_course_select,
@@ -207,6 +197,12 @@ class HenuPluginService:
             account = {}
 
         student_id = _text(account.get("student_id"))
+        login_verification = account.get("login_verification")
+        if not isinstance(login_verification, dict):
+            login_verification = {}
+        last_login_attempt = account.get("last_login_attempt")
+        if not isinstance(last_login_attempt, dict):
+            last_login_attempt = {}
         result = {
             "success": True,
             "binding": {
@@ -223,6 +219,26 @@ class HenuPluginService:
                 "library_default_location": _text(account.get("library_default_location")),
                 "library_default_seat_no": _text(account.get("library_default_seat_no")),
                 "has_seminar_mobile": bool(account.get("has_seminar_mobile")),
+                "login_verification": {
+                    "status": _text(login_verification.get("status")) or "unknown",
+                    "verified": bool(login_verification.get("verified")),
+                    "historically_verified": bool(login_verification.get("historically_verified")),
+                    "attempted_at": _text(login_verification.get("attempted_at")),
+                    "verified_at": _text(login_verification.get("verified_at")),
+                    "subject_student_id": _text(login_verification.get("subject_student_id")),
+                    "auth_mode": _text(login_verification.get("auth_mode")),
+                    "error_code": _text(login_verification.get("error_code")),
+                    "message": _text(login_verification.get("message")),
+                },
+                "last_login_attempt": {
+                    "status": _text(last_login_attempt.get("status")) or "unknown",
+                    "verified": bool(last_login_attempt.get("verified")),
+                    "attempted_at": _text(last_login_attempt.get("attempted_at")),
+                    "subject_student_id": _text(last_login_attempt.get("subject_student_id")),
+                    "auth_mode": _text(last_login_attempt.get("auth_mode")),
+                    "error_code": _text(last_login_attempt.get("error_code")),
+                    "message": _text(last_login_attempt.get("message")),
+                },
                 "profile_file": _text(account.get("profile_file"), strip=False),
             },
         }
@@ -304,16 +320,27 @@ class HenuPluginService:
         finally:
             _CURRENT_IDENTITY.value = None
 
-        # Cache invalidation after successful writes
-        if isinstance(result, dict) and result.get("success"):
+        # Account verification state changes even when authentication fails, so
+        # invalidate its context after every setup_account attempt.
+        if isinstance(result, dict):
             effective_tool = _text(result.get("_resolved_tool_name")) or tool_name
-            if effective_tool in {"setup_account"}:
+            if effective_tool == "setup_account":
+                if result.get("success") and result.get("binding_changed"):
+                    if paths is not None:
+                        try:
+                            paths.schedule_file.unlink(missing_ok=True)
+                        except Exception:
+                            paths.schedule_file.write_text("{}", encoding="utf-8")
+                    invalidate_user_cache(identity.storage_key)
+                else:
+                    invalidate_account_cache(identity.storage_key)
+            elif result.get("success") and effective_tool == "preferences":
                 invalidate_account_cache(identity.storage_key)
-            elif effective_tool in {"sync_schedule"}:
+            elif result.get("success") and effective_tool in {"sync_schedule"}:
                 invalidate_schedule_cache(identity.storage_key)
-            elif effective_tool in {"library_reserve", "library_auto_signin", "library_cancel"}:
+            elif result.get("success") and effective_tool in {"library_reserve", "library_auto_signin", "library_cancel"}:
                 LIBRARY_QUERY_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
-            elif effective_tool in {"seminar_reserve", "seminar_signin", "seminar_cancel"}:
+            elif result.get("success") and effective_tool in {"seminar_reserve", "seminar_signin", "seminar_cancel"}:
                 SEMINAR_QUERY_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
 
         if isinstance(result, dict):
@@ -392,6 +419,7 @@ class HenuPluginService:
     def _henu_cli(self, params: dict[str, Any]) -> dict[str, Any]:
         raw_command = _text(params.get("command"), strip=False)
         spec = inspect_cli_command(raw_command)
+        safe_command = redact_cli_command(raw_command)
 
         if spec.is_help:
             help_payload = build_help_payload(spec.help_topic)
@@ -400,7 +428,7 @@ class HenuPluginService:
                 "msg": help_payload["summary"],
                 "cli": {
                     "mode": "help",
-                    "command": raw_command,
+                    "command": safe_command,
                     "topic": help_payload["topic"],
                 },
                 "commands": help_payload["commands"],
@@ -416,7 +444,7 @@ class HenuPluginService:
                 "msg": spec.error,
                 "cli": {
                     "mode": "error",
-                    "command": raw_command,
+                    "command": safe_command,
                     "topic": help_payload["topic"],
                 },
                 "commands": help_payload["commands"],
@@ -429,8 +457,26 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": "命令未解析到具体动作，请先执行 `help`。",
-                "cli": {"mode": "error", "command": raw_command},
+                "cli": {"mode": "error", "command": safe_command},
                 "next_commands": ["help"],
+            }
+
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        if (
+            spec.resolved_tool == "setup_account"
+            and identity is not None
+            and (identity.launcher_type != "person" or not identity.sender_id)
+        ):
+            return {
+                "success": False,
+                "error_code": "private_chat_required",
+                "msg": "账号密码只允许在可确认发送者身份的私聊中绑定，本次未执行登录。",
+                "cli": {
+                    "mode": "error",
+                    "command": safe_command,
+                    "resolved_tool": spec.resolved_tool,
+                },
+                "next_commands": ["help account set"],
             }
 
         handler = self._tool_dispatch.get(spec.resolved_tool)
@@ -438,7 +484,7 @@ class HenuPluginService:
             return {
                 "success": False,
                 "msg": f"CLI 路由失败：未找到 `{spec.resolved_tool}`。",
-                "cli": {"mode": "error", "command": raw_command, "resolved_tool": spec.resolved_tool},
+                "cli": {"mode": "error", "command": safe_command, "resolved_tool": spec.resolved_tool},
                 "next_commands": ["help"],
             }
 
@@ -454,13 +500,13 @@ class HenuPluginService:
             result["cli"].update(
                 {
                     "mode": "exec",
-                    "command": raw_command,
+                    "command": safe_command,
                     "action": spec.action,
                     "resolved_tool": spec.resolved_tool,
                 }
             )
         result["_resolved_tool_name"] = spec.resolved_tool
-        result["_effective_params"] = spec.params
+        result["_effective_params"] = redact_cli_params(spec.params)
         result["next_commands"] = build_next_commands(spec, result)
         return result
 
@@ -513,6 +559,15 @@ class HenuPluginService:
         return None
 
     def _setup_account(self, params: dict[str, Any]) -> dict[str, Any]:
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        if identity is not None and (
+            identity.launcher_type != "person" or not identity.sender_id
+        ):
+            return {
+                "success": False,
+                "error_code": "private_chat_required",
+                "msg": "账号密码只允许在可确认发送者身份的私聊中绑定，本次未执行登录。",
+            }
         return mcp_server.setup_account(
             student_id=_text(params.get("student_id")),
             password=_text(params.get("password"), strip=False),
@@ -521,6 +576,65 @@ class HenuPluginService:
             verify_login=_bool(params.get("verify_login"), True),
             calibrate_period_time=_bool(params.get("calibrate_period_time"), True),
         )
+
+    def _preferences(self, params: dict[str, Any]) -> dict[str, Any]:
+        action = (_text(params.get("action")) or "get").lower()
+
+        if action == "set":
+            fields: dict[str, str] = {}
+            location = _text(params.get("library_location"))
+            seat_no = _text(params.get("library_seat_no"))
+            if location:
+                fields["library_location"] = location
+            if seat_no:
+                fields["library_seat_no"] = seat_no
+            if not fields:
+                return {
+                    "success": False,
+                    "error_code": "missing_params",
+                    "missing_params": ["library_location", "library_seat_no"],
+                    "msg": "请至少提供一个要设置的偏好。",
+                }
+            server_impl._save_profile_fields(fields)
+        elif action == "clear":
+            fields = {}
+            if _bool(params.get("clear_library_location"), False):
+                fields["library_location"] = ""
+            if _bool(params.get("clear_library_seat_no"), False):
+                fields["library_seat_no"] = ""
+                fields["seat_no"] = ""
+            if _bool(params.get("clear_library_location"), False):
+                fields["location"] = ""
+            if not fields:
+                fields = {
+                    "library_location": "",
+                    "library_seat_no": "",
+                    "location": "",
+                    "seat_no": "",
+                }
+            server_impl._save_profile_fields(fields)
+        elif action != "get":
+            return {
+                "success": False,
+                "error_code": "invalid_action",
+                "msg": f"不支持的 preferences 动作: {action}",
+            }
+
+        current = server_impl._effective_profile()
+        preferences = {
+            "library_location": _text(
+                current.get("library_location") or current.get("location")
+            ),
+            "library_seat_no": _text(
+                current.get("library_seat_no") or current.get("seat_no")
+            ),
+        }
+        action_text = {"get": "读取", "set": "更新", "clear": "清空"}[action]
+        return {
+            "success": True,
+            "msg": f"偏好已{action_text}",
+            "preferences": preferences,
+        }
 
 
     def _smart_course_selection(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -566,6 +680,9 @@ class HenuPluginService:
                     latest = max(schedule_files, key=lambda p: p.stat().st_mtime)
                     try:
                         schedule_data = json.loads(latest.read_text(encoding="utf-8"))
+                        schedule_data["_subject_student_id"] = str(
+                            server_impl._effective_profile().get("student_id") or ""
+                        ).strip()
                         paths.schedule_file.write_text(
                             json.dumps(schedule_data, ensure_ascii=False, indent=2),
                             encoding="utf-8"
@@ -589,11 +706,21 @@ class HenuPluginService:
                 try:
                     import json
                     schedule_data = json.loads(paths.schedule_file.read_text(encoding="utf-8"))
-                    target = paths.output_dir / "schedule_clean_latest.json"
-                    target.write_text(
-                        json.dumps(schedule_data, ensure_ascii=False, indent=2),
-                        encoding="utf-8"
-                    )
+                    bound_sid = str(
+                        server_impl._effective_profile().get("student_id") or ""
+                    ).strip()
+                    if (
+                        bound_sid
+                        and str(schedule_data.get("_subject_student_id") or "").strip()
+                        == bound_sid
+                    ):
+                        target = paths.output_dir / "schedule_clean_latest.json"
+                        target.write_text(
+                            json.dumps(schedule_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8"
+                        )
+                    else:
+                        paths.schedule_file.unlink(missing_ok=True)
                 except Exception:
                     pass
 
@@ -703,16 +830,65 @@ class HenuPluginService:
         )
 
     def _library_reserve(self, params: dict[str, Any]) -> dict[str, Any]:
-        return mcp_server.library_reserve(
+        target_date = _text(params.get("target_date"))
+        preferred_time = _text(params.get("preferred_time"))
+        preferred_end_time = _text(params.get("preferred_end_time"))
+        end_policy = _text(params.get("end_policy")).lower()
+        if preferred_end_time and not end_policy:
+            end_policy = "explicit_end"
+
+        missing_params = []
+        if not target_date:
+            missing_params.append("target_date")
+        if not preferred_time:
+            missing_params.append("preferred_time")
+        if not end_policy:
+            missing_params.append("end_policy")
+        if missing_params:
+            return {
+                "success": False,
+                "error_code": "missing_params",
+                "missing_params": missing_params,
+                "msg": (
+                    "图书馆预约缺少用户明确授权的参数："
+                    + ", ".join(missing_params)
+                    + "。日期和开始时间不得使用查询默认值；结束策略请选择 "
+                    "ask 或 server_full_slot。"
+                ),
+            }
+
+        if end_policy not in {"ask", "server_full_slot", "explicit_end"}:
+            return {
+                "success": False,
+                "error_code": "invalid_end_policy",
+                "msg": "end_policy 仅支持 ask、server_full_slot 或 explicit_end。",
+            }
+        if end_policy in {"ask", "explicit_end"} and not preferred_end_time:
+            return {
+                "success": False,
+                "error_code": "missing_params",
+                "missing_params": ["preferred_end_time"],
+                "msg": (
+                    "end_policy=ask/explicit_end 时必须先取得用户明确的 "
+                    "--end-time。"
+                ),
+            }
+
+        result = mcp_server.library_reserve(
             location=_text(params.get("location")),
             seat_no=_text(params.get("seat_no")),
-            target_date=_text(params.get("target_date")),
-            preferred_time=_text(params.get("preferred_time")) or "08:00",
-            preferred_end_time=_text(params.get("preferred_end_time")),
+            target_date=target_date,
+            preferred_time=preferred_time,
+            preferred_end_time=(
+                "" if end_policy == "server_full_slot" else preferred_end_time
+            ),
             retry_until=_text(params.get("retry_until")),
             retry_interval_seconds=_int(params.get("retry_interval_seconds"), 2),
             max_attempts=_int(params.get("max_attempts"), 1),
         )
+        if isinstance(result, dict):
+            result.setdefault("end_policy", end_policy)
+        return result
 
     def _library_auto_signin(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.library_auto_signin(

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
+import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -28,6 +32,7 @@ from henu_mcp.core.course_schedule import (
     run_fetch,
     save_json,
 )
+from henu_mcp.core.kingo_auth import KINGO_WARNING
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
     DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
@@ -96,6 +101,13 @@ _SEMINAR_SIGNIN_TASK_LOCK = threading.Lock()
 _SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
 _SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
+LOGIN_VERIFICATION_FRESH_HOURS = 24
+LOGIN_ATTEMPT_COOLDOWN_SECONDS = 30
+LOGIN_ATTEMPT_WINDOW_HOURS = 24
+LOGIN_ATTEMPT_MAX_FAILURES = 3
+LOGIN_GUARD_FILE = BASE_DIR / "data" / "shared" / "login_attempt_guard.json"
+_LOGIN_GUARD_LOCK = threading.Lock()
+_LOGIN_MASTER_KEY_FILE = Path('/run/secrets/henu_master_key')
 
 # 尝试导入校园核心模块
 HenuCampusBot = None
@@ -550,6 +562,91 @@ def _effective_profile() -> dict[str, Any]:
     return load_encrypted_profile(PROFILE_FILE)
 
 
+def _login_verification_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    raw = profile.get("login_verification")
+    if not isinstance(raw, dict):
+        raw = {}
+    status = str(raw.get("status") or "unknown").strip().lower()
+    if status not in {"verified", "unverified", "failed", "stale", "unknown"}:
+        status = "unknown"
+    subject_student_id = str(raw.get("subject_student_id") or "").strip()
+    bound_student_id = str(profile.get("student_id") or "").strip()
+    verified_at = str(raw.get("verified_at") or raw.get("attempted_at") or "").strip()
+    historically_verified = status in {"verified", "stale"} or bool(raw.get("verified_at"))
+    if status == "verified":
+        if not subject_student_id or subject_student_id != bound_student_id:
+            status = "stale"
+        else:
+            try:
+                verified_dt = datetime.fromisoformat(verified_at)
+                now = _now_dt()
+                if verified_dt.tzinfo is None:
+                    verified_dt = verified_dt.replace(tzinfo=now.tzinfo)
+                if now - verified_dt > timedelta(hours=LOGIN_VERIFICATION_FRESH_HOURS):
+                    status = "stale"
+            except (TypeError, ValueError):
+                status = "stale"
+    message = re.sub(r"\s+", " ", str(raw.get("message") or "")).strip()[:240]
+    return {
+        "status": status,
+        "verified": bool(raw.get("verified")) and status == "verified",
+        "historically_verified": historically_verified,
+        "attempted_at": str(raw.get("attempted_at") or "").strip(),
+        "verified_at": verified_at,
+        "subject_student_id": subject_student_id,
+        "auth_mode": str(raw.get("auth_mode") or "").strip(),
+        "error_code": str(raw.get("error_code") or "").strip(),
+        "message": message,
+    }
+
+
+def _login_verification_record(
+    status: str,
+    auth: dict[str, Any] | None = None,
+    subject_student_id: str = "",
+) -> dict[str, Any]:
+    auth_info = auth if isinstance(auth, dict) else {}
+    normalized_status = status if status in {"verified", "unverified", "failed"} else "unknown"
+    default_message = {
+        "verified": "在线登录校验成功",
+        "unverified": "账号已保存，但未执行在线登录校验",
+        "failed": "在线登录校验失败",
+    }.get(normalized_status, "尚无在线登录校验记录")
+    attempted_at = _now_dt().isoformat(timespec="seconds")
+    return {
+        "status": normalized_status,
+        "verified": normalized_status == "verified",
+        "attempted_at": attempted_at,
+        "verified_at": attempted_at if normalized_status == "verified" else "",
+        "subject_student_id": str(subject_student_id or "").strip(),
+        "auth_mode": str(auth_info.get("mode") or "").strip(),
+        "error_code": str(auth_info.get("error_code") or "").strip(),
+        "message": re.sub(
+            r"\s+",
+            " ",
+            str(auth_info.get("message") or default_message),
+        ).strip()[:240],
+    }
+
+
+def _last_login_attempt_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    raw = profile.get("last_login_attempt")
+    if not isinstance(raw, dict):
+        raw = {}
+    status = str(raw.get("status") or "unknown").strip().lower()
+    if status not in {"verified", "unverified", "failed", "unknown"}:
+        status = "unknown"
+    return {
+        "status": status,
+        "verified": bool(raw.get("verified")) and status == "verified",
+        "attempted_at": str(raw.get("attempted_at") or "").strip(),
+        "subject_student_id": str(raw.get("subject_student_id") or "").strip(),
+        "auth_mode": str(raw.get("auth_mode") or "").strip(),
+        "error_code": str(raw.get("error_code") or "").strip(),
+        "message": re.sub(r"\s+", " ", str(raw.get("message") or "")).strip()[:240],
+    }
+
+
 def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
     location, seat_no = _resolve_library_defaults()
     seminar_groups = _load_seminar_groups()
@@ -562,6 +659,8 @@ def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "seminar_groups_total": len(seminar_groups),
         "seminar_signin_tasks_total": len(seminar_tasks),
         "has_seminar_mobile": bool(str(profile.get("seminar_mobile") or profile.get("mobile") or "").strip()),
+        "login_verification": _login_verification_summary(profile),
+        "last_login_attempt": _last_login_attempt_summary(profile),
         "profile_file": str(PROFILE_FILE),
         "cookie_file": str(COOKIE_FILE),
         "library_cookie_file": str(LIBRARY_COOKIE_FILE),
@@ -1434,38 +1533,267 @@ def _target_library_date(target_date: str | None = None) -> str:
 
 
 def _load_library_cookies() -> dict[str, Any]:
-    return load_json(LIBRARY_COOKIE_FILE)
+    data = load_json(LIBRARY_COOKIE_FILE)
+    if not _artifact_matches_bound_student(data):
+        return {}
+    return {key: value for key, value in data.items() if not str(key).startswith("_")}
 
 
 def _save_library_cookies(cookies: dict[str, Any]) -> None:
-    save_json(LIBRARY_COOKIE_FILE, cookies)
+    save_json(
+        LIBRARY_COOKIE_FILE,
+        {**cookies, "_subject_student_id": _bound_student_id()},
+    )
+
+
+def _bound_student_id() -> str:
+    return str(_effective_profile().get("student_id") or "").strip()
+
+
+def _artifact_matches_bound_student(data: dict[str, Any]) -> bool:
+    subject = str(data.get("_subject_student_id") or "").strip()
+    bound = _bound_student_id()
+    return bool(subject and bound and subject == bound)
 
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load this user's IDS CAS cookie jar for cross-service login reuse."""
+    cas_data = load_json(CAS_COOKIE_FILE)
+    xk_data = load_json(COOKIE_FILE)
     return _merge_cas_cookies(
-        load_json(CAS_COOKIE_FILE),
-        load_json(COOKIE_FILE),
+        xk_data if _artifact_matches_bound_student(xk_data) else {},
+        cas_data if _artifact_matches_bound_student(cas_data) else {},
     )
 
 
-def _save_cas_cookies(cookies: dict[str, Any]) -> None:
+def _save_cas_cookies(
+    cookies: dict[str, Any],
+    subject_student_id: str = "",
+) -> None:
     """Save this user's IDS CAS cookie jar for reuse across campus services."""
     clean = _extract_ids_cas_cookies(cookies)
     if clean:
+        clean["_subject_student_id"] = (
+            str(subject_student_id or "").strip() or _bound_student_id()
+        )
         save_json(CAS_COOKIE_FILE, clean)
 
 
 def _load_xk_cookies() -> dict[str, Any]:
+    xk_data = load_json(COOKIE_FILE)
     return {
-        **load_json(COOKIE_FILE),
+        **(xk_data if _artifact_matches_bound_student(xk_data) else {}),
         **_load_cas_cookies(),
     }
 
 
-def _save_xk_cookies(cookies: dict[str, Any]) -> None:
-    save_json(COOKIE_FILE, cookies)
-    _save_cas_cookies(cookies)
+def _save_xk_cookies(
+    cookies: dict[str, Any],
+    subject_student_id: str = "",
+) -> None:
+    mode = str(cookies.get("_auth_mode") or "")
+    subject = str(subject_student_id or "").strip() or _bound_student_id()
+    persisted = {**cookies, "_subject_student_id": subject}
+    if mode == "xk_kingo":
+        persisted = {
+            key: value
+            for key, value in cookies.items()
+            if key not in _extract_ids_cas_cookies(cookies)
+        }
+        persisted["_subject_student_id"] = subject
+    save_json(COOKIE_FILE, persisted)
+    if mode == "ids_cas":
+        _save_cas_cookies(cookies, subject)
+
+
+def _clear_account_auth_artifacts() -> None:
+    """Remove account-scoped sessions, tasks, and generated account data."""
+    for path in (
+        COOKIE_FILE,
+        CAS_COOKIE_FILE,
+        LIBRARY_COOKIE_FILE,
+        HEBAO_TOKEN_FILE,
+        SEMINAR_SIGNIN_TASK_FILE,
+    ):
+        path.unlink(missing_ok=True)
+    output_dir = Path(OUTPUT_DIR)
+    if output_dir.exists():
+        for child in output_dir.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+
+
+def _snapshot_account_binding_files() -> dict[Path, bytes | None]:
+    return {
+        path: path.read_bytes() if path.exists() else None
+        for path in (
+            PROFILE_FILE,
+            COOKIE_FILE,
+            CAS_COOKIE_FILE,
+            LIBRARY_COOKIE_FILE,
+            HEBAO_TOKEN_FILE,
+            SEMINAR_SIGNIN_TASK_FILE,
+        )
+    }
+
+
+def _restore_account_binding_files(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def _recent_login_attempt_retry_after(
+    profile: dict[str, Any],
+    student_id: str,
+) -> int:
+    attempt = profile.get("last_login_attempt")
+    if not isinstance(attempt, dict):
+        return 0
+    if str(attempt.get("subject_student_id") or "").strip() != student_id:
+        return 0
+    attempted_at = str(attempt.get("attempted_at") or "").strip()
+    try:
+        attempted_dt = datetime.fromisoformat(attempted_at)
+        now = _now_dt()
+        if attempted_dt.tzinfo is None:
+            attempted_dt = attempted_dt.replace(tzinfo=now.tzinfo)
+        elapsed = (now - attempted_dt).total_seconds()
+    except (TypeError, ValueError):
+        return 0
+    remaining = LOGIN_ATTEMPT_COOLDOWN_SECONDS - elapsed
+    return max(0, int(remaining + 0.999))
+
+
+def _student_guard_hash(student_id: str) -> str:
+    secret = str(os.environ.get("HENU_MASTER_KEY") or "").strip()
+    if not secret:
+        try:
+            secret = _LOGIN_MASTER_KEY_FILE.read_text(encoding='utf-8').strip()
+        except FileNotFoundError:
+            pass
+    if not secret:
+        raise RuntimeError("HENU_MASTER_KEY 未配置，无法安全执行账号验证")
+    return hmac.new(
+        secret.encode("utf-8"),
+        str(student_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _load_login_guard_store() -> dict[str, Any]:
+    if not LOGIN_GUARD_FILE.exists():
+        return {}
+    try:
+        data = json.loads(LOGIN_GUARD_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError("登录限流状态损坏") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("登录限流状态格式错误")
+    return data
+
+
+def _save_login_guard_store(guards: dict[str, Any]) -> None:
+    LOGIN_GUARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = LOGIN_GUARD_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(guards, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    temporary.replace(LOGIN_GUARD_FILE)
+
+
+def _prune_expired_login_guards(
+    guards: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[str, Any], bool]:
+    kept: dict[str, Any] = {}
+    changed = False
+    for key, value in guards.items():
+        if not isinstance(value, dict):
+            changed = True
+            continue
+        try:
+            started = datetime.fromisoformat(str(value.get("window_started_at") or ""))
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=now.tzinfo)
+            if now - started > timedelta(hours=LOGIN_ATTEMPT_WINDOW_HOURS):
+                changed = True
+                continue
+        except (TypeError, ValueError):
+            changed = True
+            continue
+        kept[key] = value
+    return kept, changed
+
+
+def _login_attempt_guard_retry_after(
+    profile: dict[str, Any],
+    student_id: str,
+) -> int:
+    del profile
+    student_hash = _student_guard_hash(student_id)
+    now = _now_dt()
+    with _LOGIN_GUARD_LOCK:
+        guards, _ = _prune_expired_login_guards(_load_login_guard_store(), now)
+        # Always perform an atomic write probe before any remote authentication.
+        # A read-only/unavailable guard store must fail closed without consuming
+        # an IDS password attempt.
+        _save_login_guard_store(guards)
+        guard = guards.get(student_hash)
+        if not isinstance(guard, dict) or int(guard.get("failed_attempts") or 0) < LOGIN_ATTEMPT_MAX_FAILURES:
+            return 0
+        started = datetime.fromisoformat(str(guard.get("window_started_at") or ""))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=now.tzinfo)
+        remaining = LOGIN_ATTEMPT_WINDOW_HOURS * 3600 - (now - started).total_seconds()
+        return max(0, int(remaining + 0.999))
+
+
+def _next_login_attempt_guard(
+    profile: dict[str, Any],
+    student_id: str,
+) -> dict[str, Any]:
+    del profile
+    now = _now_dt()
+    student_hash = _student_guard_hash(student_id)
+    with _LOGIN_GUARD_LOCK:
+        guards, _ = _prune_expired_login_guards(_load_login_guard_store(), now)
+        current = guards.get(student_hash)
+        if not isinstance(current, dict):
+            current = {}
+        guards[student_hash] = {
+            "window_started_at": str(current.get("window_started_at") or now.isoformat(timespec="seconds")),
+            "failed_attempts": int(current.get("failed_attempts") or 0) + 1,
+            "last_failed_at": now.isoformat(timespec="seconds"),
+        }
+        _save_login_guard_store(guards)
+        return guards[student_hash]
+
+
+def _reset_login_attempt_guard(student_id: str) -> None:
+    student_hash = _student_guard_hash(student_id)
+    with _LOGIN_GUARD_LOCK:
+        guards = _load_login_guard_store()
+        if student_hash in guards:
+            guards.pop(student_hash, None)
+            _save_login_guard_store(guards)
+
+
+def _saved_xk_auth_info() -> dict[str, Any]:
+    data = load_json(COOKIE_FILE)
+    mode = str(data.get("_auth_mode") or "") if _artifact_matches_bound_student(data) else ""
+    return {
+        "mode": mode,
+        "degraded": mode == "xk_kingo",
+        "error_code": "",
+        "message": "已保存登录态" if mode else "尚无已保存的认证模式",
+        "warning": KINGO_WARNING if mode == "xk_kingo" else "",
+        "ids_error_code": "",
+        "ids_message": "",
+    }
 
 
 def _set_library_login_error(message: str) -> None:
@@ -1544,11 +1872,15 @@ def _hebao_login_failed(extra: dict[str, Any] | None = None, default: str = "河
 
 
 def _load_hebao_token() -> dict[str, Any]:
-    return load_json(HEBAO_TOKEN_FILE)
+    data = load_json(HEBAO_TOKEN_FILE)
+    return data if _artifact_matches_bound_student(data) else {}
 
 
 def _save_hebao_token(token: str) -> None:
-    save_json(HEBAO_TOKEN_FILE, {"token": token})
+    save_json(
+        HEBAO_TOKEN_FILE,
+        {"token": token, "_subject_student_id": _bound_student_id()},
+    )
 
 
 def _build_hebao_bot(student_id: str, password: str):
@@ -1736,23 +2068,130 @@ def save_account(
         return {"success": False, "msg": "student_id/password 不能为空"}
 
     context: dict[str, Any] = {}
+    auth: dict[str, Any] = _saved_xk_auth_info()
+    current_profile = _effective_profile()
+    bound_sid = str(current_profile.get("student_id") or "").strip()
+    retry_after = (
+        max(
+            _recent_login_attempt_retry_after(current_profile, sid),
+            _login_attempt_guard_retry_after(current_profile, sid),
+        )
+        if verify_login
+        else 0
+    )
+    if retry_after > 0:
+        return {
+            "success": False,
+            "verified": False,
+            "error_code": "local_login_cooldown",
+            "retry_after_seconds": retry_after,
+            "msg": f"账号验证请求过于频繁，请等待 {retry_after} 秒后再试",
+        }
+    candidate_cookies: dict[str, Any] = {}
     if verify_login:
-        client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
+        # A binding command must verify the supplied password itself. Reusing a
+        # previous cookie could authenticate the old account and falsely mark a
+        # new student ID (or a wrong new password) as verified.
+        client = HenuXkClient(sid, pwd, saved_cookies=None)
         if not client.login():
-            return {"success": False, "msg": "登录失败，账号或密码可能错误"}
-        _save_xk_cookies(client.get_cookies())
+            auth = client.get_auth_info()
+            verification = _login_verification_record("failed", auth, sid)
+            failed_fields: dict[str, Any] = {"last_login_attempt": verification}
+            if str(auth.get("error_code") or "") in {
+                "invalid_credentials",
+                "captcha_required",
+                "rate_limited",
+                "account_locked",
+                "auth_state_unknown",
+            }:
+                _next_login_attempt_guard(current_profile, sid)
+            _save_profile_fields(failed_fields)
+            return {
+                "success": False,
+                "msg": client.auth_result.message,
+                "verified": False,
+                "auth": auth,
+                "login_verification": verification,
+            }
         context = client.fetch_user_context()
+        auth = client.get_auth_info()
+        authenticated_sid = str(
+            context.get("login_id") or context.get("user_code") or ""
+        ).strip()
+        if not context.get("authenticated") or authenticated_sid != sid:
+            auth = {
+                **auth,
+                "error_code": "account_mismatch" if authenticated_sid != sid else context.get("error_code") or "session_expired",
+                "message": "登录态账号与本次提交学号不一致，未保存绑定" if authenticated_sid != sid else "本次教务登录态已失效，未保存绑定",
+            }
+            verification = _login_verification_record("failed", auth, sid)
+            _save_profile_fields({"last_login_attempt": verification})
+            return {
+                "success": False,
+                "msg": auth["message"],
+                "verified": False,
+                "auth": auth,
+                "login_verification": verification,
+            }
+        candidate_cookies = client.get_cookies()
 
-    fields: dict[str, Any] = {"student_id": sid, "password": pwd}
+    binding_changed = bound_sid != sid
+
+    verification = _login_verification_record(
+        "verified" if verify_login else "unverified",
+        auth if verify_login else None,
+        sid,
+    )
+    fields: dict[str, Any] = {
+        "student_id": sid,
+        "password": pwd,
+        "login_verification": verification,
+        "last_login_attempt": verification,
+    }
+    if verify_login:
+        _reset_login_attempt_guard(sid)
+    if binding_changed:
+        fields.update(
+            {
+                "library_location": "",
+                "location": "",
+                "library_seat_no": "",
+                "seat_no": "",
+                "seminar_groups": {},
+                "seminar_mobile": "",
+                "mobile": "",
+            }
+        )
     if str(library_location or "").strip():
         fields["library_location"] = str(library_location).strip()
     if str(library_seat_no or "").strip():
         fields["library_seat_no"] = str(library_seat_no).strip()
-    _save_profile_fields(fields)
+    snapshot = _snapshot_account_binding_files()
+    try:
+        if binding_changed:
+            _clear_account_auth_artifacts()
+        if verify_login:
+            _save_xk_cookies(candidate_cookies, sid)
+        _save_profile_fields(fields)
+    except Exception as exc:
+        try:
+            _restore_account_binding_files(snapshot)
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "verified": False,
+            "error_code": "binding_persist_failed",
+            "msg": f"账号绑定保存失败，已尝试恢复原绑定状态: {type(exc).__name__}",
+        }
     return {
         "success": True,
         "msg": "账号已保存",
+        "verified": bool(verify_login),
+        "binding_changed": binding_changed,
         "account": _mask_profile(_effective_profile()),
+        "auth": auth,
+        "login_verification": verification,
         "context": {
             "login_id": context.get("login_id", ""),
             "user_type": context.get("user_type", ""),
@@ -1784,7 +2223,8 @@ def check_login(
 
     return {
         "success": ok,
-        "msg": "登录成功" if ok else "登录失败",
+        "msg": "登录成功" if ok else client.auth_result.message,
+        "auth": client.get_auth_info(),
         "login_id": context.get("login_id", ""),
         "user_type": context.get("user_type", ""),
         "current_xn": context.get("current_xn", ""),
@@ -1810,6 +2250,14 @@ def fetch_schedule(
     if not pwd:
         return {"success": False, "msg": "缺少密码，请先 save_account 或传入 password"}
 
+    bound_sid = str(_effective_profile().get("student_id") or "").strip()
+    session_cookies: dict[str, Any] = {}
+
+    def persist_session(cookies: dict[str, Any]) -> None:
+        session_cookies.update(cookies)
+        if sid == bound_sid:
+            _save_xk_cookies(cookies)
+
     result = run_fetch(
         student_id=sid,
         password=pwd,
@@ -1817,10 +2265,14 @@ def fetch_schedule(
         schedule_url=schedule_url,
         xn=xn,
         xq=xq,
+        saved_cookies=_load_xk_cookies() if sid == bound_sid else {},
+        cookie_saver=persist_session,
     )
 
     if result.get("success") and save_account_after_success:
         _save_profile_fields({"student_id": sid, "password": pwd})
+        if session_cookies:
+            _save_xk_cookies(session_cookies)
 
     # 兜底：若 clean 文件未生成，尝试从最新 schedule_grid 手工重建
     if result.get("success") and not result.get("clean_schedule_file_json"):
@@ -3020,14 +3472,28 @@ def setup_account(
     if not result.get("success"):
         return result
 
-    calibration: dict[str, Any] = {}
-    if calibrate_period_time:
+    verified = bool(verify_login)
+    if not verified:
+        calibration: dict[str, Any] = {
+            "skipped": True,
+            "reason": "login_not_verified",
+        }
+    elif calibrate_period_time:
         calibration = auto_calibrate_period_time(force=True)
+    else:
+        calibration = {
+            "skipped": True,
+            "reason": "disabled",
+        }
 
     return {
         "success": True,
-        "msg": "账号初始化完成",
+        "verified": verified,
+        "binding_changed": bool(result.get("binding_changed")),
+        "msg": "账号登录验证成功，已完成绑定" if verified else "账号已保存，尚未验证登录",
         "account": result.get("account", {}),
+        "auth": result.get("auth", {}),
+        "login_verification": result.get("login_verification", {}),
         "login_context": result.get("context", {}),
         "period_time_calibration": calibration,
     }
@@ -3742,6 +4208,7 @@ def system_status(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
         "success": True,
         "server_time": get_server_time(timezone=timezone),
         "account": show_account(),
+        "auth": _saved_xk_auth_info(),
         "period_time_config": get_period_time_config(),
         "library_defaults": {
             "location": _resolve_library_defaults()[0],

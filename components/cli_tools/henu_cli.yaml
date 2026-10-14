@@ -7,17 +7,34 @@ metadata:
     zh_Hans: 河大 CLI
   description:
     en_US: "Unified CLI-style entry for HENU account, schedule, course selection, library, seminar, and calibration operations."
-    zh_Hans: "统一 CLI 风格入口，用一条 command 调用河大账号、课表、选课、图书馆、研讨室与节次校准能力。"
+    zh_Hans: "统一 CLI 风格入口，用一条 command 调用河大账号、偏好、课表、选课、图书馆、研讨室与节次校准能力。"
 spec:
   parameters:
     type: object
     properties:
       command:
         type: string
-        description: CLI 风格命令字符串，例如 help、account status、schedule now、course status、library current
+        description: CLI 风格命令字符串，例如 help、account status、preferences get、schedule now、course status、library current
     required:
       - command
-  llm_prompt: "统一入口，只传 `command`。渐进式披露：先用 `help` 看一级命令，再用 `help <topic>` 看更窄主题；不确定参数时不要一次展开全部。工具返回 `reply_text` 时，最终回复必须优先直接复述或压缩 `reply_text`，不要把完整 JSON 发给用户；除非用户明确要求翻页、筛选、预约或继续执行，否则不要重复调用 henu_cli。常用命令：`account status`、`account set --student-id ... --password ...`、`schedule now`、`course status`、`course plan --excel ./courses.xlsx --class 25软工1`、`course plan --candidates-json '<json>'`、`course monitor config --config-json '<json>'`、`course monitor once`、`course monitor run --max-checks 3`、`library current`、`library locations --date 2026-03-30`、`library seats --location ... --date 2026-03-30 --time 08:00`、`library reserve --location ... --seat-no ... --date 2026-03-30 --time 08:00 --end-time 12:00`、`library reserve --location ... --seat-no ... --retry-until 08:05 --max-attempts 30`、`seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4`、`empty_classroom query --week 1 --day-of-week 1 --period 1`、`empty_classroom query --view occupancy --classroom-text 十号楼101`、`resource search 十号楼101`。`course status` 和 `course monitor` 只读查询/提醒；`course submit` 当前不执行真实提交。参数值包含空格时要加引号。所有真实写操作只以返回 `success=true` 为准。"
+  llm_prompt: >-
+    统一入口，只传 `command`。先用 `help` 或 `help <topic>` 渐进查看命令。
+    工具返回 `reply_text` 时，最终回复优先复述或压缩它，不发送完整 JSON，也不回显密码。
+    登录只接受河大统一身份认证学号和对应密码，格式为 `account set --student-id 20230001 --password '实际密码'`；
+    示例中的尖括号只是占位说明，绝不能原样带入。遇到验证码、额外校验或账号锁定时停止重试，
+    请用户先在浏览器登录 ids.henu.edu.cn 完成验证或解锁。学号和密码必须同一条结构化私聊命令发送，
+    不得要求用户下一条单独发送裸密码。每个 QQ 的账号和 preferences 相互隔离；
+    使用 `preferences get`、`preferences set --library-location ... --library-seat-no ...`、
+    `preferences clear [--library-location] [--library-seat-no]` 管理默认区域和座位。
+    图书馆先调用 `library locations`，后续只使用返回的准确 location/area_id 和 seat_no。
+    校区是硬约束：用户指定金明、明伦或郑州后只能在该校区筛选，不得静默跨校区；
+    第一/第二/第三自习室和东馆属于明伦，不可用于金明请求。
+    查询命令可以使用工具的日期或 08:00 fallback，但这些 fallback 绝不构成预约写授权。
+    `library reserve` 必须由用户明确给出日期和开始时间；明确给出 `--end-time` 时按 explicit_end 执行，
+    否则必须指定 `--end-policy ask` 或 `--end-policy server_full_slot`；ask 还必须取得明确结束时间，
+    server_full_slot 才会采用服务端完整有效窗口。
+    “随便”只允许在已确认校区/区域候选中选座，绝不等于 12:00，也不得推测结束时间。
+    所有真实写操作只以返回 `success=true` 为准。
 execution:
   python:
     path: henu_cli_safe.py

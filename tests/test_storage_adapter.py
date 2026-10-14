@@ -91,6 +91,22 @@ class PluginStorageAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await adapter.save_all()
 
+    async def test_save_all_persists_tombstone_for_removed_account_data(self) -> None:
+        plugin = _FakePlugin()
+        plugin.storage["user:qq_10001:seminar_task"] = b'{"tasks":[{"record_id":"OLD"}]}'
+        adapter = PluginStorageAdapter(plugin, "qq_10001")
+        paths = await adapter.load_all()
+        paths.seminar_signin_task_file.unlink()
+
+        await adapter.save_all()
+
+        self.assertEqual(plugin.storage["user:qq_10001:seminar_task"], b"{}")
+        reloaded = await PluginStorageAdapter(plugin, "qq_10001").load_all()
+        self.assertEqual(
+            reloaded.seminar_signin_task_file.read_text(encoding="utf-8"),
+            "{}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
