@@ -669,12 +669,13 @@ def preferences_clear(keys: list[str]) -> dict[str, Any]:
     if (
         not isinstance(keys, list)
         or not keys
-        or any(key not in aliases for key in keys)
+        or any(not isinstance(key, str) or key not in aliases for key in keys)
+        or len(keys) != len(set(keys))
     ):
         return {
             "success": False,
             "error_code": "invalid_preference_keys",
-            "msg": "必须明确指定 library_location 或 library_seat_no；未知字段不执行清空",
+            "msg": "必须明确指定不重复的 library_location 或 library_seat_no；无效字段不执行清空",
         }
     with _PROFILE_WRITE_LOCK:
         profile = _effective_profile()

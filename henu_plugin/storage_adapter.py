@@ -222,8 +222,12 @@ class PluginStorageAdapter:
             changed: list[tuple[_StorageFile, bytes]] = []
             for spec in self._files:
                 if not spec.path.exists():
-                    continue
-                payload = spec.path.read_bytes()
+                    if spec.shared:
+                        continue
+                    # Deleting a materialized user file explicitly clears its record.
+                    payload = b"{}"
+                else:
+                    payload = spec.path.read_bytes()
                 self._validate_json_payload(spec.storage_key, payload)
                 if payload != self._original_bytes.get(spec.storage_key, b"{}"):
                     changed.append((spec, payload))

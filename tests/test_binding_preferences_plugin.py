@@ -41,6 +41,10 @@ def test_rebinding_persists_empty_old_sessions_schedule_and_invalidates_cache(tm
         plugin.storage["user:binding-user:library_cookie"] = (
             b'{"fixture":"old-session"}'
         )
+        for record in ("course_monitor_config", "course_monitor_state"):
+            plugin.storage[f"user:binding-user:{record}"] = (
+                b'{"targets":["old-account-target"]}'
+            )
         cache_key = "user:binding-user:library:offline-fixture"
         LIBRARY_QUERY_CACHE.set(cache_key, {"success": True, "seats": ["old-account"]})
         adapter = PluginStorageAdapter(plugin, "binding-user")
@@ -67,6 +71,13 @@ def test_rebinding_persists_empty_old_sessions_schedule_and_invalidates_cache(tm
         assert json.loads(plugin.storage["user:binding-user:schedule"]) == {}
         assert json.loads(plugin.storage["user:binding-user:library_cookie"]) == {}
         assert LIBRARY_QUERY_CACHE.get(cache_key) is None
+        next_request = PluginStorageAdapter(plugin, "binding-user")
+        next_paths = await next_request.load_all()
+        try:
+            assert json.loads(next_paths.course_monitor_config_file.read_bytes()) == {}
+            assert json.loads(next_paths.course_monitor_state_file.read_bytes()) == {}
+        finally:
+            await next_request.abort()
 
     asyncio.run(run())
 
