@@ -13,6 +13,9 @@ NO_SUBMIT_CODE = "not_implemented"
 setup_account = account.setup_account
 show_account = account.show_account
 check_login = account.check_login
+preferences_get = account.preferences_get
+preferences_set = account.preferences_set
+preferences_clear = account.preferences_clear
 system_status = account.system_status
 get_server_time = account.get_server_time
 

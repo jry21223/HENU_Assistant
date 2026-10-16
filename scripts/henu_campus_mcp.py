@@ -28,6 +28,9 @@ from mcp_server import (  # noqa: E402
     library_cancel,
     library_query,
     library_reserve,
+    preferences_clear,
+    preferences_get,
+    preferences_set,
     resource_registry_query,
     resource_registry_sync,
     schedule_query,
@@ -51,6 +54,9 @@ from mcp_server import (  # noqa: E402
 
 __all__ = [
     "setup_account",
+    "preferences_get",
+    "preferences_set",
+    "preferences_clear",
     "sync_schedule",
     "schedule_query",
     "course_selection_query",
