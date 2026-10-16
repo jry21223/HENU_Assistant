@@ -12,6 +12,8 @@ from typing import Any
 from urllib.parse import urljoin
 
 import requests
+from lxml import html
+from lxml.etree import ParserError
 
 from henu_mcp.core.cas_session import (
     CAS_COOKIE_NAMES,
@@ -65,6 +67,29 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def save_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _visible_ids_text(markup: str) -> str:
+    """Read error text without scripts, comments, or explicitly hidden widgets."""
+    try:
+        document = html.fromstring(markup)
+    except (ParserError, ValueError):
+        return ""
+    for element in list(document.iter()):
+        if not isinstance(element.tag, str):
+            element.clear(keep_tail=True)
+            continue
+        style = re.sub(r"\s+", "", element.get("style", "").lower())
+        hidden = (
+            element.tag.lower() in {"script", "style", "template", "noscript"}
+            or "hidden" in element.attrib
+            or element.get("aria-hidden", "").lower() == "true"
+            or "display:none" in style
+            or "visibility:hidden" in style
+        )
+        if hidden:
+            element.clear(keep_tail=True)
+    return " ".join(document.itertext())
 
 
 class HenuXkClient:
@@ -241,10 +266,7 @@ class HenuXkClient:
 
     @staticmethod
     def _ids_error(text: str, status_code: int = 0) -> tuple[str, str]:
-        markup = re.sub(
-            r"(?is)<(?:script|style)\b[^>]*>.*?</(?:script|style)\s*>", " ", str(text or ""),
-        )
-        plain = re.sub(r"(?is)<[^>]+>", " ", markup)
+        plain = _visible_ids_text(str(text or ""))
         plain = re.sub(r"\s+", " ", plain).strip()
         compact = plain.lower()
         if any(marker in compact for marker in ("验证码", "captcha", "校验码")):

@@ -188,3 +188,21 @@ def test_post_5xx_remains_unknown_even_when_its_body_looks_definitive(monkeypatc
     assert client.login() is False
     assert client.get_auth_info()["error_code"] == "auth_state_unknown"
     assert sum(method == "POST" for method, _ in calls) == 1
+
+
+@pytest.mark.parametrize("widget", [
+    '<div hidden><label>验证码</label><input name="captcha"></div>',
+    '<div style="display: none !important"><label>验证码</label><input name="captcha"></div>',
+    '<div style="visibility: hidden"><label>验证码</label></div>',
+    '<div aria-hidden="true"><label>验证码</label></div>',
+    '<!-- 请输入验证码，账号已被锁定 -->',
+])
+def test_hidden_challenge_widgets_do_not_block_ids_success(monkeypatch, widget):
+    form = ('<input name="execution" value="e1">'
+            '<input id="pwdEncryptSalt" value="0123456789abcdef">')
+    calls = install_school_http(monkeypatch, page=form + widget, post_result=("signed_in", 200))
+    client = HenuXkClient("student", "offline-test-password")
+
+    assert client.login() is True
+    assert client.get_auth_info()["mode"] == "ids_cas"
+    assert sum(method == "POST" for method, _ in calls) == 1
