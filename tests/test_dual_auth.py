@@ -31,12 +31,12 @@ def test_ids_success_never_calls_kingo(monkeypatch) -> None:
     assert client.get_auth_info()["mode"] == "ids_cas"
 
 
-def test_ids_failure_calls_kingo_once_and_reports_degraded_mode(monkeypatch) -> None:
+def test_ids_unavailable_calls_kingo_once_and_reports_degraded_mode(monkeypatch) -> None:
     client = _client(monkeypatch)
     monkeypatch.setattr(
         client,
         "_login_via_ids",
-        lambda: AuthResult(False, error_code="service_error", message="IDS failed"),
+        lambda: AuthResult(False, error_code="ids_unavailable", message="IDS failed"),
     )
     calls = 0
 
@@ -52,7 +52,7 @@ def test_ids_failure_calls_kingo_once_and_reports_degraded_mode(monkeypatch) -> 
     auth = client.get_auth_info()
     assert auth["mode"] == "xk_kingo"
     assert auth["degraded"] is True
-    assert auth["ids_error_code"] == "service_error"
+    assert auth["ids_error_code"] == "ids_unavailable"
     assert client.get_cookies()["_auth_mode"] == "xk_kingo"
 
 
@@ -61,7 +61,7 @@ def test_both_failures_are_combined_without_response_bodies(monkeypatch) -> None
     monkeypatch.setattr(
         client,
         "_login_via_ids",
-        lambda: AuthResult(False, error_code="network_error", message="IDS network failed"),
+        lambda: AuthResult(False, error_code="ids_unavailable", message="IDS network failed"),
     )
     monkeypatch.setattr(
         "henu_mcp.core.course_schedule.login_via_kingo",

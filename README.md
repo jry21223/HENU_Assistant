@@ -82,7 +82,7 @@ cd "<SKILL_DIR>" && .venv/bin/python henu_cli.py <command> [args]
 .venv/bin/python henu_cli.py system_status
 .venv/bin/python henu_cli.py library_query --view locations
 .venv/bin/python henu_cli.py library_query --view seats --location "<区域>"
-.venv/bin/python henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>"
+.venv/bin/python henu_cli.py library_reserve --location "<区域>" --seat_no "<座位号>" --target_date YYYY-MM-DD --preferred_time 08:00 --preferred_end_time 12:00
 ```
 
 图书馆契约：先 `locations`，只用返回的 `location` / `area_id` 与 `seats[].seat_no`。  
@@ -130,7 +130,7 @@ cd "<SKILL_DIR>" && .venv/bin/python henu_cli.py <command> [args]
 ## 登录与说明
 
 - 账号与 Cookie 仅本地保存。  
-- IDS（`CASTGC` / `TGC`）优先；失败只自动一次 Kingo。  
+- IDS（`CASTGC` / `TGC`）优先；仅在提交凭据前 IDS 不可用时降级一次 Kingo。验证码、锁号、密码错误、限流或提交结果未知时停止重试。
 - Kingo 主要保 xk 能力，不生成/覆盖 CAS Jar。  
 - `auth`：`mode` / `degraded` / `error_code` / `warning`。  
 - 敏感值（密码、Cookie、Ticket、Token、`--data`）不作为公开结果回显。
