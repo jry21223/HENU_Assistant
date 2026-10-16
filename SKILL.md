@@ -64,7 +64,7 @@ cd "$SKILL_DIR" && .venv/bin/python henu_cli.py <command> [args]
 system_status
 library_query --view locations
 library_query --view seats --location "<返回的区域>" [--target_date YYYY-MM-DD]
-library_reserve --location "..." --seat_no "<返回的座位号>"
+library_reserve --location "..." --seat_no "<返回的座位号>" --target_date YYYY-MM-DD --preferred_time HH:MM --preferred_end_time HH:MM
 library_query --view current
 ```
 
@@ -148,7 +148,7 @@ yunfz_collection_query --view list|statistics
 - `library_query --view seats --location "<区域>" --target_date "2026-03-19" --preferred_time "08:00"`
 - `library_query --view current`
 - `library_query --view records --record_type 1 --page 1 --limit 20`
-- `library_reserve --location "<区域>" --seat_no "<座位号>" --preferred_time "10:30"`
+- `library_reserve --location "<区域>" --seat_no "<座位号>" --target_date YYYY-MM-DD --preferred_time "10:30" --preferred_end_time "12:00"`
 - `library_auto_signin [--record_id "<记录ID>"]`
 - `library_cancel --record_id "<记录ID>"`
 - `seminar_group --action save --group_name "<组名>" --member_ids "<学号1,学号2,学号3>" [--note "<备注>"]`
@@ -183,5 +183,6 @@ yunfz_collection_query --view list|statistics
 - 账号、密码、Cookie、Ticket、Token 和校准 `--data` 不得写入日志或回复；真实写操作只以 `success=true` 为准
 - 研讨室 `group` 不含自己；建议 3–9 个同行学号；申请说明必须多于 10 个字
 - 河宝相关查询前先 `system_status`
-- 教务登录优先 IDS（`CASTGC`/`TGC`）；失败后仅自动一次 xk Kingo；不生成/覆盖 CAS Jar
+- 预约必须确认日期、开始时间及结束时间；用户明确接受完整服务端时段时才传 `--end_policy server_full_slot`，否则先追问。查询默认值不构成写入授权。
+- 教务登录优先 IDS（`CASTGC`/`TGC`）；仅在提交凭据前 IDS 不可用时降级一次 xk Kingo；验证码、锁号、密码错误、限流或提交结果未知时停止重试；不生成/覆盖 CAS Jar
 - 遇到 Kingo 验证码立即返回 `captcha_required`，禁止识别、绕过或循环重试；根据 `auth.mode`、`degraded`、`error_code`、`warning` 说明能力边界
