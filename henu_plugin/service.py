@@ -25,6 +25,7 @@ from henu_plugin.cache import (
     get_cache_stats,
     invalidate_account_cache,
     invalidate_schedule_cache,
+    invalidate_user_cache,
 )
 from henu_plugin.cli import (
     build_help_payload,
@@ -333,7 +334,10 @@ class HenuPluginService:
         if isinstance(result, dict) and result.get("success"):
             effective_tool = _text(result.get("_resolved_tool_name")) or tool_name
             if effective_tool in {"setup_account"}:
-                invalidate_account_cache(identity.storage_key)
+                if result.get("binding_changed"):
+                    # This file is outside output_dir and tracked by Storage.
+                    paths.schedule_file.write_text("{}", encoding="utf-8")
+                invalidate_user_cache(identity.storage_key)
             elif effective_tool in {"sync_schedule"}:
                 invalidate_schedule_cache(identity.storage_key)
             elif effective_tool in {"library_reserve", "library_auto_signin", "library_cancel"}:

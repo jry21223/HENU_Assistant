@@ -98,6 +98,7 @@ _SEMINAR_SIGNIN_TASK_LOCK = threading.Lock()
 _SEMINAR_AUTO_SIGNIN_THREAD: threading.Thread | None = None
 _SEMINAR_AUTO_SIGNIN_THREAD_LOCK = threading.Lock()
 _LAST_LIBRARY_LOGIN_ERROR = ""
+_PROFILE_WRITE_LOCK = threading.RLock()
 
 # 尝试导入校园核心模块
 HenuCampusBot = None
@@ -585,9 +586,10 @@ def _resolve_account(student_id: str, password: str, use_saved_account: bool = T
 
 def _save_profile_fields(fields: dict[str, Any]) -> None:
     """加密并保存配置字段"""
-    profile = load_encrypted_profile(PROFILE_FILE)
-    profile.update(fields)
-    save_encrypted_profile(PROFILE_FILE, profile)
+    with _PROFILE_WRITE_LOCK:
+        profile = load_encrypted_profile(PROFILE_FILE)
+        profile.update(fields)
+        save_encrypted_profile(PROFILE_FILE, profile)
 
 
 def _resolve_library_defaults() -> tuple[str, str]:
@@ -1750,6 +1752,43 @@ def show_account() -> dict[str, Any]:
     return {"success": True, "account": _mask_profile(_effective_profile())}
 
 
+def _persist_account_binding(fields: dict[str, Any], cookies: dict[str, Any] | None) -> bool:
+    with _PROFILE_WRITE_LOCK:
+        output_files = [
+            path for path in Path(OUTPUT_DIR).rglob("*")
+            if path.is_file() and not path.is_symlink()
+        ]
+        artifact_files = (COOKIE_FILE, CAS_COOKIE_FILE, LIBRARY_COOKIE_FILE, HEBAO_TOKEN_FILE)
+        snapshot = {
+            path: path.read_bytes() if path.exists() else None
+            for path in (PROFILE_FILE, *artifact_files, SEMINAR_SIGNIN_TASK_FILE, *output_files)
+        }
+        try:
+            profile = _effective_profile()
+            changed = str(profile.get("student_id") or "").strip() != fields["student_id"]
+            for path in artifact_files:
+                save_json(path, {})
+            if changed:
+                for key in ("library_location", "library_seat_no", "location", "seat_no",
+                            "seminar_groups", "seminar_mobile", "mobile"):
+                    profile.pop(key, None)
+                save_json(SEMINAR_SIGNIN_TASK_FILE, {"tasks": []})
+                for path in output_files:
+                    path.unlink()
+            profile.update(fields)
+            save_encrypted_profile(PROFILE_FILE, profile)
+            if cookies is not None:
+                _save_xk_cookies(cookies)
+        except Exception:
+            for path, content in snapshot.items():
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(content)
+            raise
+        return changed
+
+
 def save_account(
     student_id: str,
     password: str,
@@ -1765,28 +1804,58 @@ def save_account(
         return {"success": False, "msg": "student_id/password 不能为空"}
 
     context: dict[str, Any] = {}
-    auth: dict[str, Any] = _saved_xk_auth_info()
+    cookies: dict[str, Any] | None = None
+    auth: dict[str, Any] = {"mode": "", "error_code": "not_verified", "message": "尚未验证账号"}
     if verify_login:
-        client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
-        if not client.login():
+        # A credential save must verify this password, not an older session.
+        client = HenuXkClient(sid, pwd, saved_cookies=None)
+        try:
+            logged_in = client.login()
+            if logged_in:
+                context = client.fetch_user_context()
+        except Exception:
             return {
                 "success": False,
+                "verified": False,
+                "msg": "无法核对本次登录态账号，未保存绑定",
+                "auth": {"mode": "", "error_code": "binding_verification_unavailable"},
+            }
+        if not logged_in:
+            return {
+                "success": False,
+                "verified": False,
                 "msg": client.auth_result.message,
                 "auth": client.get_auth_info(),
             }
-        _save_xk_cookies(client.get_cookies())
-        context = client.fetch_user_context()
         auth = client.get_auth_info()
+        if not context.get("authenticated") or str(context.get("login_id") or "").strip() != sid:
+            return {
+                "success": False,
+                "verified": False,
+                "msg": "登录态账号与提交学号不一致或已失效，未保存绑定",
+                "auth": {**auth, "error_code": "account_mismatch" if context.get("authenticated") else "session_expired"},
+            }
+        cookies = client.get_cookies()
 
     fields: dict[str, Any] = {"student_id": sid, "password": pwd}
     if str(library_location or "").strip():
         fields["library_location"] = str(library_location).strip()
     if str(library_seat_no or "").strip():
         fields["library_seat_no"] = str(library_seat_no).strip()
-    _save_profile_fields(fields)
+    try:
+        binding_changed = _persist_account_binding(fields, cookies)
+    except Exception:
+        return {
+            "success": False,
+            "verified": False,
+            "error_code": "binding_persist_failed",
+            "msg": "账号保存失败，本次新绑定未确认，请检查本地存储",
+        }
     return {
         "success": True,
-        "msg": "账号已保存",
+        "verified": verify_login,
+        "binding_changed": binding_changed,
+        "msg": "账号已保存并验证" if verify_login else "账号已保存，尚未验证登录",
         "account": _mask_profile(_effective_profile()),
         "auth": auth,
         "context": {
@@ -3086,13 +3155,18 @@ def setup_account(
     if not result.get("success"):
         return result
 
-    calibration: dict[str, Any] = {}
-    if calibrate_period_time:
+    calibration: dict[str, Any] = {
+        "skipped": True,
+        "reason": "disabled" if not calibrate_period_time else "account_not_verified",
+    }
+    if calibrate_period_time and result.get("verified"):
         calibration = auto_calibrate_period_time(force=True)
 
     return {
         "success": True,
-        "msg": "账号初始化完成",
+        "msg": "账号初始化完成" if result.get("verified") else "账号已保存，尚未验证登录",
+        "verified": result.get("verified", False),
+        "binding_changed": result.get("binding_changed", False),
         "account": result.get("account", {}),
         "auth": result.get("auth", {}),
         "login_context": result.get("context", {}),
