@@ -4,6 +4,7 @@ import json
 import shlex
 from typing import Any
 
+from henu_mcp.core.reservation_request import reservation_request_error
 from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
 from henu_plugin.confirmation import (
@@ -116,6 +117,15 @@ class HenuCli(BaseHenuTool):
         if missing:
             flags = "、".join("--" + key.replace("_", "-") for key in missing)
             return f"外部写操作必须显式提供完整参数，缺少：{flags}。不会使用账号默认值或隐式日期。"
+        if tool == "library_reserve":
+            error = reservation_request_error(
+                target_date=params.get("target_date", ""),
+                preferred_time=params.get("preferred_time", ""),
+                preferred_end_time=params.get("preferred_end_time", ""),
+                end_policy=params.get("end_policy", ""),
+            )
+            if error:
+                return str(error["msg"])
         if tool == "seminar_signin" and params.get("auto_scan"):
             return "LangBot 写操作确认不允许 seminar signin --auto-scan；请先查询签到任务并指定 --record-id。"
         return ""
@@ -130,7 +140,7 @@ class HenuCli(BaseHenuTool):
             "yuketang_exam_set": ("auto_answer", "llm", "subjective", "master", "slave"),
             "yuketang_list_update": ("scope", "op", "items"),
             "yuketang_start_time": ("op", "course", "slots"),
-            "library_reserve": ("location", "seat_no", "target_date", "preferred_time", "preferred_end_time"),
+            "library_reserve": ("location", "seat_no", "target_date", "preferred_time", "preferred_end_time", "end_policy"),
             "library_auto_signin": ("record_id",),
             "library_cancel": ("record_id", "record_type"),
             "seminar_reserve": ("area_id", "target_date", "start_time", "end_time", "title"),
@@ -250,6 +260,15 @@ class HenuCli(BaseHenuTool):
                 "success": False,
                 "error_code": "confirmation_scope_invalid",
                 "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
+            }
+
+        parameter_error = self._write_parameter_error(spec)
+        if parameter_error:
+            return {
+                "success": False,
+                "error_code": "confirmation_parameters_incomplete",
+                "msg": parameter_error,
+                "reply_text": parameter_error,
             }
 
         result = await super().call({"command": canonical_command}, session, query_id)
