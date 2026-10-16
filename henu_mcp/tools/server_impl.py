@@ -607,6 +607,102 @@ def _resolve_library_defaults() -> tuple[str, str]:
     return location, seat_no
 
 
+@mcp.tool()
+def preferences_get() -> dict[str, Any]:
+    """读取默认图书馆区域和座位，不返回凭据，不访问学校。"""
+    with _PROFILE_WRITE_LOCK:
+        location, seat_no = _resolve_library_defaults()
+        return {
+            "success": True,
+            "preferences": {
+                "library_location": location,
+                "library_seat_no": seat_no,
+            },
+        }
+
+
+@mcp.tool()
+def preferences_set(
+    library_location: str | None = None,
+    library_seat_no: str | None = None,
+) -> dict[str, Any]:
+    """局部更新图书馆区域和座位；空值不是清空操作，也不构成预约授权。"""
+    updates = {}
+    for key, value in (
+        ("library_location", library_location),
+        ("library_seat_no", library_seat_no),
+    ):
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            return {
+                "success": False,
+                "error_code": "invalid_preference_value",
+                "msg": "偏好必须为非空文本；清空请使用 preferences_clear",
+            }
+        updates[key] = value.strip()
+    if not updates:
+        return {
+            "success": False,
+            "error_code": "missing_preferences",
+            "msg": "至少提供一个偏好字段",
+        }
+    with _PROFILE_WRITE_LOCK:
+        profile = _effective_profile()
+        old_location = str(
+            profile.get("library_location") or profile.get("location") or ""
+        ).strip()
+        if (
+            "library_location" in updates
+            and updates["library_location"] != old_location
+        ):
+            profile.pop("library_seat_no", None)
+            profile.pop("seat_no", None)
+        profile.update(updates)
+        return _persist_library_preferences(profile, "偏好已保存")
+
+
+@mcp.tool()
+def preferences_clear(keys: list[str]) -> dict[str, Any]:
+    """显式清空选中的区域／座位偏好；不会清除凭据或授权任何预约。"""
+    aliases = {"library_location": "location", "library_seat_no": "seat_no"}
+    if (
+        not isinstance(keys, list)
+        or not keys
+        or any(key not in aliases for key in keys)
+    ):
+        return {
+            "success": False,
+            "error_code": "invalid_preference_keys",
+            "msg": "必须明确指定 library_location 或 library_seat_no；未知字段不执行清空",
+        }
+    with _PROFILE_WRITE_LOCK:
+        profile = _effective_profile()
+        for key in keys:
+            profile.pop(key, None)
+            profile.pop(aliases[key], None)
+        return _persist_library_preferences(profile, "偏好已清空")
+
+
+def _persist_library_preferences(
+    profile: dict[str, Any], message: str
+) -> dict[str, Any]:
+    original = PROFILE_FILE.read_bytes() if PROFILE_FILE.exists() else None
+    try:
+        save_encrypted_profile(PROFILE_FILE, profile)
+    except Exception:
+        if original is None:
+            PROFILE_FILE.unlink(missing_ok=True)
+        else:
+            PROFILE_FILE.write_bytes(original)
+        return {
+            "success": False,
+            "error_code": "preference_persist_failed",
+            "msg": "偏好保存失败，原配置已恢复",
+        }
+    return {**preferences_get(), "msg": message}
+
+
 def _parse_csv_text(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
     if isinstance(value, (list, tuple)):
         items = [str(item or "").strip() for item in value]
@@ -1752,25 +1848,47 @@ def show_account() -> dict[str, Any]:
     return {"success": True, "account": _mask_profile(_effective_profile())}
 
 
-def _persist_account_binding(fields: dict[str, Any], cookies: dict[str, Any] | None) -> bool:
+def _persist_account_binding(
+    fields: dict[str, Any], cookies: dict[str, Any] | None
+) -> bool:
     with _PROFILE_WRITE_LOCK:
         output_files = [
-            path for path in Path(OUTPUT_DIR).rglob("*")
+            path
+            for path in Path(OUTPUT_DIR).rglob("*")
             if path.is_file() and not path.is_symlink()
         ]
-        artifact_files = (COOKIE_FILE, CAS_COOKIE_FILE, LIBRARY_COOKIE_FILE, HEBAO_TOKEN_FILE)
+        artifact_files = (
+            COOKIE_FILE,
+            CAS_COOKIE_FILE,
+            LIBRARY_COOKIE_FILE,
+            HEBAO_TOKEN_FILE,
+        )
         snapshot = {
             path: path.read_bytes() if path.exists() else None
-            for path in (PROFILE_FILE, *artifact_files, SEMINAR_SIGNIN_TASK_FILE, *output_files)
+            for path in (
+                PROFILE_FILE,
+                *artifact_files,
+                SEMINAR_SIGNIN_TASK_FILE,
+                *output_files,
+            )
         }
         try:
             profile = _effective_profile()
-            changed = str(profile.get("student_id") or "").strip() != fields["student_id"]
+            changed = (
+                str(profile.get("student_id") or "").strip() != fields["student_id"]
+            )
             for path in artifact_files:
                 save_json(path, {})
             if changed:
-                for key in ("library_location", "library_seat_no", "location", "seat_no",
-                            "seminar_groups", "seminar_mobile", "mobile"):
+                for key in (
+                    "library_location",
+                    "library_seat_no",
+                    "location",
+                    "seat_no",
+                    "seminar_groups",
+                    "seminar_mobile",
+                    "mobile",
+                ):
                     profile.pop(key, None)
                 save_json(SEMINAR_SIGNIN_TASK_FILE, {"tasks": []})
                 for path in output_files:

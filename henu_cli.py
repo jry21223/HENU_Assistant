@@ -26,6 +26,9 @@ from henu_campus_mcp import (  # noqa: E402
     library_cancel,
     library_query,
     library_reserve,
+    preferences_clear,
+    preferences_get,
+    preferences_set,
     resource_registry_query,
     resource_registry_sync,
     schedule_query,
@@ -46,6 +49,13 @@ from henu_campus_mcp import (  # noqa: E402
 )
 
 
+class _StoreOnce(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"参数 {option_string} 不可重复")
+        setattr(namespace, self.dest, values)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="河南大学校园助手")
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -61,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="初始化时不自动校准节次时间",
     )
+
+    subparsers.add_parser("preferences_get", help="查看默认图书馆区域和座位", allow_abbrev=False)
+    pref_set = subparsers.add_parser("preferences_set", help="局部更新区域和座位偏好", allow_abbrev=False)
+    pref_set.add_argument("--library_location", default=None, action=_StoreOnce)
+    pref_set.add_argument("--library_seat_no", default=None, action=_StoreOnce)
+    pref_clear = subparsers.add_parser("preferences_clear", help="显式清空选中的偏好", allow_abbrev=False)
+    pref_clear.add_argument("--keys", nargs="+", required=True, action=_StoreOnce,
+                            choices=["library_location", "library_seat_no"])
 
     sync_parser = subparsers.add_parser("sync_schedule", help="同步课表")
     sync_parser.add_argument("--xn", default=None, help="学年")
@@ -312,6 +330,12 @@ def main() -> None:
                 verify_login=not args.no_verify_login,
                 calibrate_period_time=not args.no_calibrate_period_time,
             )
+        elif args.command == "preferences_get":
+            result = preferences_get()
+        elif args.command == "preferences_set":
+            result = preferences_set(library_location=args.library_location, library_seat_no=args.library_seat_no)
+        elif args.command == "preferences_clear":
+            result = preferences_clear(keys=args.keys)
         elif args.command == "sync_schedule":
             result = sync_schedule(
                 xn=args.xn,
