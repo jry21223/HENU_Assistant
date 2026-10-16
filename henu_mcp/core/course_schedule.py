@@ -241,7 +241,10 @@ class HenuXkClient:
 
     @staticmethod
     def _ids_error(text: str, status_code: int = 0) -> tuple[str, str]:
-        plain = re.sub(r"(?is)<[^>]+>", " ", str(text or ""))
+        markup = re.sub(
+            r"(?is)<(?:script|style)\b[^>]*>.*?</(?:script|style)\s*>", " ", str(text or ""),
+        )
+        plain = re.sub(r"(?is)<[^>]+>", " ", markup)
         plain = re.sub(r"\s+", " ", plain).strip()
         compact = plain.lower()
         if any(marker in compact for marker in ("验证码", "captcha", "校验码")):
@@ -269,32 +272,36 @@ class HenuXkClient:
     def _login_via_ids(self) -> AuthResult:
         cas_auth_url = self._cas_auth_url()
         try:
-            response = self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
-            if self._check_logged_in():
-                return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
+            login_page = self.session.get(cas_auth_url, allow_redirects=True, timeout=30)
         except Exception as exc:
             code = "ids_unavailable" if isinstance(exc, requests.RequestException) else "protocol_error"
             return AuthResult(False, error_code=code, message=f"IDS 登录入口访问失败: {exc}")
+
+        login_text = self._decode_text(login_page)
+        error_code, message = self._ids_error(login_text, login_page.status_code)
+        if error_code != "service_error" or login_page.status_code >= 400:
+            return AuthResult(False, error_code=error_code, message=message)
+
+        # Reuse a session established by the first response without replacing
+        # an observed rejection with another request or network failure.
+        try:
+            if self._check_logged_in():
+                return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
+        except Exception as exc:
+            return AuthResult(False, error_code="service_error", message=f"xk 登录态核验失败: {exc}")
 
         if not self.password:
             return AuthResult(False, error_code="missing_password", message="IDS 登录缺少密码")
 
         credentials_submitted = False
         try:
-            self._clear_runtime_cookies()
-            login_page = self.session.get(cas_auth_url, timeout=30)
-            login_text = self._decode_text(login_page)
-            if login_page.status_code >= 400:
-                error_code, message = self._ids_error(login_text, login_page.status_code)
-                return AuthResult(False, error_code=error_code, message=message)
             execution_match = re.search(r'name="execution" value="(.*?)"', login_text)
             salt_match = re.search(r'id="pwdEncryptSalt" value="(.*?)"', login_text)
             if not execution_match or not salt_match:
-                error_code, message = self._ids_error(login_text, login_page.status_code)
-                if error_code == "service_error":
-                    error_code = "protocol_error"
-                    message = "IDS 登录页缺少 execution 或 pwdEncryptSalt"
-                return AuthResult(False, error_code=error_code, message=message)
+                return AuthResult(
+                    False, error_code="protocol_error",
+                    message="IDS 登录页缺少 execution 或 pwdEncryptSalt",
+                )
 
             form_data = {
                 "username": self.username,
@@ -313,15 +320,17 @@ class HenuXkClient:
                 allow_redirects=True,
                 timeout=35,
             )
+            if login_response.status_code >= 500:
+                return AuthResult(
+                    False, error_code="auth_state_unknown",
+                    message=f"IDS 登录请求已提交，结果未知（HTTP {login_response.status_code}）",
+                )
             if self._check_logged_in():
                 return AuthResult(True, mode="ids_cas", message="IDS 统一认证登录成功")
             error_code, message = self._ids_error(
                 self._decode_text(login_response),
                 login_response.status_code,
             )
-            if error_code in IDS_SAFE_FALLBACK_ERROR_CODES:
-                error_code = "auth_state_unknown"
-                message = f"{message}；认证请求已提交，结果未知"
             return AuthResult(False, error_code=error_code, message=message)
         except Exception as exc:
             if credentials_submitted:
@@ -330,8 +339,7 @@ class HenuXkClient:
                     error_code="auth_state_unknown",
                     message=f"IDS 登录请求已提交但结果未知: {exc}",
                 )
-            code = "ids_unavailable" if isinstance(exc, requests.RequestException) else "protocol_error"
-            return AuthResult(False, error_code=code, message=f"IDS 登录页处理失败: {exc}")
+            return AuthResult(False, error_code="protocol_error", message=f"IDS 登录页处理失败: {exc}")
 
     def login(self) -> bool:
         if self._check_logged_in():
