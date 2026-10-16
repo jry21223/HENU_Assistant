@@ -143,3 +143,9 @@ python3 diagnose_mcp.py
 ## License
 
 [MIT](LICENSE)
+
+## 图书馆区域与座位偏好
+
+`preferences_get()`、`preferences_set(library_location="第一自习室", library_seat_no="001")`、`preferences_clear(keys=["library_seat_no"])`。偏好不需要重新提供密码，仅保存区域和座位；清空必须明确字段。换区域会清除旧座位，除非同时提供新座位。偏好不会发起或授权预约，日期、时间及确认要求仍然适用。
+
+保存账号时会通过全新会话核对学号。验证失败不替换旧绑定；不验证保存会标记 `verified=false` 并跳过节次校准。成功换绑后旧会话和课表缓存失效。
