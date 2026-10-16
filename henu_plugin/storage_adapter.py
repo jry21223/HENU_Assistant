@@ -15,7 +15,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from langbot_plugin.api.definition.plugin import BasePlugin
@@ -242,14 +242,35 @@ class PluginStorageAdapter:
                         f"Storage 已被其他请求修改，拒绝覆盖: {spec.storage_key}"
                     )
 
-            for spec, payload in changed:
-                lock = self._shared_lock() if spec.shared else None
-                if lock is not None:
-                    async with lock:
+            attempted = []
+            try:
+                for spec, payload in changed:
+                    # Record before the call: a lost response may follow a write.
+                    if not spec.shared:
+                        attempted.append((spec, payload, self._original_bytes[spec.storage_key]))
+                    lock = self._shared_lock() if spec.shared else None
+                    if lock is not None:
+                        async with lock:
+                            await self._write_storage(spec.storage_key, payload)
+                    else:
                         await self._write_storage(spec.storage_key, payload)
-                else:
-                    await self._write_storage(spec.storage_key, payload)
-                self._original_bytes[spec.storage_key] = payload
+                    self._original_bytes[spec.storage_key] = payload
+            except Exception as commit_error:
+                restore_failed = False
+                # Shared metadata retains its independent commit semantics.
+                for spec, candidate, original in reversed(attempted):
+                    try:
+                        current = await self._read_storage(spec.storage_key)
+                        if current == original:
+                            continue
+                        if current != candidate:
+                            raise StorageConflictError("恢复时发现其他请求的新记录，拒绝覆盖")
+                        await self._write_storage(spec.storage_key, original)
+                    except Exception:
+                        restore_failed = True
+                if restore_failed:
+                    raise StorageAdapterError("Storage 部分保存失败且未能完整恢复，请检查存储后再操作") from commit_error
+                raise
         finally:
             self._release_transaction()
             self._cleanup()

@@ -148,6 +148,7 @@ class HenuPluginService:
         self._tool_dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "henu_cli": self._henu_cli,
             "setup_account": self._setup_account,
+            "preferences": self._preferences,
             "sync_schedule": self._sync_schedule,
             "smart_course_selection": self._smart_course_selection,
             "smart_course_select": self._smart_course_select,
@@ -338,6 +339,11 @@ class HenuPluginService:
                     # This file is outside output_dir and tracked by Storage.
                     paths.schedule_file.write_text("{}", encoding="utf-8")
                 invalidate_user_cache(identity.storage_key)
+            elif effective_tool == "preferences":
+                action = (result.get("_effective_params") or params or {}).get("action")
+                if action in {"set", "clear"}:
+                    invalidate_account_cache(identity.storage_key)
+                    LIBRARY_QUERY_CACHE.invalidate_pattern(f"user:{identity.storage_key}:")
             elif effective_tool in {"sync_schedule"}:
                 invalidate_schedule_cache(identity.storage_key)
             elif effective_tool in {"library_reserve", "library_auto_signin", "library_cancel"}:
@@ -552,6 +558,19 @@ class HenuPluginService:
             calibrate_period_time=_bool(params.get("calibrate_period_time"), True),
         )
 
+
+    def _preferences(self, params: dict[str, Any]) -> dict[str, Any]:
+        action = params.get("action")
+        if action == "get":
+            return mcp_server.preferences_get()
+        if action == "set":
+            return mcp_server.preferences_set(
+                library_location=params.get("library_location"),
+                library_seat_no=params.get("library_seat_no"),
+            )
+        if action == "clear":
+            return mcp_server.preferences_clear(keys=params.get("keys", []))
+        return {"success": False, "error_code": "invalid_action", "msg": "不支持的偏好操作"}
 
     def _smart_course_selection(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.smart_course_selection(
