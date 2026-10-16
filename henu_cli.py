@@ -53,6 +53,8 @@ class _StoreOnce(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         if getattr(namespace, self.dest, None) is not None:
             parser.error(f"参数 {option_string} 不可重复")
+        if isinstance(values, list) and len(values) != len(set(values)):
+            parser.error(f"参数 {option_string} 的字段不可重复")
         setattr(namespace, self.dest, values)
 
 

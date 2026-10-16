@@ -44,6 +44,7 @@ def test_snake_case_preferences_commands_persist_and_clear(
     [
         ["preferences_clear"],
         ["preferences_clear", "--keys", "typo"],
+        ["preferences_clear", "--keys", "library_location", "library_location"],
         ["preferences_get", "extra"],
         ["preferences_set", "--library_location", "A", "--library_location", "B"],
         ["preferences_set", "--library_loc", "A"],
