@@ -9,10 +9,11 @@ from henu_mcp.core.course_schedule import HenuXkClient
 
 
 def install_school_http(monkeypatch, *, page="请输入验证码", status=200,
-                        post_result=None, unavailable=False, authenticated=False):
+                        post_result=None, unavailable=False, authenticated=False,
+                        second_get_error=False):
     """Offline adapter at the school HTTP seam, with an observable request log."""
     calls = []
-    state = {"authenticated": authenticated}
+    state = {"authenticated": authenticated, "ids_gets": 0}
     form = ('<input name="execution" value="e1">'
             '<input id="pwdEncryptSalt" value="0123456789abcdef">')
 
@@ -32,6 +33,9 @@ def install_school_http(monkeypatch, *, page="请输入验证码", status=200,
                 if body == "signed_in":
                     state["authenticated"] = True
             else:
+                state["ids_gets"] += 1
+                if second_get_error and state["ids_gets"] > 1:
+                    raise requests.ConnectionError("later IDS request failed")
                 body, code = (form if page == "form" else page), status
         elif parsed.path.endswith("/cas/login.action"):
             body = ('<script>var _ssessionid="SESSION";</script>'
@@ -127,3 +131,60 @@ def test_existing_ids_session_is_preserved(monkeypatch):
     assert client.login() is True
     assert client.get_auth_info()["mode"] == "ids_cas"
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(("page", "status", "expected"), [
+    ("请输入验证码", 200, "captcha_required"),
+    ("Too Many Requests", 429, "rate_limited"),
+    ("unknown IDS response", 200, "protocol_error"),
+])
+def test_first_ids_rejection_cannot_be_overwritten_by_a_later_network_failure(monkeypatch, page, status, expected):
+    calls = install_school_http(
+        monkeypatch, page=page, status=status, second_get_error=True,
+    )
+    client = HenuXkClient("student", "offline-test-password")
+
+    assert client.login() is False
+    assert client.get_auth_info()["error_code"] == expected
+    assert not any(method == "POST" for method, _ in calls)
+    assert not any("/cas/login.action" in url for _, url in calls)
+
+
+@pytest.mark.parametrize(("message", "expected"), [
+    ("账号已被锁定", "account_locked"),
+    ("尝试次数过多", "rate_limited"),
+    ("需要完成额外校验", "additional_verification_required"),
+    ("请输入验证码", "captcha_required"),
+])
+def test_explicit_rejection_on_a_valid_login_form_stops_before_credentials(monkeypatch, message, expected):
+    form = ('<input name="execution" value="e1">'
+            '<input id="pwdEncryptSalt" value="0123456789abcdef">')
+    calls = install_school_http(monkeypatch, page=form + '<div class="authError">' + message + '</div>')
+    client = HenuXkClient("student", "offline-test-password")
+
+    assert client.login() is False
+    assert client.get_auth_info()["error_code"] == expected
+    assert not any(method == "POST" for method, _ in calls)
+
+
+def test_hidden_captcha_input_and_scripts_do_not_block_normal_login(monkeypatch):
+    form = ('<input name="execution" value="e1">'
+            '<input id="pwdEncryptSalt" value="0123456789abcdef">'
+            '<input type="hidden" name="captcha">'
+            '<script>var captchaMessage = "请输入验证码";</script>')
+    calls = install_school_http(monkeypatch, page=form, post_result=("signed_in", 200))
+    client = HenuXkClient("student", "offline-test-password")
+
+    assert client.login() is True
+    assert client.get_auth_info()["mode"] == "ids_cas"
+    assert sum(method == "POST" for method, _ in calls) == 1
+
+
+@pytest.mark.parametrize("message", ["用户名或密码错误", "请输入验证码"])
+def test_post_5xx_remains_unknown_even_when_its_body_looks_definitive(monkeypatch, message):
+    calls = install_school_http(monkeypatch, page="form", post_result=(message, 503))
+    client = HenuXkClient("student", "offline-test-password")
+
+    assert client.login() is False
+    assert client.get_auth_info()["error_code"] == "auth_state_unknown"
+    assert sum(method == "POST" for method, _ in calls) == 1
