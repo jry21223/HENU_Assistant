@@ -33,6 +33,7 @@ def page_request_text(chain: list) -> str:
 # Every service dispatch route has a deliberate presentation title.
 TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
+    "preferences": "图书馆偏好",
     "sync_schedule": "课表导入", "schedule_query": "我的课表",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
     "course_selection_query": "教务选课", "course_selection_plan": "选课方案",

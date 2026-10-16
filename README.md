@@ -256,3 +256,9 @@ MCP 连接器，保留其他 MCP，启用插件 Tool；共享 MCP Session 不能
 QQ 官方适配器单条消息当前只提供第一张附件，多张可分次发送。无法读取或不合规的图片会阻止发布并提示处理。
 草稿有效期 10 分钟，按 Bot、发送者与会话隔离，存储在插件目录的私有 `.food-drafts/drafts.sqlite3`，
 单文件权限为 600；可用 `HENU_FOOD_DRAFT_DB` 指定持久化路径。该目录不可打包或发布，备份需按私有数据处理。
+
+## 图书馆区域与座位偏好
+
+`preferences get`、`preferences set --library-location "第一自习室" --library-seat-no "001"`、`preferences clear --library-seat-no`。偏好不需要重新提供密码，仅保存区域和座位；清空必须明确字段。换区域会清除旧座位，除非同时提供新座位。偏好不会发起或授权预约，日期、时间及确认要求仍然适用。
+
+保存账号时会通过全新会话核对学号。验证失败不替换旧绑定；不验证保存会标记 `verified=false` 并跳过节次校准。成功换绑后旧会话和课表缓存失效。

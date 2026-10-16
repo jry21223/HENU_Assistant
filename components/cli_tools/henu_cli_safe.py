@@ -115,6 +115,14 @@ class HenuCliSafe(HenuCli):
             msg = str(result.get("msg") or "").strip()
             if msg:
                 return msg
+        preferences = result.get("preferences")
+        if isinstance(preferences, dict):
+            return "\n".join((
+                str(result.get("msg") or "当前图书馆偏好"),
+                f"默认区域：{preferences.get('library_location') or '未设置'}",
+                f"默认座位：{preferences.get('library_seat_no') or '未设置'}",
+                "保存偏好不会发起预约；预约仍需明确参数并另行确认。",
+            ))
         if self._is_empty_classroom_result(result):
             return self._format_empty_classroom_reply(result)
         if isinstance(result.get("locations"), list):

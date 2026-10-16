@@ -114,6 +114,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
 
     if head == "system":
         return _parse_system(raw, argv)
+    if head == "preferences":
+        return _parse_preferences(raw, argv)
     if head == "account":
         return _parse_account(raw, argv)
     if head == "schedule":
@@ -151,6 +153,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "summary": "HENU CLI 采用渐进式披露。先看一级命令，再进入具体主题。",
             "commands": [
                 "account status",
+                "preferences get",
                 "account set --student-id ... --password ...",
                 "schedule now",
                 "course status",
@@ -186,6 +189,19 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "参数值包含空格时要加引号。",
                 "不确定参数时，不要一次展开全部，先进入更窄的 help 主题。",
             ],
+        }
+
+    if normalized == "preferences":
+        return {
+            "topic": normalized,
+            "summary": "私聊管理默认图书馆区域和座位，无需重新提交密码。",
+            "commands": ["preferences get",
+                         "preferences set --library-location <区域> [--library-seat-no <座位>]",
+                         "preferences clear --library-location [--library-seat-no]"],
+            "examples": ["preferences set --library-location 第一自习室 --library-seat-no 001",
+                         "preferences clear --library-seat-no"],
+            "tips": ["换区域会清除旧座位，除非同时提供新座位。",
+                     "clear 必须指定字段；偏好不是预约授权。"],
         }
 
     if normalized == "account":
@@ -711,6 +727,44 @@ def _parse_account(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
 
     return _error_spec(raw, f"未知命令 `account {argv[1]}`。", help_topic="account")
+
+
+def _parse_preferences(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 1 or argv[1] in {"help", "--help", "-h"}:
+        return _help_spec(raw, argv, "preferences")
+    action = argv[1]
+    options = {"--library-location": "library_location", "--library-seat-no": "library_seat_no"}
+    params: dict[str, Any] = {"action": action}
+    tokens = argv[2:]
+    if action == "get":
+        if tokens:
+            return _error_spec(raw, "preferences get 不接受额外参数", help_topic="preferences")
+    elif action in {"set", "clear"}:
+        if not tokens:
+            return _error_spec(raw, "请明确指定区域或座位字段", help_topic="preferences")
+        seen: set[str] = set()
+        keys = []
+        index = 0
+        while index < len(tokens):
+            flag = tokens[index]
+            if flag not in options or flag in seen:
+                return _error_spec(raw, "未知、重复或多余的偏好参数", help_topic="preferences")
+            seen.add(flag)
+            key = options[flag]
+            if action == "set":
+                if index + 1 >= len(tokens) or tokens[index + 1].startswith("--") or not tokens[index + 1].strip():
+                    return _error_spec(raw, "偏好参数缺少非空值", help_topic="preferences")
+                params[key] = tokens[index + 1].strip()
+                index += 2
+            else:
+                keys.append(key)
+                index += 1
+        if action == "clear":
+            params["keys"] = keys
+    else:
+        return _error_spec(raw, "preferences 仅支持 get/set/clear", help_topic="preferences")
+    return CliCommandSpec(raw=raw, argv=argv, resolved_tool="preferences", params=params,
+                          action=f"preferences {action}", should_preload_runtime_context=False)
 
 
 def _parse_schedule(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
