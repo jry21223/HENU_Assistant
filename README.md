@@ -87,7 +87,7 @@ resource search 十号楼101
 library current
 library locations --date YYYY-MM-DD
 library seats --location "<区域>" --date YYYY-MM-DD --time 08:00
-library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD --time 08:00
+library reserve --location "<区域>" --seat-no "<座位号>" --date YYYY-MM-DD --time 08:00 --end-time 12:00
 seminar rooms --date YYYY-MM-DD --start 14:00 --end 16:00 --members 4
 seminar signin --auto-scan
 yuketang status
@@ -202,7 +202,7 @@ QQ 功能结果采用统一 Markdown 卡片：状态、时间位置、关键条�
 
 ## 登录
 
-IDS 优先；失败时只一次 Kingo。Kingo 主要保 xk 能力，不生成/覆盖其他服务 CAS Cookie。验证码 → `captcha_required`。
+IDS 优先；仅在提交凭据前 IDS 不可用时降级一次 Kingo。验证码、锁号、密码错误、限流或提交结果未知时停止重试。Kingo 主要保 xk 能力，不生成/覆盖其他服务 CAS Cookie。
 
 ## 目录
 

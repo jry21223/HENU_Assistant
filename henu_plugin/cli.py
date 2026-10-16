@@ -289,17 +289,18 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "library seats [--location <区域>|--area-id <ID>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM]",
                 "library current",
                 "library records [--record-type 1] [--page 1] [--limit 20]",
-                "library reserve [--location <区域>] [--seat-no <座位>] [--date YYYY-MM-DD] [--time HH:MM] [--end-time HH:MM] [--retry-until HH:MM] [--max-attempts 30]",
+                "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD --time HH:MM (--end-time HH:MM | --end-policy server_full_slot) [--retry-until HH:MM] [--max-attempts 30]",
                 "library signin [--record-id <ID>]",
                 "library cancel --record-id <ID> [--record-type auto]",
             ],
             "examples": [
                 "library current",
                 "library seats --location 金明馆北区 --date 2026-03-30 --time 08:00",
-                "library reserve --location 金明馆北区 --seat-no 201 --date 2026-03-30",
+                "library reserve --location 金明馆北区 --seat-no 201 --date YYYY-MM-DD --time 08:00 --end-time 12:00",
             ],
             "tips": [
                 "先用 `library current` 或 `library records` 看现状。",
+                "预约必须明确日期、开始和结束时间；仅用户明确接受完整服务端时段时使用 --end-policy server_full_slot。",
                 "取消与签到属于真实写操作，只认 `success=true`。",
             ],
         }
@@ -595,11 +596,11 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         if spec.params.get("view") == "locations":
             if not success:
                 return ["library locations --date YYYY-MM-DD"]
-            return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD"]
+            return ["library seats --location <区域> --date YYYY-MM-DD", "library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD --time HH:MM --end-time HH:MM"]
         if spec.params.get("view") == "seats":
             if not success:
                 return ["library locations --date YYYY-MM-DD"]
-            return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD", "library current"]
+            return ["library reserve --location <区域> --seat-no <座位> --date YYYY-MM-DD --time HH:MM --end-time HH:MM", "library current"]
         return ["library current", "library records"]
     if resolved_tool == "library_reserve":
         return ["library current", "library signin"] if success else ["library locations", "library current"]
@@ -975,7 +976,9 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in {"help", "-h", "--help"}:
         return _help_spec(raw, argv, "library")
 
-    options, _, error = _parse_options(argv[2:])
+    options, positionals, error = _parse_options(
+        argv[2:], reject_duplicates=sub in {"reserve", "book"},
+    )
     if error:
         return _error_spec(raw, error, help_topic="library")
 
@@ -1037,6 +1040,20 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
             should_preload_runtime_context=True,
         )
     if sub in {"reserve", "book"}:
+        allowed = {
+            "location", "seat_no", "date", "target_date", "time", "preferred_time",
+            "end_time", "preferred_end_time", "end_policy", "retry_until",
+            "retry_interval_seconds", "max_attempts",
+        }
+        if set(options) - allowed or positionals:
+            return _error_spec(raw, "预约包含不支持的参数；请查看 help library。", help_topic="library")
+        if any(value is True or not str(value).strip() for value in options.values()):
+            return _error_spec(raw, "预约参数必须提供明确的值。", help_topic="library")
+        for first, second in (
+            ("date", "target_date"), ("time", "preferred_time"), ("end_time", "preferred_end_time"),
+        ):
+            if first in options and second in options:
+                return _error_spec(raw, "同一预约参数的别名不能重复提供。", help_topic="library")
         retry_interval, error = _int_option(options, "retry_interval_seconds", 2)
         if error:
             return _error_spec(raw, error, help_topic="library")
@@ -1051,8 +1068,9 @@ def _parse_library(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                 "location": _string_option(options, "location"),
                 "seat_no": _string_option(options, "seat_no"),
                 "target_date": _string_option(options, "date") or _string_option(options, "target_date"),
-                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time") or "08:00",
+                "preferred_time": _string_option(options, "time") or _string_option(options, "preferred_time"),
                 "preferred_end_time": _string_option(options, "end_time") or _string_option(options, "preferred_end_time"),
+                "end_policy": _string_option(options, "end_policy"),
                 "retry_until": _string_option(options, "retry_until"),
                 "retry_interval_seconds": retry_interval,
                 "max_attempts": max_attempts,
