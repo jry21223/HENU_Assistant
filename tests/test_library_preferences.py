@@ -65,7 +65,10 @@ def test_explicit_clear_removes_legacy_alias_without_clearing_other_fields(
     assert api.show_account()["account"]["student_id"] == "old-student"
 
 
-@pytest.mark.parametrize("keys", [[], ["password"], ["library_location", "typo"]])
+@pytest.mark.parametrize(
+    "keys",
+    [[], ["password"], ["library_location", "typo"], ["library_location", "library_location"]],
+)
 def test_invalid_clear_never_mutates_profile(account_files, keys):
     before = account_files["profile_file"].read_bytes()
 

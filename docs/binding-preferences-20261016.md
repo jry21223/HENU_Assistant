@@ -49,4 +49,3 @@ including persisted round trips, isolation, cache invalidation and pending
 booking constraints. Mock school HTTP/filesystem failures, not internal logic.
 No real school requests or credentials. Red/green one slice at a time, then each
 variant's full suite. Fixed review base is the delivery SHA used at creation.
-
