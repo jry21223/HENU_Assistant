@@ -29,6 +29,7 @@ from henu_mcp.core.course_schedule import (
     save_json,
 )
 from henu_mcp.core.kingo_auth import KINGO_WARNING
+from henu_mcp.core.reservation_request import reservation_request_error
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
     DEFAULT_CONFIG as COURSE_MONITOR_DEFAULT_CONFIG,
@@ -2116,11 +2117,12 @@ def _library_reserve_impl(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    end_policy: str = "",
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2130,6 +2132,19 @@ def _library_reserve_impl(
     重要：不要假装预约成功，必须调用此工具执行真实的预约操作。
     预约结果会返回成功或失败的详细信息。
     """
+    target_date = str(target_date or "").strip()
+    preferred_time = str(preferred_time or "").strip()
+    preferred_end_time = str(preferred_end_time or "").strip()
+    end_policy = str(end_policy or "").strip().lower()
+    validation_error = reservation_request_error(
+        target_date=target_date,
+        preferred_time=preferred_time,
+        preferred_end_time=preferred_end_time,
+        end_policy=end_policy,
+    )
+    if validation_error:
+        return validation_error
+
     if HenuCampusBot is None:
         return {"success": False, "msg": "图书馆模块不可用"}
     
@@ -2145,10 +2160,6 @@ def _library_reserve_impl(
     if not target_location or not target_seat:
         return {"success": False, "msg": "请提供 location/seat_no 或在 setup_account 中设置默认值"}
     
-    # 日期默认为明天
-    if not target_date:
-        target_date = (_now_dt().date() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
     bot = _build_library_bot(sid, pwd)
     if not bot:
         return _library_login_failed()
@@ -2157,7 +2168,7 @@ def _library_reserve_impl(
         target_location,
         target_seat,
         target_date,
-        preferred_time=str(preferred_time or "08:00"),
+        preferred_time=preferred_time,
         preferred_end_time=str(preferred_end_time or ""),
         retry_until=str(retry_until or ""),
         retry_interval_seconds=retry_interval_seconds,
@@ -3351,12 +3362,13 @@ def library_reserve(
     location: str = "",
     seat_no: str = "",
     target_date: str = "",
-    preferred_time: str = "08:00",
+    preferred_time: str = "",
     preferred_end_time: str = "",
     resource_id: str = "",
     retry_until: str = "",
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
+    end_policy: str = "",
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -3371,9 +3383,11 @@ def library_reserve(
     - location: 图书馆区域名称（如"一楼东"）
     - seat_no: 座位号（如"001"）
     - resource_id: 资源ID（如 henu:library:seat:...），优先级高于 location/seat_no
-    - target_date: 预约日期（格式：YYYY-MM-DD，默认明天）
-    - preferred_time: 首选/最早时间（格式：HH:MM，默认08:00）
-    - preferred_end_time: 最晚结束时间（格式：HH:MM；传入后只在该时间窗口内预约）
+    - target_date: 用户明确确认的预约日期（YYYY-MM-DD，必填；不会默认明天）
+    - preferred_time: 用户明确确认的开始时间（HH:MM，必填；不会默认08:00）
+    - preferred_end_time: 用户明确确认的结束时间（HH:MM，必须晚于开始时间）
+    - end_policy: 未给结束时间时，server_full_slot 表示明确授权使用服务端完整时段；
+      ask 表示先追问结束时间，不提交。查询偏好不构成预约授权。
     - retry_until: 自动抢约截止时间（HH:MM 或 ISO 日期时间；传入后默认最多尝试120次）
     - retry_interval_seconds: 抢约重试间隔秒数（1-60）
     - max_attempts: 最大尝试次数（1-120）
@@ -3399,6 +3413,7 @@ def library_reserve(
         target_date=target_date,
         preferred_time=preferred_time,
         preferred_end_time=preferred_end_time,
+        end_policy=end_policy,
         retry_until=retry_until,
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,

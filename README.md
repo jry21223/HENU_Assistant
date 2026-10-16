@@ -80,6 +80,7 @@ python3 mcp_server.py --transport stdio
 
 - 先 `library_query(view="locations")`，后续只用返回的 `locations[].location` / `area_id`。  
 - 座位预约只用 `seats[].seat_no`。  
+- 预约必须明确提供 `target_date`、`preferred_time` 及较晚的 `preferred_end_time`；用户明确接受完整服务端时段时才用 `end_policy="server_full_slot"`。查询默认值不构成预约授权。
 - `source="live_empty"` 表示实时接口明确空列表（`success=false`），**不要**推测开放时间或替代方案。  
 - 写操作只以 `success=true` 为准。
 
@@ -95,7 +96,7 @@ python3 mcp_server.py --transport stdio
 ## 登录与数据
 
 - 账号、Cookie、抓取结果**仅本地保存**。  
-- **IDS CAS 优先**（`CASTGC` / `TGC`）；失败时只自动 **一次** xk Kingo。  
+- **IDS CAS 优先**（`CASTGC` / `TGC`）；仅在提交凭据前 IDS 不可用时降级 **一次** xk Kingo。验证码、锁号、密码错误、限流或提交结果未知时停止重试。
 - 不识别验证码、不绕过风控、不循环重试。  
 - Kingo 主要保课表 / 选课状态 / 空教室；图书馆、研讨室、河宝仍需 IDS。  
 - `auth` 返回 `mode`（`ids_cas` / `xk_kingo`）、`degraded`、`error_code`、`warning`。
