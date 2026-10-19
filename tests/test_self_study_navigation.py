@@ -254,3 +254,26 @@ def test_unusable_cache_asks_building_without_starting_school_login(monkeypatch,
         assert '教学楼' in str(ctx.reply.call_args)
         assert '正在查询' not in str(ctx.reply.call_args)
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('owner_matches', [True, False])
+def test_compacted_tool_summary_uses_only_current_conversation_full_card(monkeypatch, owner_matches):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    call = AsyncMock(return_value={'success': True, 'total': 5, 'reply_text': '找到5间空闲教室'})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        ctx = context('金明校区金明综合楼第2大节')
+        owner = ['bot', 'person', 'alice', 'alice'] if owner_matches else ['bot', 'person', 'bob', 'bob']
+        ctx.get_query_vars.return_value = {'_henu_card': {
+            'owner': owner, 'page': '# 河大助手 · 空教室查询\n金明综合楼1201\n金明综合楼1303'}}
+        assert await handle_navigation(plugin, ctx)
+        sent = str(ctx.reply.call_args)
+        if owner_matches:
+            assert '金明综合楼1201' in sent and '金明综合楼1303' in sent
+        else:
+            assert '金明综合楼1201' not in sent
+            assert '5' in sent and '清单' in sent
+        assert '没有可核验的该时段教室结果' not in sent
+    asyncio.run(run())

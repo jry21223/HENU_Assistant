@@ -150,19 +150,37 @@ async def handle_self_study(plugin, ctx, text):
         command += ' --freshness cache_only'
     await _reply(ctx, '正在查询', [
         '正在读取所选楼栋的该大节课程占用。' if building else '正在读取该大节已有缓存，不启动全校逐栋刷新。'])
+    staged_page = None
     try:
         result = await tool.call({'command': command}, session, ctx.query_id)
+        try:
+            variables = await ctx.get_query_vars()
+            staged = variables.get('_henu_card') if isinstance(variables, dict) else None
+            from henu_plugin.qq_cards import PREFIX
+            if (isinstance(staged, dict) and staged.get('owner') == list(key)
+                    and isinstance(staged.get('page'), str) and staged['page'].startswith(PREFIX)):
+                staged_page = staged['page']
+        except Exception:
+            pass  # The structured result remains usable when the card API is unavailable.
     except Exception:
         await _reply(ctx, '查询未完成', ['校园服务暂时无法读取，请稍后重试；没有提交预约。'])
         return True
     finally:
         await ctx.set_query_var('_henu_card', None)
+    if staged_page:
+        await ctx.reply(card_chain(staged_page))
+        return True
     if not result.get('success'):
         message = str(result.get('msg') or result.get('reply_text') or '校园服务未能完成查询。')
         auth = result.get('error_code') in {'auth_required', 'account_not_bound', 'login_required'} or any(
             word in message for word in ('登录', '账号', '密码', 'setup_account'))
         await _reply(ctx, '查询未完成', [escape(message, 600)],
             ('请在私聊发送“绑定账号”，按提示绑定校园账号。' if result.get('error_code') == 'account_not_bound' else '请在私聊检查“我的状态”，恢复校园登录后重试。') if auth else '请核对查询条件；校历或学期无法核验时请联系维护者，稍后重试。')
+        return True
+    if 'rooms' not in result and type(result.get('total')) is int and result['total'] > 0:
+        await _reply(ctx, '清单暂未读取完整', [
+            f"学校返回了{result['total']}间教室，但本次清单暂时无法读取；这不代表没有空教室。"],
+            '请重新查询该教学楼。')
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}
