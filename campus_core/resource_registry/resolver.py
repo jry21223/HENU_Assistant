@@ -110,6 +110,14 @@ def resolve_resource(
                 candidates.append(c)
                 seen_ids.add(c.resource_id)
 
+    # Text inference must never relax explicit type or campus filters.
+    candidates = [candidate for candidate in candidates
+                  if not resource_type or candidate.resource_type == resource_type]
+    if campus_code:
+        candidates = [candidate for candidate in candidates
+                      if (record := get_resource(candidate.resource_id)) is not None
+                      and matches_campus(record.location, campus_code)]
+
     # 按 score 降序排序
     candidates.sort(key=lambda c: c.score, reverse=True)
 

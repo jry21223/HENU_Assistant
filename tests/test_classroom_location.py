@@ -149,3 +149,24 @@ def test_cache_only_missing_building_evidence_fails_locally(monkeypatch, tmp_pat
         campus_code='01', building_code='not-cached', freshness='cache_only',
     )
     assert result['code'] == 'building_validation_unavailable'
+
+
+def test_detected_campus_in_building_text_cannot_override_explicit_campus(school, monkeypatch, tmp_path):
+    from campus_core import storage_paths
+    from campus_core.resource_registry.models import ResourceRecord
+    from campus_core.resource_registry.registry import upsert_resource
+
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    state = tmp_path / 'data/shared/resource_registry/sync_state.json'
+    state.parent.mkdir(parents=True)
+    state.write_text('{"seed_classrooms": {"status": "loaded"}}')
+    upsert_resource(ResourceRecord(
+        resource_id='henu:building:02:0013', resource_type='building',
+        display_name='金明校区独有楼', canonical_name='独有楼', aliases=['独有楼'],
+        location={'campusCode': '02', 'buildingCode': '0013'}, source={'system': 'xk'},
+    ))
+    result = api.empty_classroom_query(
+        view='classrooms', campus_code='01', building_text='金明校区独有楼'
+    )
+    assert result['success'] is False
+    assert not any(r[0] == 'classrooms' for r in school.requests)
