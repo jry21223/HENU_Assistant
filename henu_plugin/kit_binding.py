@@ -920,8 +920,38 @@ class KitBindingCoordinator:
         return metadata
 
     @staticmethod
+    def _original_message_chain(ctx):
+        """Normal content filters may remove Source; retain the same event's chain."""
+        current = getattr(ctx.event, "message_chain", None)
+        event = getattr(ctx.event, "message_event", None)
+        original = event.get("message_chain") if isinstance(event, dict) else getattr(event, "message_chain", None)
+        def sources(chain):
+            parts = getattr(chain, "root", chain)
+            if not isinstance(parts, (list, tuple)):
+                return []
+            result = []
+            for part in parts:
+                kind = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+                if kind == "Source":
+                    identity = part.get("id") if isinstance(part, dict) else getattr(part, "id", None)
+                    stamp = part.get("time", part.get("timestamp")) if isinstance(part, dict) else getattr(part, "time", None)
+                    if isinstance(stamp, datetime.datetime):
+                        stamp = stamp.timestamp()
+                    result.append((str(identity), stamp))
+            return result
+
+        if original is None:
+            return [] if len(sources(current)) > 1 else current
+        raw_sources, current_sources = sources(original), sources(current)
+        if len(raw_sources) > 1 or len(current_sources) > 1:
+            return []
+        if current_sources and current_sources != raw_sources:
+            return []  # Conflicting evidence is never replaced by a fallback.
+        return original if raw_sources else current
+
+    @staticmethod
     def _exact_quoted_confirmation(ctx, source_id):
-        chain = getattr(ctx.event, "message_chain", None)
+        chain = KitBindingCoordinator._original_message_chain(ctx)
         components = getattr(chain, "root", chain)
         if not isinstance(components, (list, tuple)) or len(components) != 2:
             return False
@@ -992,7 +1022,7 @@ class KitBindingCoordinator:
 
     @staticmethod
     async def _source_details(ctx):
-        chain = getattr(ctx.event, "message_chain", None)
+        chain = KitBindingCoordinator._original_message_chain(ctx)
         if chain is None:
             try:
                 chain = await ctx.get_query_var("message_chain")

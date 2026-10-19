@@ -2005,3 +2005,69 @@ def test_used_source_limit_recovers_after_replay_horizon(monkeypatch):
         assert not await flow.handle(kit_event("确认", 3, "source-two"), is_group=False)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('mode', ['filtered', 'conflicting', 'unverified'])
+def test_normal_filtered_source_uses_same_original_event_without_weakening_guards(monkeypatch, mode):
+    from tests.test_confirmation_shortcut import Plugin
+    async def run():
+        plugin = Plugin()
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=plugin))
+        monkeypatch.setattr('henu_plugin.kit_binding.kit_settings', lambda: {'bot_uuid': 'bot', 'portal_url': 'https://kit.test'})
+        remote = Mock(return_value={'bound': False})
+        monkeypatch.setattr('henu_plugin.kit_binding.kit_request', remote)
+        ctx = kit_event('HENU KIT 状态', 1, 'original-message')
+        ctx.event.message_event.message_chain = SimpleNamespace(root=[qq_source('original-message', 1, source_time=ctx.event.message_event.time), {'type': 'Plain', 'text': 'HENU KIT 状态'}])
+        ctx.event.message_chain = SimpleNamespace(root=[{'type': 'Plain', 'text': 'HENU KIT 状态'}])
+        if mode == 'conflicting':
+            ctx.event.message_chain.root.insert(0, qq_source('different-source', 1, source_time=ctx.event.message_event.time))
+        if mode == 'unverified':
+            ctx.event.message_event.source_platform_object['qq_websocket_verified'] = False
+        assert await flow.handle(ctx, is_group=False)
+        if mode == 'filtered':
+            remote.assert_called_once()
+            assert '尚未绑定' in str(ctx.reply.call_args)
+        else:
+            remote.assert_not_called()
+            assert '无法验证' in str(ctx.reply.call_args)
+    asyncio.run(run())
+
+
+def test_filtered_normal_quote_still_requires_exact_confirm_and_matching_receipt(monkeypatch):
+    from tests.test_confirmation_shortcut import Plugin
+    async def run():
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=Plugin()))
+        monkeypatch.setattr('henu_plugin.kit_binding.kit_settings', lambda: {'bot_uuid': 'bot', 'portal_url': 'https://kit.test'})
+        calls = []
+        def remote(settings, action, body):
+            calls.append(action)
+            return {'start': {'token': 'a' * 43}, 'pending': {'state': 'authorized', 'display_name': '小河'}, 'confirm': {'bound': True}}[action]
+        monkeypatch.setattr('henu_plugin.kit_binding.kit_request', remote)
+        def normal(text, query, ref=None):
+            ctx = kit_event(text, query, f'source-{query}', quote_ref_idx=ref)
+            parts = ctx.event.message_chain.root + ([] if ref else [{'type': 'Plain', 'text': text}])
+            ctx.event.message_event.message_chain = SimpleNamespace(root=parts)
+            ctx.event.message_chain = SimpleNamespace(root=[{'type': 'Plain', 'text': text}])
+            return ctx
+        assert await flow.handle(normal('绑定 HENU KIT', 1), is_group=False)
+        assert await flow.handle(normal('确认', 2), is_group=False)
+        assert calls == ['start', 'pending']
+        assert await flow.handle(normal('确认', 3, 'wrong-ref'), is_group=False)
+        assert 'confirm' not in calls
+        assert await flow.handle(normal('确认', 4, 'ref-bot-2'), is_group=False)
+        assert calls.count('confirm') == 1
+    asyncio.run(run())
+
+
+def test_multiple_sources_without_original_chain_are_rejected(monkeypatch):
+    from tests.test_confirmation_shortcut import Plugin
+    async def run():
+        flow = KitBindingCoordinator(SimpleNamespace(plugin=Plugin()))
+        monkeypatch.setattr('henu_plugin.kit_binding.kit_settings', lambda: {'bot_uuid': 'bot', 'portal_url': 'https://kit.test'})
+        remote = Mock(return_value={'bound': False});monkeypatch.setattr('henu_plugin.kit_binding.kit_request', remote)
+        ctx = kit_event('HENU KIT 状态', 1, 'original-message')
+        ctx.event.message_chain.root.append(qq_source('second-source', 1, source_time=ctx.event.message_event.time))
+        assert await flow.handle(ctx, is_group=False)
+        remote.assert_not_called()
+        assert '无法验证' in str(ctx.reply.call_args)
+    asyncio.run(run())

@@ -13,3 +13,26 @@
 回滚：恢复备份的宿主 API 文件和原插件包。保留/移除未引用的 helper 均不影响原来的文字发送。原有业务 Storage 不变。
 
 HTTP 400/403 明确拒绝时回退一次可读文字，新 `msg_seq` 保留原被动来源；429/5xx/网络超时不重复发送。未配置被动来源时维持原宿主文字行为，不新增主动 Markdown 消息。桥永不发送模板或 keyboard 字段，不上传图片。
+
+## FriendMessage 原始来源链（SDK 0.5.8）
+
+QQ Normal 阶段会过滤外层 Source。KIT 校验读取同事件的原始
+`message_event.message_chain`，仍核对 marker、发送者、时间、引用及来源冲突。
+
+宿主和插件运行时两跳的 SDK `FriendMessage` 均需保留嵌套组件子类：
+在 `langbot_plugin/api/entities/builtin/platform/events.py` 的该类增加
+`ops/qq_friend_chain_transport.py` 中的 `validate_message_chain` validator，
+并保留模块的 `import pydantic`。不要用仓库文件覆盖整个生产 SDK 模块。
+validator 对输入深复制后调用既有 `MessageChain.model_validate`，不会生成 Source
+或添加可信标记。深复制避免 SDK 解析器原地修改同一字典导致第二次解析异常。
+
+先备份并核对线上源码 hash，对候选连续三次序列化往返及同一原始对象重复解析，
+验证 Source id/time、Plain 文本及原始字典均保留，再停止两容器、按精确片段替换。
+保留所有其余覆盖层，恢复后检查五插件及真实 QQ 网站状态回执。
+运行时与宿主现有 compose 本地镜像标签均须固化；旧镜像单独留回滚标签。
+用户记录不参与源码回滚。
+
+2026-10-20 本轮服务器证据目录：
+`/root/LangBot/backups/henu-qq-source-sdk-20261019/`。
+`copy-staging-smoke.json`、`copy-activated.json` 是深复制版本证据，
+早期 `activated.json` 仅记录第一版，不能代替最终版本。
