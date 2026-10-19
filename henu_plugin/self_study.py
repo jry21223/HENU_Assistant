@@ -83,17 +83,6 @@ async def handle_self_study(plugin, ctx, text):
                       launcher_id=launcher, sender_id=sender)
     tool = HenuCliSafe()
     tool.plugin = plugin
-    if initial and not state.get('campus') and kind == 'person':
-        try:
-            preferences = await tool.call({'command': 'preferences get'}, session, ctx.query_id)
-            values = preferences.get('preferences') or {} if isinstance(preferences, dict) and preferences.get('success') else {}
-            value = values.get('campus') if isinstance(values, dict) else None
-            if value in {'金明', '明伦', '龙子湖', '金明校区', '明伦校区', '龙子湖校区'}:
-                state['campus'] = value.removesuffix('校区')
-        except Exception:
-            pass  # Missing preferences do not establish a campus.
-        finally:
-            await ctx.set_query_var('_henu_card', None)
     if not state.get('campus'):
         await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
         return True
@@ -137,7 +126,7 @@ async def handle_self_study(plugin, ctx, text):
         auth = result.get('error_code') in {'auth_required', 'account_not_bound', 'login_required'} or any(
             word in message for word in ('登录', '账号', '密码', 'setup_account'))
         await _reply(ctx, '查询未完成', [escape(message, 600)],
-            '请在私聊检查“我的状态”，按“绑定账号”提示恢复校园登录后重试。' if auth else '请核对查询条件；校历或学期无法核验时请联系维护者，稍后重试。')
+            ('请在私聊发送“绑定账号”，按提示绑定校园账号。' if result.get('error_code') == 'account_not_bound' else '请在私聊检查“我的状态”，恢复校园登录后重试。') if auth else '请核对查询条件；校历或学期无法核验时请联系维护者，稍后重试。')
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}

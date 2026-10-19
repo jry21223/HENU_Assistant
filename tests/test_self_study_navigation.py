@@ -37,7 +37,7 @@ def test_missing_campus_only_asks_campus(monkeypatch, entry):
     assert asyncio.run(handle_navigation(plugin, ctx))
     assert '在哪个校区' in str(ctx.reply.call_args)
     assert '第几大节' not in str(ctx.reply.call_args)
-    assert all(c.args[0]['command'] == 'preferences get' for c in call.call_args_list)
+    call.assert_not_awaited()
     assert '十号楼101' not in str(ctx.reply.call_args)
 
 
@@ -76,7 +76,8 @@ def test_selected_period_returns_only_that_period_rooms_and_real_login_error(mon
         ctx = context('金明校区十号楼第2大节')
         await handle_navigation(plugin, ctx)
         assert '校园登录已失效' in str(ctx.reply.call_args)
-        assert '绑定账号' in str(ctx.reply.call_args) and '暂无缓存' not in str(ctx.reply.call_args)
+        assert '我的状态' in str(ctx.reply.call_args) and '绑定账号' not in str(ctx.reply.call_args)
+        assert '暂无缓存' not in str(ctx.reply.call_args)
         call.return_value = {'success': True, 'rooms': [{'roomName': '十号楼101'}],
                              'freshness': {'liveChecked': True, 'stale': False}}
         ctx = context('第2大节')
@@ -101,7 +102,7 @@ def test_midnight_uses_complete_saved_clock_without_claiming_all_rooms_free(monk
         await handle_navigation(plugin, ctx)
         return ctx
     ctx = asyncio.run(run())
-    assert all(c.args[0]['command'] == 'preferences get' for c in call.call_args_list)
+    call.assert_not_awaited()
     assert '当前不在教学时段' in str(ctx.reply.call_args)
     assert '不能据此认定所有教室空闲' in str(ctx.reply.call_args)
 
@@ -173,20 +174,22 @@ def test_verified_kaifeng_campus_automatically_queries_current_period(monkeypatc
     asyncio.run(run())
 
 
-def test_saved_campus_reuses_preference_then_empty_cache_asks_only_building(monkeypatch):
+def test_conversation_campus_is_reused_without_inventing_a_preference(monkeypatch):
     import henu_plugin.self_study as study
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai')))
     plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(PRODUCTION_CLOCK).encode()))
-    async def call(tool, params, *args):
-        if params['command'] == 'preferences get':
-            return {'success': True, 'preferences': {'campus': '金明校区'}}
-        return {'success': True, 'rooms': [], 'freshness': {'stale': False}}
+    call = AsyncMock(return_value={'success': True, 'rooms': [], 'freshness': {'stale': False}})
     monkeypatch.setattr(HenuCliSafe, 'call', call)
-    ctx = context('空教室查询')
-    assert asyncio.run(handle_navigation(plugin, ctx))
-    assert '请回复教学楼' in str(ctx.reply.call_args)
-    assert '在哪个校区' not in str(ctx.reply.call_args)
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        await handle_navigation(plugin, context('金明'))
+        ctx = context('空教室查询')
+        assert await handle_navigation(plugin, ctx)
+        assert '请回复教学楼' in str(ctx.reply.call_args)
+        assert '在哪个校区' not in str(ctx.reply.call_args)
+        assert all(c.args[0]['command'].startswith('empty classroom') for c in call.call_args_list)
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize('campus', ['金明', '龙子湖'])
@@ -200,7 +203,10 @@ def test_mismatched_clock_or_longzihu_never_applies_kaifeng_mapping(monkeypatch,
     plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(clock).encode()))
     call = AsyncMock(return_value={'success': True, 'preferences': {'campus': campus}})
     monkeypatch.setattr(HenuCliSafe, 'call', call)
-    ctx = context('找自习室')
-    assert asyncio.run(handle_navigation(plugin, ctx))
-    assert '第几大节' in str(ctx.reply.call_args)
-    assert all(c.args[0]['command'] == 'preferences get' for c in call.call_args_list)
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        ctx = context(campus)
+        assert await handle_navigation(plugin, ctx)
+        assert '第几大节' in str(ctx.reply.call_args)
+    asyncio.run(run())
+    call.assert_not_awaited()
