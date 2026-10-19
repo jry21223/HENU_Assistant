@@ -88,3 +88,21 @@ def test_conflicting_password_modes_are_rejected(monkeypatch):
     with pytest.raises(SystemExit) as error:
         henu_cli.main()
     assert error.value.code == 2
+
+
+def test_returned_nested_errors_never_repeat_password(monkeypatch, capsys):
+    secret = 'synthetic-returned-secret'
+    monkeypatch.setattr(sys, 'argv', [
+        'henu_cli.py', 'setup_account', '--student_id', 'offline', '--password_stdin',
+    ])
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(secret + '\n'))
+    monkeypatch.setattr(henu_cli, 'setup_account', lambda **kw: {
+        'success': False, 'msg': f'request rejected: {secret}',
+        'auth': {'error_code': 'invalid_credentials', 'message': secret},
+        'details': [secret],
+    })
+    henu_cli.main()
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result['auth']['error_code'] == 'invalid_credentials'
+    assert secret not in output.out + output.err

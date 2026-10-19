@@ -344,6 +344,16 @@ def _read_account_password(args) -> str:
     return password
 
 
+def _redact_account_result(value, password: str):
+    if isinstance(value, str):
+        return value.replace(password, "<redacted>")
+    if isinstance(value, dict):
+        return {key: _redact_account_result(item, password) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_account_result(item, password) for item in value]
+    return value
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -596,6 +606,8 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
+        if args.command == "setup_account":
+            result = _redact_account_result(result, password)
         print(json.dumps(sanitize_public_result(result), ensure_ascii=False, indent=2))
     except Exception as exc:
         print(
