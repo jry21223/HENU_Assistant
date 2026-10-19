@@ -45,3 +45,9 @@ QQ 私聊实查（北京时间 2026-10-19 22:42–22:44）：
 本地完整494项通过；生产SDK0.5.8暂存最终70项通过；两轴复核无阻塞。首次上线五文件、148保护文件不变；实际开启验收发现StorageAdapter私有helper签名漂移后，改为直接严格匹配SDK缺失键异常。最终兼容修正单文件发布，152保护文件不变，五个插件initialized。备份证据位于 `/root/LangBot/backups/henu-qq-layout-reminder-20261019/` 与 `/root/LangBot/backups/henu-qq-reminder-fix-20261019/`。
 
 QQ已实查：本周11项完整单卡，七天标题及日期均可见；开启提醒返回已开启，订阅已保存；另安排45秒后台测试并验证重启恢复。真实课前15分钟触发的自然时间验收需等待下一次课程，不伪造上课时间。
+
+### 宿主主动发送空实现修正
+
+首次后台测试虽然调度 journal 显示 sent，QQ并未收到。查实际宿主 `QQOfficialAdapter.send_message` 是 `pass`，所以该旧记录仅表示空方法返回，不能作为送达证据。新增 `ops/qq_active_transport.py` 作为精确方法覆盖源，接入宿主已有C2C发送器，仅支持私聊纯文本并要求QQ消息ID回执，缺失回执抛错。宿主其他471个Python文件hash不变。修改后的容器快照保存到部署原有local image tag，容器重建后也保留；旧镜像保留回滚tag。部署证据 `/root/LangBot/backups/henu-qq-active-transport-20261019/activated.json`。
+
+本地完整496项通过，宿主实际SDK smoke通过，两轴复核通过。新的真实发送链路后台测试与旧空调用记录分开验收。
