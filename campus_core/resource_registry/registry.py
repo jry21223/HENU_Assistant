@@ -90,6 +90,12 @@ def search_resources(
         for rid in matched_ids:
             record = get_resource(rid)
             if record and rid not in seen_ids:
+                if resource_type and record.resource_type != resource_type:
+                    continue
+                if campus_code and record.location.get(
+                    "campusCode", record.location.get("campus_code", "")
+                ) != campus_code:
+                    continue
                 results.append(record)
                 seen_ids.add(rid)
 

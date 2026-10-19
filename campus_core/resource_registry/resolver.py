@@ -65,6 +65,10 @@ def resolve_resource(
         if record:
             if resource_type and record.resource_type != resource_type:
                 continue
+            if campus_code and record.location.get(
+                "campusCode", record.location.get("campus_code", "")
+            ) != campus_code:
+                continue
             candidates.append(
                 ResolveCandidate(
                     resource_id=rid,

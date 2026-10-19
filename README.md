@@ -50,6 +50,8 @@ cd "<SKILL_DIR>" && .venv/bin/python henu_cli.py <command> [args]
 
 ## 快速开始
 
+首次配置运行 `.venv/bin/python henu_cli.py setup_account --student_id "<学号>"`，在交互终端中隐藏输入密码。自动化使用 `--password_stdin` 从标准输入读取一行；旧 `--password` 仍兼容，但不建议在命令参数中传递真实密码。
+
 ```bash
 .venv/bin/python henu_cli.py system_status
 .venv/bin/python henu_cli.py schedule_query --view current
