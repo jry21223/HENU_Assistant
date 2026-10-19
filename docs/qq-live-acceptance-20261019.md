@@ -51,3 +51,5 @@ QQ已实查：本周11项完整单卡，七天标题及日期均可见；开启�
 首次后台测试虽然调度 journal 显示 sent，QQ并未收到。查实际宿主 `QQOfficialAdapter.send_message` 是 `pass`，所以该旧记录仅表示空方法返回，不能作为送达证据。新增 `ops/qq_active_transport.py` 作为精确方法覆盖源，接入宿主已有C2C发送器，仅支持私聊纯文本并要求QQ消息ID回执，缺失回执抛错。宿主其他471个Python文件hash不变。修改后的容器快照保存到部署原有local image tag，容器重建后也保留；旧镜像保留回滚tag。部署证据 `/root/LangBot/backups/henu-qq-active-transport-20261019/activated.json`。
 
 本地完整496项通过，宿主实际SDK smoke通过，两轴复核通过。新的真实发送链路后台测试与旧空调用记录分开验收。
+
+最终QQ验收：2026-10-19 23:07，新的后台调度测试实际在HENU-Bot私聊收到“后台定时测试 · 非真实上课提醒”，不是工具调用后的立即回复。随后关闭提醒，QQ回执“未开启”，Storage enabled_count=0且无待发测试；最后重新开启保留用户的课前15分钟设置。自然课程提醒尚未到触发时间，未将标注测试冒充真实上课提醒。
