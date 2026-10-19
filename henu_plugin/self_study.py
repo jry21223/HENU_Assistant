@@ -1,4 +1,4 @@
-"""Read-only study-room queries; never infer a large-period/small-period mapping."""
+"""Read-only classroom queries with a campus- and clock-verified current period."""
 from __future__ import annotations
 
 import json
@@ -9,24 +9,28 @@ from zoneinfo import ZoneInfo
 
 from henu_plugin.qq_cards import Card, card_chain, escape
 
+# Official Kaifeng timetable: https://kfxq.henu.edu.cn/info/1931/2401.htm
+# Applies only to Minglun/Jinming and the matching saved thirteen-period clock.
+KAIFENG_CLOCK = dict(zip((str(n) for n in range(1, 14)), (
+    {'start': start, 'end': end} for start, end in (
+        ('08:00', '08:45'), ('08:55', '09:40'), ('10:00', '10:45'),
+        ('10:55', '11:40'), ('11:45', '12:30'), ('14:05', '14:50'),
+        ('15:00', '15:45'), ('15:55', '16:40'), ('17:00', '17:45'),
+        ('17:55', '18:40'), ('19:10', '19:55'), ('20:05', '20:50'), ('20:55', '21:40')))))
+KAIFENG_UNITS = (('08:00', '09:40'), ('10:00', '12:30'), ('14:05', '16:40'),
+                  ('17:00', '18:40'), ('19:10', '21:40'))
+
 
 def campus_now():
     return datetime.now(ZoneInfo('Asia/Shanghai'))
 
 
-async def _outside_saved_clock(plugin, now):
-    from henu_plugin.schedule_reminders import valid_period_clock
+async def _saved_clock_matches(plugin):
     try:
         clock = json.loads(await plugin.get_plugin_storage('shared:period_time') or b'{}')
     except Exception:
         return False
-    if not valid_period_clock(clock):
-        return False
-    if not set(str(n) for n in range(1, 14)).issubset(clock):
-        return False
-    # Only establish outside the entire saved teaching day, not gaps or big periods.
-    current = now.strftime('%H:%M')
-    return current < min(v['start'] for v in clock.values()) or current >= max(v['end'] for v in clock.values())
+    return clock == KAIFENG_CLOCK
 
 
 async def _reply(ctx, status, lines, next_step=''):
@@ -62,21 +66,48 @@ async def handle_self_study(plugin, ctx, text):
     ctx.prevent_default()
     ctx.prevent_postorder()
     state = {} if initial else dict(previous)
+    if initial and previous:
+        state['campus'] = previous.get('campus', '')
     if not initial:
         for field, value in zip(('campus', 'building', 'period'), location.groups()):
             if value:
+                if field == 'campus' and state.get('campus') != value:
+                    state.pop('building', None)
                 state[field] = value
     state['expires'] = time.monotonic() + 300
     if len(pending) >= 256 and key not in pending:
         pending.pop(next(iter(pending)))
     pending[key] = state
     now = campus_now()
-    if initial and await _outside_saved_clock(plugin, now):
-        await _reply(ctx, '当前不在已保存的教学时段', [now.strftime('%m月%d日 %H:%M'),
-            '现在不在已保存的教学钟点范围内，不能据此认定所有教室空闲或开放。'],
-            '如需查询课程占用，请回复校区、教学楼和大节。')
+    session = Session(launcher_type=LauncherTypes.GROUP if kind == 'group' else LauncherTypes.PERSON,
+                      launcher_id=launcher, sender_id=sender)
+    tool = HenuCliSafe()
+    tool.plugin = plugin
+    if initial and not state.get('campus') and kind == 'person':
+        try:
+            preferences = await tool.call({'command': 'preferences get'}, session, ctx.query_id)
+            values = preferences.get('preferences') or {} if isinstance(preferences, dict) and preferences.get('success') else {}
+            value = values.get('campus') if isinstance(values, dict) else None
+            if value in {'金明', '明伦', '龙子湖', '金明校区', '明伦校区', '龙子湖校区'}:
+                state['campus'] = value.removesuffix('校区')
+        except Exception:
+            pass  # Missing preferences do not establish a campus.
+        finally:
+            await ctx.set_query_var('_henu_card', None)
+    if not state.get('campus'):
+        await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
         return True
-    if not state.get('period'):
+    period = state.get('period')
+    automatic = not period
+    if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
+        current = now.strftime('%H:%M')
+        period = next((str(n) for n, (start, end) in enumerate(KAIFENG_UNITS, 1) if start <= current < end), None)
+        if not period:
+            await _reply(ctx, '当前不在教学时段', [now.strftime('%m月%d日 %H:%M'),
+                '当前不在该校区教学时段内，不能据此认定所有教室空闲或开放。'],
+                '如需查询课程占用，可回复指定大节，例如“第2大节”。')
+            return True
+    if not period:
         await _reply(ctx, '需确认当前大节', [
             '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
             '可直接回复“第2大节”；如需限定地点，可一并回复“金明校区十号楼第2大节”。'])
@@ -85,19 +116,15 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
         return True
     campus, building = state.get('campus', ''), state.get('building', '')
-    command = f"empty classroom query --view free --period {state['period']}"
+    command = f"empty classroom query --view free --period {period}"
     if campus:
         command += f' --campus-text {campus}'
     if building:
         command += f' --building-text {building}'
     else:
         command += ' --freshness cache_only'
-    session = Session(launcher_type=LauncherTypes.GROUP if kind == 'group' else LauncherTypes.PERSON,
-                      launcher_id=launcher, sender_id=sender)
     await _reply(ctx, '正在查询', [
         '正在读取所选楼栋的该大节课程占用。' if building else '正在读取该大节已有缓存，不启动全校逐栋刷新。'])
-    tool = HenuCliSafe()
-    tool.plugin = plugin
     try:
         result = await tool.call({'command': command}, session, ctx.query_id)
     except Exception:
@@ -114,7 +141,7 @@ async def handle_self_study(plugin, ctx, text):
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}
-    lines = [now.strftime('%m月%d日') + f" · 本人指定第{state['period']}大节",
+    lines = [now.strftime('%m月%d日') + (f' · 当前第{period}大节' if automatic else f' · 本人指定第{period}大节'),
              '仅反映课程占用，不保证现场无人或楼门开放。']
     cached = not building or not freshness.get('liveChecked')
     stale = freshness.get('stale') is True
@@ -123,6 +150,8 @@ async def handle_self_study(plugin, ctx, text):
         rooms = []
     if not rooms:
         lines.append('没有可核验的该时段教室结果；不能据此判断无空教室。')
+        if not building:
+            lines.append('请回复教学楼，例如“十号楼”，继续查询该楼栋。')
     else:
         for room in rooms[:10]:
             name = room.get('roomName') or room.get('room_name') or '教室未标名'
