@@ -277,9 +277,9 @@ def login_via_kingo(
         )
         payload = json.loads(decode_text(response))
     except json.JSONDecodeError:
-        return AuthResult(False, error_code="protocol_error", message="xk 登录响应不是有效 JSON")
+        return AuthResult(False, error_code="auth_state_unknown", message="xk 登录请求已提交但响应无法确认")
     except Exception as exc:
-        return AuthResult(False, error_code="network_error", message=f"xk 登录请求失败: {exc}")
+        return AuthResult(False, error_code="auth_state_unknown", message="xk 登录请求已提交但结果未知")
 
     status = str(payload.get("status") or "") if isinstance(payload, dict) else ""
     message = _response_message(payload)
@@ -291,7 +291,7 @@ def login_via_kingo(
         if result_path:
             session.get(urljoin(f"{base_url}/", result_path), timeout=30)
     except Exception as exc:
-        return AuthResult(False, error_code="network_error", message=f"xk 登录后跳转失败: {exc}")
+        return AuthResult(False, error_code="auth_state_unknown", message="xk 登录请求已提交但后续登录态未知")
 
     if not check_logged_in():
         return AuthResult(False, error_code="service_error", message="xk 返回成功但未建立登录态")

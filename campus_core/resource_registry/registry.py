@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from .models import (
+    matches_campus,
     ALL_RESOURCE_TYPES,
     ResourceRecord,
     build_resource_id,
@@ -92,9 +93,7 @@ def search_resources(
             if record and rid not in seen_ids:
                 if resource_type and record.resource_type != resource_type:
                     continue
-                if campus_code and record.location.get(
-                    "campusCode", record.location.get("campus_code", "")
-                ) != campus_code:
+                if not matches_campus(record.location, campus_code):
                     continue
                 results.append(record)
                 seen_ids.add(rid)
@@ -109,7 +108,7 @@ def search_resources(
 
         # campus_code 过滤
         loc = d.get("location", {})
-        if campus_code and loc.get("campusCode", loc.get("campus_code", "")) != campus_code:
+        if not matches_campus(loc, campus_code):
             continue
         if building_code and loc.get("buildingCode", loc.get("building_code", "")) != building_code:
             continue

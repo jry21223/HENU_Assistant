@@ -35,6 +35,13 @@ ALL_RESOURCE_TYPES = {
 }
 
 
+def matches_campus(location: dict[str, Any], campus_code: str) -> bool:
+    """Match an optional campus filter across current and legacy location fields."""
+    return not campus_code or location.get(
+        "campusCode", location.get("campus_code", "")
+    ) == campus_code
+
+
 def build_resource_id(resource_type: str, **parts: str) -> str:
     """构建标准资源 ID。
 
