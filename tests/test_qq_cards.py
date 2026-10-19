@@ -283,3 +283,22 @@ def test_food_actions_and_detail_ids_share_pages_without_actor_metadata(monkeypa
         await tool.call({"action": "detail", "post_id": "详情D"}, session, 2)
         assert len(cards.entries[key][1]) == 1 and "详情D" in cards.page(key, "卡片第 1 页")
     asyncio.run(run())
+
+
+def test_unverified_day_schedule_is_reference_with_readable_fields():
+    result={'success':True,'date':'2026-10-19','weekday':'星期一','week_filter_applied':False,'msg':'2026-10-19 星期一 共4门课（未按教学周过滤）','schedule':[{'course':'计算机网络','period':'第3-4节','time':'1-18周 一[3-4] 金明综合楼6202(134)','location':'金明综合楼6202(134)'}],'next_commands':['schedule day --date YYYY-MM-DD','schedule week']}
+    page='\n'.join(result_card(result,'schedule_query').pages())
+    assert '共4门课' not in page and '已完成' not in page
+    assert '教学周未核验' in page
+    assert '第3–4节' in page and '周次：1–18周' in page
+    assert page.count('金明综合楼6202（134）')==1
+    assert '\\[' not in page and '\\(' not in page
+    assert 'schedule day' not in page and '同步课表' in page
+
+
+def test_four_course_day_fits_one_page_without_splitting_course_details():
+    result={'success':True,'date':'2026-10-19','week_filter_applied':False,'schedule':[{'course':name,'period':'第3-4节','time':'1-18周 一[3-4]','location':'金明综合楼6202(134)'} for name in ('计算机网络','大学体育（三）','野外生存技能','国家森林公园赏析与旅游')]}
+    pages=result_card(result,'schedule_query').pages()
+    assert len(pages)==1
+    assert '国家森林公园赏析与旅游' in pages[0]
+    assert pages[0].count('地点：')==4

@@ -9,7 +9,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.account_login import AccountLoginCoordinator
 from henu_plugin.cli import inspect_cli_command
-from henu_plugin.qq_navigation import handle_navigation
+from henu_plugin.qq_navigation import handle_navigation, handle_menu_query
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
 from henu_plugin.qq_cards import (
@@ -249,6 +249,10 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         if await self._confirmation_shortcut.handle(ctx):
             return
         if await self._yuketang_login.handle(ctx, is_group=is_group):
+            return
+        if await handle_menu_query(self.plugin, ctx):
+            return
+        if await handle_navigation(self.plugin, ctx, listener=self):
             return
         text = str(getattr(ctx.event, "text_message", "") or "").strip()
         compact = " ".join(text.lower().split())

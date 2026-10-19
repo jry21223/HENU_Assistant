@@ -149,6 +149,27 @@ def _row(item: Any) -> str:
     return "- **" + escape(name, 100) + "**" + ("\n  " + " · ".join(parts) if parts else "")
 
 
+
+def _schedule_row_lines(item: Any) -> list[str]:
+    if not isinstance(item, dict):
+        return _row_lines(item)
+    name = _first(item, "course", "course_name", "name") or "未命名课程"
+    period = _first(item, "period")
+    start, end = _first(item, "clock_start"), _first(item, "clock_end")
+    clock = f"{start}–{end}" if start and end else ""
+    location = _first(item, "location", "classroom", "place") or "未标注"
+    # Keep numeric suffixes faithfully; do not guess whether they denote capacity.
+    location = location.translate(str.maketrans("[]()", "［］（）"))
+    raw = _first(item, "time")
+    weeks = re.search(r"\d+(?:-\d+)?(?:[,，]\d+(?:-\d+)?)*周(?:[（(]?[单双]周[）)]?)?", raw)
+    lines = ["- **" + escape(name, 100) + "**"]
+    lines.append("  " + escape(period.replace("-", "–") or "节次未标注") + (" · " + escape(clock) if clock else ""))
+    lines.append("  地点：" + escape(location, 160))
+    if weeks:
+        lines.append("  周次：" + escape(weeks.group().replace("-", "–").translate(str.maketrans("()", "（）"))))
+    return ["\n".join(lines)]
+
+
 def _row_lines(item: Any, depth: int = 0) -> list[str]:
     lines = [_row(item)]
     if not isinstance(item, dict):
@@ -191,6 +212,10 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
     msg = str(result.get("reply_text") or result.get("msg") or "")
+    schedule_reference = tool == "schedule_query" and result.get("success") and result.get("week_filter_applied") is not True
+    if schedule_reference:
+        title = "课表参考"
+        msg = "以下按星期匹配，尚未确认这些课程在目标日期实际上课。"
     food_rows = None
     if tool == "food" and "{" in msg:
         try:
@@ -225,6 +250,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         status = "缓存已过期 · 仅供参考"
     elif tool.startswith("yuketang") and result.get("bridge") == "pending":
         status = "本地已保存 · 远端待同步"
+    if schedule_reference:
+        status = "教学周未核验 · 仅供参考"
     lines = []
     query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else result.get("query", {})
     if not isinstance(query, dict):
@@ -333,21 +360,27 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     for key, rows in collections:
         if rows:
             label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天其他课程", "schedule": "课程安排", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
+            if schedule_reference:
+                label = {"current_courses": "按当前时段匹配（供核对）", "下一节课": "后续时段匹配（供核对）", "day_schedule": "该星期其他课程", "schedule": "按星期匹配的课程"}.get(key, label)
             lines.append(f"**{escape(label, 60)} · {len(rows)} 项**")
             for row in rows:
-                lines.extend(_row_lines(row))
+                lines.extend(_schedule_row_lines(row) if tool == "schedule_query" else _row_lines(row))
     if result.get("week_filter_applied") is False and "未按教学周过滤" not in msg:
         lines.append("课表未按教学周过滤，请核对实际教学周。")
     if tool.startswith("yuketang") and tool != "yuketang_exam_list":
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
     next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    if tool == "schedule_query" and result.get("success"):
+        next_step = "发送“明天课表”查看其他日期；课表有变动时发送“同步课表”。"
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
         next_step = "先查询当前记录核验，不要重复提交。"
     elif status == "需要绑定或登录":
         next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
+    if tool == "schedule_query" and result.get("success") and result.get("unknown_course_count"):
+        status = "部分课程周次待核验"
     return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "发送“使用帮助”查看常用操作。")
 
 

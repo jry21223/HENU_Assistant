@@ -128,3 +128,23 @@ def test_sdk_primary_food_listener_pages_only_pure_control(tmp_path, monkeypatch
             assert rpc.sent == [[{"type":"Plain", "text":PREFIX + "第二页"}]]
             assert response.data["event_context"]["is_prevent_default"]
     asyncio.run(run())
+
+
+def test_sdk_food_primary_delivers_navigation_before_normal_stage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    receive=AsyncMock()
+    monkeypatch.setattr(HenuFood,'receive_message',receive)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc=MemoryRPC(None,initialize_plugin);rpc.variables={};rpc.sent=[]
+        plugin=SimpleNamespace(plugin_runtime_handler=rpc)
+        food=FoodCaptureListener();food.plugin=plugin;await food.initialize()
+        rpc.plugin_container=SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'),component_instance=food)])
+        chain=pm.MessageChain(root=[pm.Plain(text='使用帮助')])
+        incoming=pe.FriendMessage(sender=entities.Friend(id='alice',nickname='合成',remark=''),message_chain=chain)
+        event=events.PersonMessageReceived(launcher_type='person',launcher_id='alice',sender_id='alice',message_event=incoming,message_chain=chain)
+        response=await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context':{'query_id':0,'eid':4,'event_name':'PersonMessageReceived','event':event.model_dump(mode='json')}})
+        assert '从这里开始' in str(rpc.sent)
+        assert response.data['event_context']['is_prevent_default']
+        receive.assert_not_awaited()
+    asyncio.run(run())

@@ -167,7 +167,7 @@ class HardenedHenuPluginService(_base.HenuPluginService):
         cache_key = ""
         if identity and view in {"week", "full"}:
             cache_key = (
-                f"user:{identity.storage_key}:schedule:{view}:"
+                f"user:{identity.storage_key}:schedule:{view}:{server_impl._now_dt(timezone).date().isoformat()}:"
                 f"{timezone}:{int(auto_calibrate)}:{self._schedule_revision(paths)}"
             )
             cached = SCHEDULE_CACHE.get(cache_key)
