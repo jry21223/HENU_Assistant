@@ -10,10 +10,10 @@ from datetime import datetime
 from typing import Any
 
 from .models import (
-    matches_campus,
     ALL_RESOURCE_TYPES,
     ResourceRecord,
     build_resource_id,
+    matches_campus,
 )
 from .storage import (
     add_alias_entry,
