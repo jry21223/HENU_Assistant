@@ -250,6 +250,49 @@ def _without_query_resource_ids(value):
     return value
 
 
+def _classroom_query_card(result: dict) -> Card:
+    query = result.get('query') if isinstance(result.get('query'), dict) else {}
+    freshness = result.get('freshness') if isinstance(result.get('freshness'), dict) else {}
+    scope = []
+    if query.get('week'):
+        scope.append('第' + str(query['week']) + '周')
+    day = query.get('dayOfWeek')
+    if type(day) is int and 1 <= day <= 7:
+        scope.append('星期' + '一二三四五六日'[day - 1])
+    period = query.get('periodName') or ('第' + str(query['period']) + '大节' if query.get('period') else '')
+    if period:
+        scope.append(str(period))
+    location = ' · '.join(str(query[key]) for key in ('campusName', 'buildingName') if query.get(key))
+    lines = [escape(' · '.join(scope + ([location] if location else [])))] if scope or location else []
+    stale = bool(result.get('stale') or result.get('is_stale') or freshness.get('stale'))
+    rooms = [] if stale else [room for room in result['rooms'] if isinstance(room, dict)]
+    if stale:
+        lines.append('缓存已过期，未将其中教室列为可用；请重新查询。')
+        if freshness.get('fetchedAt'):
+            lines.append('上次核验：' + escape(str(freshness['fetchedAt'])[:10], 20))
+        if freshness.get('liveChecked') is False:
+            lines.append('本次未请求上游重新核验。')
+    elif not rooms:
+        lines.append('没有可核验的教室结果，不能据此确认没有空教室。')
+    else:
+        block = ''
+        for room in rooms:
+            name = _first(room, 'roomName', 'room_name', 'classroomName', 'name') or '未标名教室'
+            capacity = room.get('capacity')
+            row = '- **' + escape(name, 100) + '**'
+            if type(capacity) is int and capacity > 0:
+                row += ' · ' + str(capacity) + '座'
+            if len((block + '\n' + row).encode()) > 1800:
+                lines.append(block)
+                block = ''
+            block += ('\n' if block else '') + row
+        if block:
+            lines.append(block)
+    lines.append('仅反映课程占用，不保证现场无人或楼门开放。')
+    status = '缓存已过期 · 待核验' if stale else ('按课程占用筛选 · ' + str(result.get('total', len(rooms))) + '间' if rooms else '暂无可核验结果')
+    return Card('空教室查询', status, tuple(lines), '可补充教学楼或大节继续查询。')
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -257,6 +300,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
     if tool == "library_query" or tool.startswith("empty_classroom"):
         result = _without_query_resource_ids(result)
+    if tool == 'empty_classroom_query' and result.get('success') and isinstance(result.get('rooms'), list):
+        return _classroom_query_card(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
     if tool == "food":
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)

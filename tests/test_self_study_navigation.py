@@ -15,6 +15,22 @@ PRODUCTION_CLOCK = {str(n): {'start': start, 'end': end} for n, (start, end) in 
     ('17:00', '17:45'), ('17:55', '18:40'), ('19:10', '19:55'), ('20:05', '20:50'), ('20:55', '21:40')], 1)}
 
 
+@pytest.fixture(autouse=True)
+def cached_query_dir(tmp_path, monkeypatch):
+    import henu_plugin.self_study as study
+    from campus_core import storage_paths
+    monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai')))
+    monkeypatch.setattr(storage_paths, 'get_empty_classroom_cache_dir', lambda: tmp_path)
+    folder = tmp_path / 'query_cache'
+    folder.mkdir()
+    for campus in ('金明', '明伦'):
+        for period in range(1, 6):
+            (folder / f'{campus}-{period}.json').write_text(json.dumps({'query': {
+                'termCode': '2026,0', 'week': 8, 'dayOfWeek': 2, 'period': period,
+                'campusName': campus + '校区', 'buildingCode': '', 'minCapacity': 0}}))
+    return folder
+
+
 def context(text, sender='alice'):
     ctx = SimpleNamespace(event=SimpleNamespace(launcher_type='person', launcher_id=sender,
         sender_id=sender, message_chain=MessageChain(root=[Plain(text=text)])), query_id=1,
@@ -210,3 +226,31 @@ def test_mismatched_clock_or_longzihu_never_applies_kaifeng_mapping(monkeypatch,
         assert '第几大节' in str(ctx.reply.call_args)
     asyncio.run(run())
     call.assert_not_awaited()
+
+
+@pytest.mark.parametrize('cache_case', ['empty', 'stale', 'other_week', 'other_period'])
+def test_unusable_cache_asks_building_without_starting_school_login(monkeypatch, cached_query_dir, cache_case):
+    import os
+    import time
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    for file in cached_query_dir.glob('*.json'):
+        file.unlink()
+    if cache_case != 'empty':
+        file = cached_query_dir / 'candidate.json'
+        query = {'week': 7 if cache_case == 'other_week' else 8, 'dayOfWeek': 2,
+                 'period': 1 if cache_case == 'other_period' else 2,
+                 'campusName': '金明校区', 'buildingCode': '', 'minCapacity': 0}
+        file.write_text(json.dumps({'query': query}))
+        if cache_case == 'stale':
+            os.utime(file, (time.time() - 400, time.time() - 400))
+    call = AsyncMock(side_effect=AssertionError('school access must not start'))
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        ctx = context('金明第2大节')
+        assert await handle_navigation(plugin, ctx)
+        call.assert_not_awaited()
+        assert '教学楼' in str(ctx.reply.call_args)
+        assert '正在查询' not in str(ctx.reply.call_args)
+    asyncio.run(run())

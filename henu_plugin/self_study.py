@@ -33,6 +33,37 @@ async def _saved_clock_matches(plugin):
     return clock == KAIFENG_CLOCK
 
 
+def _may_have_current_cache(campus, period, now):
+    """Reject empty/stale/other-slot caches before the CLI's login preamble."""
+    from itertools import islice
+    from campus_core.storage_paths import get_empty_classroom_cache_dir
+    from henu_mcp.core.teaching_calendar import teaching_week
+    calendar = teaching_week(now)
+    if not calendar.get('available'):
+        return False
+    try:
+        folder = get_empty_classroom_cache_dir() / 'query_cache'
+        for file in islice(folder.glob('*.json'), 128):
+            try:
+                stat = file.stat()
+                age = time.time() - stat.st_mtime
+                if not 0 <= age <= 300 or stat.st_size > 1_000_000:
+                    continue
+                data = json.loads(file.read_text())
+                query = data.get('query', {})
+                if (isinstance(query, dict) and query.get('week') == calendar['week']
+                        and query.get('dayOfWeek') == now.isoweekday()
+                        and query.get('period') == int(period)
+                        and query.get('campusName') == campus + '校区'
+                        and query.get('buildingCode') == '' and query.get('minCapacity') == 0):
+                    return True
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+    except OSError:
+        pass
+    return False
+
+
 async def _reply(ctx, status, lines, next_step=''):
     for page in Card('找自习室', status, tuple(lines), next_step).pages():
         await ctx.reply(card_chain(page))
@@ -105,6 +136,11 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
         return True
     campus, building = state.get('campus', ''), state.get('building', '')
+    if not building and not _may_have_current_cache(campus, period, now):
+        await _reply(ctx, '需要查询地点', [
+            '暂时没有可直接使用的该时段教室数据，不能据此判断没有空教室。',
+            '查哪栋教学楼？'], '请回复教学楼名称，我会继续查询该楼栋。')
+        return True
     command = f"empty classroom query --view free --period {period}"
     if campus:
         command += f' --campus-text {campus}'
