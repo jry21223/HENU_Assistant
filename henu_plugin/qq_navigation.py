@@ -5,7 +5,7 @@ from __future__ import annotations
 
 TASKS = (
     ('我的校园', (('我的状态', '查看绑定与服务状态'), ('今天课表', '查看今天的课程安排'), ('明天课表', '提前查看明天课程'), ('下一节课', '查看接下来上的课'), ('同步课表', '从教务更新课表'))),
-    ('找自习室', (('找自习室', '选择空教室或图书馆'), ('空教室查询', '按校区楼栋时段查询'), ('图书馆座位', '查看区域与可用座位'))),
+    ('找自习室', (('找自习室', '查询当前时段空教室'), ('空教室查询', '按校区楼栋时段查询'), ('图书馆座位', '查看区域与可用座位'))),
     ('账号与帮助', (('绑定账号', '校园账号与网站绑定'), ('绑定Kit', '关联 HENU KIT 网站'), ('使用帮助', '查看常用说法与流程'), ('课表推送', '查看课表提醒支持情况'))),
 )
 
@@ -50,6 +50,9 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.self_study import handle_self_study
+    if await handle_self_study(plugin, ctx, text):
+        return True
     reminders = getattr(plugin, 'schedule_reminders', None)
     if reminders is not None:
         if getattr(ctx, 'is_prevent_postorder', False):
@@ -112,6 +115,9 @@ async def handle_menu_query(plugin, ctx) -> bool:
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.self_study import handle_self_study
+    if await handle_self_study(plugin, ctx, text):
+        return True
     reminders = getattr(plugin, "schedule_reminders", None)
     if reminders is not None and await reminders.handle(ctx, text):
         return True
