@@ -9,6 +9,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.cli import inspect_cli_command
+from henu_plugin.qq_navigation import handle_navigation
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
@@ -53,6 +54,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if await handle_navigation(self.plugin, ctx, listener=self):
+                return
             if await handle_card_page(self.plugin, ctx):
                 return
             if await self._kit_binding.handle(ctx, is_group=False):
@@ -63,6 +66,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if await handle_navigation(self.plugin, ctx, listener=self):
+                return
             if await handle_card_page(self.plugin, ctx):
                 return
             if await self._kit_binding.handle(ctx, is_group=True):
