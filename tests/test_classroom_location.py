@@ -97,3 +97,55 @@ def test_building_metadata_failure_does_not_leak_details(school):
     assert result['code'] == 'building_validation_failed'
     assert 'synthetic-secret' not in str(result)
     assert not any(r[0] == 'classrooms' for r in school.requests)
+
+
+def test_building_name_ignores_other_campus_alias(school, monkeypatch, tmp_path):
+    from campus_core.resource_registry import storage
+    from campus_core.resource_registry.models import ResourceRecord
+    from campus_core.resource_registry.registry import upsert_resource
+
+    for name, file in [('_resources_path', 'resources.json'), ('_aliases_path', 'aliases.json'),
+                       ('_sync_state_path', 'sync.json'), ('_source_mappings_path', 'sources.json')]:
+        monkeypatch.setattr(storage, name, lambda file=file: tmp_path / file)
+    (tmp_path / 'sync.json').write_text('{"seed_classrooms": {"status": "loaded"}}')
+    for campus, code in [('02', 'other'), ('01', '0013')]:
+        upsert_resource(ResourceRecord(
+            resource_id=f'henu:building:{campus}:{code}', resource_type='building',
+            display_name='同名楼', canonical_name='同名楼', aliases=['同名楼'],
+            location={'campusCode': campus, 'buildingCode': code}, source={'system': 'xk'},
+        ))
+    result = api.empty_classroom_query(view='classrooms', campus_code='01', building_text='同名楼')
+    assert result['success'] is True
+    assert ('classrooms', '01', '0013') in school.requests
+
+
+def test_cache_only_building_query_never_contacts_school(monkeypatch, tmp_path):
+    from campus_core import storage_paths
+    from campus_core.resource_registry.models import ResourceRecord
+    from campus_core.resource_registry.registry import upsert_resource
+
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    upsert_resource(ResourceRecord(
+        resource_id='henu:building:01:0013', resource_type='building',
+        display_name='十号楼', canonical_name='10号楼', aliases=['10号楼'],
+        location={'campusCode': '01', 'buildingCode': '0013'}, source={'system': 'xk'},
+    ))
+    monkeypatch.setattr(api, '_get_empty_classroom_client', lambda: pytest.fail('school login'))
+    result = api.empty_classroom_query(
+        view='free', term_code='2026,1', week=1, day_of_week=1, period=1,
+        campus_code='01', building_code='0013', freshness='cache_only',
+    )
+    assert result['success'] is True
+    assert result['freshness']['liveChecked'] is False
+
+
+def test_cache_only_missing_building_evidence_fails_locally(monkeypatch, tmp_path):
+    from campus_core import storage_paths
+
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    monkeypatch.setattr(api, '_get_empty_classroom_client', lambda: pytest.fail('school login'))
+    result = api.empty_classroom_query(
+        view='free', term_code='2026,1', week=1, day_of_week=1, period=1,
+        campus_code='01', building_code='not-cached', freshness='cache_only',
+    )
+    assert result['code'] == 'building_validation_unavailable'

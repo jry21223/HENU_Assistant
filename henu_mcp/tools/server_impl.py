@@ -4457,14 +4457,34 @@ def empty_classroom_query(
             return resolution
         building_code = resolution["building_code"]
 
-    client = _get_empty_classroom_client()
-    if client is None:
+    cache_only = freshness == "cache_only"
+    if cache_only and view not in ("free", "day_matrix", "occupancy"):
+        return {
+            "success": False,
+            "code": "metadata_cache_unavailable",
+            "msg": "该元数据查询不支持只读缓存，请明确选择实时查询",
+        }
+    client = None if cache_only else _get_empty_classroom_client()
+    if client is None and not cache_only:
         return {
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
         }
 
-    if building_code:
+    if building_code and cache_only:
+        from campus_core.resource_registry.models import build_resource_id
+        from campus_core.resource_registry.registry import get_resource
+
+        record = get_resource(build_resource_id(
+            "building", campus_code=campus_code, building_code=building_code
+        ))
+        if record is None:
+            return {
+                "success": False,
+                "code": "building_validation_unavailable",
+                "msg": "本地无该校区楼栋记录，无法在只读缓存模式核验",
+            }
+    elif building_code:
         try:
             valid_buildings = client.fetch_buildings(campus_code)
         except Exception:
