@@ -19,6 +19,7 @@ from typing import Any
 
 from .alias import normalize, normalize_building_name, normalize_campus_name, normalize_room_name
 from .models import (
+    matches_campus,
     RESOURCE_TYPE_CLASSROOM,
     RESOURCE_TYPE_LIBRARY_AREA,
     RESOURCE_TYPE_LIBRARY_SEAT,
@@ -64,6 +65,8 @@ def resolve_resource(
         record = get_resource(rid)
         if record:
             if resource_type and record.resource_type != resource_type:
+                continue
+            if not matches_campus(record.location, campus_code):
                 continue
             candidates.append(
                 ResolveCandidate(
