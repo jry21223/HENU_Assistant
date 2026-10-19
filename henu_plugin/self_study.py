@@ -78,7 +78,7 @@ async def handle_self_study(plugin, ctx, text):
         return True
     if not state.get('period'):
         await _reply(ctx, '需确认当前大节', [
-            '现在是第几大节（1–5）？尚未核验五大节与小节钟点的对应关系，不会把其他时段教室当作当前可用。',
+            '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
             '可直接回复“第2大节”；如需限定地点，可一并回复“金明校区十号楼第2大节”。'])
         return True
     if state.get('building') and not state.get('campus'):
