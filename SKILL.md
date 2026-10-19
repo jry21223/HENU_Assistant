@@ -127,7 +127,8 @@ yunfz_collection_query --view list|statistics
 
 ## 常用参数示例
 
-- `setup_account --student_id "<学号>" --password "<密码>"`
+- `setup_account --student_id "<学号>"`（交互终端隐藏输入密码）
+- 自动化使用 `setup_account --student_id "<学号>" --password_stdin`，从受控标准输入提供一行密码；`--password-stdin` 是兼容别名。不要把真实密码写进命令或回复。旧 `--password` 参数仍可用，但会提示历史记录和进程参数风险。
 - `sync_schedule`
 - `schedule_query --view current`
 - `schedule_query --view day --target_date "2026-03-19"`

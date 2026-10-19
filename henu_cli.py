@@ -5,8 +5,10 @@ HENU Campus Assistant CLI for Agent Skill.
 """
 
 import argparse
+import getpass
 import json
 import sys
+import warnings
 from pathlib import Path
 
 from henu_mcp.core.response_contract import sanitize_public_result
@@ -64,7 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser("setup_account", help="设置账号")
     setup_parser.add_argument("--student_id", required=True, help="学号")
-    setup_parser.add_argument("--password", required=True, help="密码")
+    password_group = setup_parser.add_mutually_exclusive_group()
+    password_group.add_argument("--password", default=None, help="兼容明文参数；建议省略后安全输入")
+    password_group.add_argument(
+        "--password_stdin", "--password-stdin", dest="password_stdin", action="store_true",
+        help="从标准输入读取一行密码，不进入进程参数",
+    )
     setup_parser.add_argument("--library_location", default="", help="默认图书馆区域")
     setup_parser.add_argument("--library_seat_no", default="", help="默认座位号")
     setup_parser.add_argument("--no_verify_login", action="store_true", help="仅保存账号，不立即验证登录")
@@ -314,6 +321,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_account_password(args) -> str:
+    if args.password is not None:
+        print("警告: --password 可能暴露于进程参数和历史记录；建议安全输入或 --password_stdin。", file=sys.stderr)
+        password = args.password
+    elif args.password_stdin:
+        try:
+            password = sys.stdin.readline().removesuffix("\n").removesuffix("\r")
+        except (OSError, ValueError):
+            raise ValueError("无法读取密码标准输入") from None
+    else:
+        if not sys.stdin.isatty():
+            raise ValueError("非交互环境请使用 --password_stdin 提供密码")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                password = getpass.getpass("统一身份认证密码: ")
+        except (EOFError, OSError, getpass.GetPassWarning):
+            raise ValueError("无法安全读取密码，请使用 --password_stdin") from None
+    if not password or not password.strip():
+        raise ValueError("密码不能为空")
+    return password
+
+
+def _redact_account_result(value, password: str):
+    if isinstance(value, str):
+        return value.replace(password, "<redacted>")
+    if isinstance(value, dict):
+        return {key: _redact_account_result(item, password) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_account_result(item, password) for item in value]
+    return value
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -324,9 +364,10 @@ def main() -> None:
 
     try:
         if args.command == "setup_account":
+            password = _read_account_password(args)
             result = setup_account(
                 student_id=args.student_id,
-                password=args.password,
+                password=password,
                 library_location=args.library_location,
                 library_seat_no=args.library_seat_no,
                 verify_login=not args.no_verify_login,
@@ -565,11 +606,13 @@ def main() -> None:
             print(f"未知命令: {args.command}")
             return
 
+        if args.command == "setup_account":
+            result = _redact_account_result(result, password)
         print(json.dumps(sanitize_public_result(result), ensure_ascii=False, indent=2))
     except Exception as exc:
         print(
             json.dumps(
-                sanitize_public_result({"success": False, "msg": f"执行失败: {exc}"}),
+                sanitize_public_result({"success": False, "msg": "账号设置失败，请检查输入或稍后重试" if args.command == "setup_account" else f"执行失败: {exc}"}),
                 ensure_ascii=False,
                 indent=2,
             )
