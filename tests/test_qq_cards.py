@@ -302,3 +302,20 @@ def test_four_course_day_fits_one_page_without_splitting_course_details():
     assert len(pages)==1
     assert '国家森林公园赏析与旅游' in pages[0]
     assert pages[0].count('地点：')==4
+
+
+def test_week_schedule_is_one_compact_card_with_explicit_day_sections():
+    days = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+    schedule = {day: [] for day in days}
+    for day, count in [('星期一', 4), ('星期二', 4), ('星期四', 2), ('星期五', 1)]:
+        schedule[day] = [dict(course=f'课程{n}', period=f'第{n*2+1}-{n*2+2}节', location='金明综合楼6202（134）', time='1-18周') for n in range(count)]
+    pages = result_card(dict(success=True, schedule=schedule, week_filter_applied=True,
+                            teaching_week=dict(week=8, week_start_date='2026-10-19'),
+                            msg='第8教学周，匹配11项课程。'), 'schedule_query').pages()
+    assert len(pages) == 1
+    assert '## 星期一 · 10月19日' in pages[0]
+    assert '## 星期二 · 10月20日' in pages[0]
+    assert '## 星期三 · 10月21日' in pages[0]
+    assert '当天无课' in pages[0]
+    assert '周次：' not in pages[0]
+    assert pages[0].count('课程') >= 11

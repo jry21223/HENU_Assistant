@@ -50,8 +50,16 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    reminders = getattr(plugin, 'schedule_reminders', None)
+    if reminders is not None:
+        if getattr(ctx, 'is_prevent_postorder', False):
+            return True
+        if await reminders.handle(ctx, text):
+            return True
     # Existing production credential intake must own binding intent and arm its guard.
     if text == '绑定账号' and (defer_binding or callable(getattr(listener, '_arm_credential_intake', None))):
+        return False
+    if text == '课表推送' and getattr(plugin, 'schedule_reminders', None) is not None:
         return False
     guide = GUIDES.get(text)
     if guide is None:
@@ -104,6 +112,9 @@ async def handle_menu_query(plugin, ctx) -> bool:
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    reminders = getattr(plugin, "schedule_reminders", None)
+    if reminders is not None and await reminders.handle(ctx, text):
+        return True
     command = menu_command(text)
     if not command:
         return False

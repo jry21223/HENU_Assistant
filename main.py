@@ -10,6 +10,9 @@ from henu_plugin.hardened_service import HardenedHenuPluginService
 class HenuAssistantPlugin(BasePlugin):
     async def initialize(self) -> None:
         self.service = HardenedHenuPluginService(Path(__file__).resolve().parent)
+        from henu_plugin.schedule_reminders import ScheduleReminders
+        self.schedule_reminders = ScheduleReminders(self)
+        self.schedule_reminders.start()
 
     def __del__(self) -> None:
         pass

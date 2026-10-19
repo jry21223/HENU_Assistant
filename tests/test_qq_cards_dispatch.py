@@ -148,3 +148,39 @@ def test_sdk_food_primary_delivers_navigation_before_normal_stage(tmp_path, monk
         assert response.data['event_context']['is_prevent_default']
         receive.assert_not_awaited()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('text', ['开启课前提醒', '关闭课前提醒', '课前提醒', '测试课前提醒'])
+@pytest.mark.parametrize('attached', [False, True])
+def test_sdk_primary_listener_routes_reminder_controls(tmp_path, monkeypatch, text, attached):
+    from henu_plugin.schedule_reminders import ScheduleReminders
+    monkeypatch.chdir(tmp_path)
+    receive = AsyncMock()
+    monkeypatch.setattr(HenuFood, 'receive_message', receive)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc = MemoryRPC(None, initialize_plugin);rpc.variables = {};rpc.sent = []
+        storage = {}
+        async def get(key): return storage.get(key)
+        async def put(key, value): storage[key] = value
+        plugin = SimpleNamespace(plugin_runtime_handler=rpc, get_plugin_storage=get, set_plugin_storage=put)
+        reminders = ScheduleReminders(plugin)
+        reminders.query = AsyncMock(return_value={'success': True, 'week_filter_applied': True, 'period_times': {'1': {'start': '08:00', 'end': '08:45'}}})
+        plugin.schedule_reminders = reminders
+        food = FoodCaptureListener();food.plugin = plugin;await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        parts = [pm.Plain(text=text)]
+        if attached: parts.append(pm.Image(url='https://synthetic.invalid/image.png'))
+        chain = pm.MessageChain(root=parts)
+        incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+        event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice', message_event=incoming, message_chain=chain)
+        response = await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {'query_id': 0, 'eid': 5, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+        if attached:
+            assert not rpc.sent
+            assert not storage
+            receive.assert_awaited_once()
+        else:
+            assert '课前提醒' in str(rpc.sent)
+            assert response.data['event_context']['is_prevent_default']
+            receive.assert_not_awaited()
+    asyncio.run(run())

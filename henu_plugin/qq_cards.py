@@ -201,6 +201,44 @@ def _row_lines(item: Any, depth: int = 0) -> list[str]:
 LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "course_options", "candidates", "groups", "data", "commands", "tips", "examples", "titles", "categories", "date_options", "date_rows")
 
 
+def _week_schedule_card(result: dict) -> Card:
+    from datetime import date, timedelta
+
+    calendar = result.get("teaching_week") or {}
+    try:
+        monday = date.fromisoformat(calendar.get("week_start_date", ""))
+    except (ValueError, TypeError):
+        monday = None
+    partial = bool(result.get("unknown_course_count"))
+    lines = [escape(result.get("msg") or f"第{calendar.get('week', '未知')}教学周")]
+    schedule = result["schedule"]
+    for offset, day in enumerate(("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")):
+        target = monday + timedelta(days=offset) if monday else None
+        heading = "## " + day + (f" · {target.month}月{target.day}日" if target else "")
+        rows = schedule.get(day) or []
+        block = heading
+        def order(row):
+            match = re.search(r"\d+", str(row.get("period") or "")) if isinstance(row, dict) else None
+            return int(match.group()) if match else 999
+        for row in sorted(rows, key=order):
+            if not isinstance(row, dict):
+                entry = _row(row)
+            else:
+                period = _first(row, "period") or "节次未标注"
+                name = _first(row, "course", "course_name", "name") or "未命名课程"
+                location = (_first(row, "location", "classroom", "place") or "地点未标注").translate(str.maketrans("[]()", "［］（）"))
+                entry = "**" + escape(period.replace("-", "–"), 50) + " · " + escape(name, 100) + "**\n" + escape(location, 160)
+            # Keep a weekday heading with every continuation block.
+            if len((block + "\n\n" + entry).encode("utf-8")) > 1900:
+                lines.append(block)
+                block = heading + "（续）"
+            block += "\n\n" + entry
+        if not rows:
+            block += "\n" + ("无已确认课程（有周次待核验）" if partial else "当天无课")
+        lines.append(block + "\n")
+    return Card("本周课表", "部分课程周次待核验" if partial else "已按教学周筛选", tuple(lines), "查看单日详情可发送“今天课表”或“明天课表”。")
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -211,6 +249,10 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
+    if (tool == "schedule_query" and result.get("success")
+            and result.get("week_filter_applied") is True
+            and isinstance(result.get("schedule"), dict)):
+        return _week_schedule_card(result)
     msg = str(result.get("reply_text") or result.get("msg") or "")
     schedule_reference = tool == "schedule_query" and result.get("success") and result.get("week_filter_applied") is not True
     if schedule_reference:
