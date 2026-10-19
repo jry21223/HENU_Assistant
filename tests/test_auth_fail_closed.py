@@ -206,3 +206,25 @@ def test_hidden_challenge_widgets_do_not_block_ids_success(monkeypatch, widget):
     assert client.login() is True
     assert client.get_auth_info()["mode"] == "ids_cas"
     assert sum(method == "POST" for method, _ in calls) == 1
+
+
+@pytest.mark.parametrize('lost_response', [True, False])
+def test_kingo_submitted_request_with_unknown_outcome_is_not_retryable(monkeypatch, lost_response):
+    install_school_http(monkeypatch, unavailable=True)
+    original = requests.Session.request
+
+    def request(session, method, url, **kwargs):
+        if method.upper() == 'POST' and url.endswith('/cas/logon.action'):
+            if lost_response:
+                raise requests.ConnectionError('synthetic-sensitive-exception-detail')
+            response = requests.Response()
+            response.status_code = 200
+            response.url = url
+            response._content = b'not-json'
+            return response
+        return original(session, method, url, **kwargs)
+
+    monkeypatch.setattr(requests.Session, 'request', request)
+    client = HenuXkClient('student', 'synthetic-password')
+    assert client.login() is False
+    assert client.get_auth_info()['error_code'] == 'auth_state_unknown'

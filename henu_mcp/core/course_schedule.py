@@ -364,7 +364,15 @@ class HenuXkClient:
             return AuthResult(False, error_code="protocol_error", message=f"IDS 登录页处理失败: {exc}")
 
     def login(self) -> bool:
-        if self._check_logged_in():
+        try:
+            has_session = self._check_logged_in()
+        except requests.RequestException:
+            self.auth_result = AuthResult(
+                False, error_code="network_error",
+                message="登录前会话检查网络不可用，本次未提交凭据",
+            )
+            return False
+        if has_session:
             mode = self._saved_auth_mode if self._saved_auth_mode in {"ids_cas", "xk_kingo"} else (
                 "ids_cas" if extract_cas_cookies(self.session.cookies) else "xk_kingo"
             )
