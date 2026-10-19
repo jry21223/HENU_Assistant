@@ -24,6 +24,7 @@ from .models import (
     RESOURCE_TYPE_LIBRARY_SEAT,
     RESOURCE_TYPE_SEMINAR_ROOM,
     ResolveCandidate,
+    matches_campus,
 )
 from .registry import get_resource, search_resources
 
@@ -64,6 +65,8 @@ def resolve_resource(
         record = get_resource(rid)
         if record:
             if resource_type and record.resource_type != resource_type:
+                continue
+            if not matches_campus(record.location, campus_code):
                 continue
             candidates.append(
                 ResolveCandidate(
@@ -106,6 +109,14 @@ def resolve_resource(
             if c.resource_id not in seen_ids:
                 candidates.append(c)
                 seen_ids.add(c.resource_id)
+
+    # Text inference must never relax explicit type or campus filters.
+    candidates = [candidate for candidate in candidates
+                  if not resource_type or candidate.resource_type == resource_type]
+    if campus_code:
+        candidates = [candidate for candidate in candidates
+                      if (record := get_resource(candidate.resource_id)) is not None
+                      and matches_campus(record.location, campus_code)]
 
     # 按 score 降序排序
     candidates.sort(key=lambda c: c.score, reverse=True)

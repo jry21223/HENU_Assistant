@@ -3,17 +3,24 @@ from __future__ import annotations
 from typing import Any
 
 from langbot_plugin.api.entities import context, events
-from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider import message as provider_message
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
 from components.event_listener.identity_capture import IdentityCaptureListener
+from henu_plugin.account_login import AccountLoginCoordinator
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.qq_navigation import handle_navigation
-from henu_plugin.yuketang_login import YuketangLoginCoordinator
 from henu_plugin.confirmation_shortcut import ConfirmationShortcut
 from henu_plugin.kit_binding import KitBindingCoordinator
-from henu_plugin.qq_cards import PRIVATE_NOTICE, card_chain, handle_card_page, present_card, set_card_reply, text_card
+from henu_plugin.qq_cards import (
+    PRIVATE_NOTICE,
+    card_chain,
+    handle_card_page,
+    present_card,
+    set_card_reply,
+    text_card,
+)
+from henu_plugin.yuketang_login import YuketangLoginCoordinator
 
 
 class SafeIdentityCaptureListener(IdentityCaptureListener):
@@ -51,6 +58,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         self._yuketang_login = YuketangLoginCoordinator(self)
         self._confirmation_shortcut = ConfirmationShortcut(self)
         self._kit_binding = KitBindingCoordinator(self)
+        self._account_login = AccountLoginCoordinator(self)
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
@@ -88,6 +96,18 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         async def on_campus_reply(ctx: context.EventContext):
             # SDK 0.4.13 invokes only the first matching listener component.
             await present_card(ctx)
+
+        for event_type in (
+            events.PersonMessageReceived, events.GroupMessageReceived,
+            events.PersonNormalMessageReceived, events.GroupNormalMessageReceived,
+        ):
+            wrapped = []
+            for handler in self.registered_handlers[event_type]:
+                async def account_first(ctx, handler=handler):
+                    if not await self._account_login.handle(ctx):
+                        await handler(ctx)
+                wrapped.append(account_first)
+            self.registered_handlers[event_type] = wrapped
 
     async def _alter_user_message(self, ctx: context.EventContext) -> None:
         # Do not persist wall-clock time, account state, QQ IDs, or credentials in

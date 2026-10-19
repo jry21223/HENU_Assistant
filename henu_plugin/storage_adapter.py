@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 PREFIX_PROFILE = "user:{}:profile"
+PREFIX_LOGIN_ATTEMPT = "user:{}:login_attempt"
 PREFIX_XK_COOKIE = "user:{}:xk_cookie"
 PREFIX_LIBRARY_COOKIE = "user:{}:library_cookie"
 PREFIX_SEMINAR_TASK = "user:{}:seminar_task"
@@ -153,6 +154,7 @@ class PluginStorageAdapter:
     def _file_specs(self, paths: UserStoragePaths) -> list[_StorageFile]:
         return [
             _StorageFile(self._key(PREFIX_PROFILE), paths.profile_file),
+            _StorageFile(self._key(PREFIX_LOGIN_ATTEMPT), paths.user_root / "login_attempt.json"),
             _StorageFile(self._key(PREFIX_XK_COOKIE), paths.xk_cookie_file),
             _StorageFile(
                 self._key(PREFIX_LIBRARY_COOKIE), paths.library_cookie_file
