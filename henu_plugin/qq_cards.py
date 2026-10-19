@@ -255,11 +255,16 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             lines.append(_row(data))
     if msg and not msg.lstrip().startswith(("{", "[")):
         lines.extend(escape(line, 900) for line in msg.splitlines() if line.strip())
+    if tool == "preferences":
+        preferences = result.get("preferences") or {}
+        if isinstance(preferences, dict):
+            lines += ["**默认区域**：" + escape(preferences.get("library_location") or "未设置"), "**默认座位**：" + escape(preferences.get("library_seat_no") or "未设置")]
     if tool == "system_status":
         wrapper = result.get("account") or {}
         account = wrapper.get("account", wrapper) if isinstance(wrapper, dict) else {}
         sid = str(account.get("student_id") or "")
         lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定"), "**登录凭据**：" + ("已保存" if account.get("has_password") else "未保存")]
+        lines.append("已保存凭据不代表当前登录有效；个人查询会按需核验校园服务。")
         attempt = account.get("last_login_attempt") or {}
         attempt_status = {
             "verified": "在线校验成功", "failed": "未完成", "unverified": "仅保存，未验证",
@@ -290,8 +295,15 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
                 for row in rows:
                     lines.extend(_row_lines(row))
     collections = []
+    featured = list(result.get("current_courses") or [])
+    if isinstance(result.get("next_course"), dict):
+        featured.append(result["next_course"])
     for key in ("current_courses", "next_course", "day_schedule", "schedule"):
         value = result.get(key)
+        if key == "day_schedule" and isinstance(value, list):
+            # Clock-enriched entries and raw day entries may differ in fields.
+            identities = {(item.get("course"), item.get("period"), item.get("location")) for item in featured if isinstance(item, dict)}
+            value = [item for item in value if not isinstance(item, dict) or (item.get("course"), item.get("period"), item.get("location")) not in identities]
         if isinstance(value, list):
             collections.append((key, value))
         elif isinstance(value, dict):
@@ -320,7 +332,7 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         status = "查询完成 · 没有符合条件的结果" if status == "已完成" else status + " · 无符合结果"
     for key, rows in collections:
         if rows:
-            label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天课程", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
+            label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天其他课程", "schedule": "课程安排", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
             lines.append(f"**{escape(label, 60)} · {len(rows)} 项**")
             for row in rows:
                 lines.extend(_row_lines(row))
@@ -336,7 +348,7 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         next_step = "先查询当前记录核验，不要重复提交。"
     elif status == "需要绑定或登录":
         next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
-    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "可发送 help 查看当前功能和命令。")
+    return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "发送“使用帮助”查看常用操作。")
 
 
 def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
