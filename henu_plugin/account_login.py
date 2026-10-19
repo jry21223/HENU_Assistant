@@ -77,6 +77,13 @@ class AccountLoginCoordinator:
                 or any(mark in str(spec.params.get('student_id', '')) for mark in '<>')):
             await self.reply(ctx, "账号命令格式无效。请私聊发送 account set --student-id 学号 --password '密码'；不要填写尖括号。")
             return True
+        try:
+            bot = str(await ctx.get_bot_uuid() or '')
+        except Exception:
+            bot = ''
+        if not bot or not callable(getattr(self.listener.plugin, 'send_message', None)):
+            await self.reply(ctx, '无法确认回复通道，本次未执行登录，请稍后重试。')
+            return True
         active = self.users.get(sender)
         if active is not None and not active.done():
             await self.reply(ctx, '已有账号验证正在进行，请等待结果，勿重复发送密码。')
@@ -87,13 +94,6 @@ class AccountLoginCoordinator:
         now = time.monotonic()
         if now - self.last_started.get(sender, -float('inf')) < 30:
             await self.reply(ctx, '账号验证请求过于频繁，请等待 30 秒后再试。')
-            return True
-        try:
-            bot = str(await ctx.get_bot_uuid() or '')
-        except Exception:
-            bot = ''
-        if not bot or not callable(getattr(self.listener.plugin, 'send_message', None)):
-            await self.reply(ctx, '无法确认回复通道，本次未执行登录，请稍后重试。')
             return True
         # Capture routing while the query is alive; background delivery must not
         # use ctx.reply after LangBot has closed the originating invocation.
@@ -111,7 +111,7 @@ class AccountLoginCoordinator:
                                if spec.params.get('verify_login', True)
                                else '已安全接收账号绑定命令，正在仅保存配置，不验证学校登录。')
             await self.reply(ctx, acknowledgement)
-        except Exception:
+        except (Exception, asyncio.CancelledError) as error:
             task.cancel()
             try:
                 await task
@@ -119,6 +119,8 @@ class AccountLoginCoordinator:
                 pass
             if self.users.get(sender) is task:
                 self.users.pop(sender, None)
+            if isinstance(error, asyncio.CancelledError):
+                raise
             return True
         start.set()
         return True
@@ -139,6 +141,8 @@ class AccountLoginCoordinator:
                 message = '账号登录验证成功，已完成绑定。'
             elif result.get('success'):
                 message = '账号已保存，尚未验证登录；不代表学校已确认账号可用。'
+            elif (result.get('login_attempt') or {}).get('status') == 'unknown':
+                message = '本次认证结果未知，请先查询账号状态，勿重复提交凭据。'
             elif result.get('error_code') == 'login_rate_limited':
                 message = f"登录限流保护已生效，请等待 {result['retry_after_seconds']} 秒后再试。"
             elif result.get('error_code', '').startswith('login_guard_'):

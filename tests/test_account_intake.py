@@ -329,3 +329,103 @@ def test_extra_credential_flags_do_not_silently_reach_school(tmp_path, monkeypat
         assert 'accidental-extra-secret' not in str(replies)
 
     asyncio.run(run())
+
+
+def test_concurrent_route_lookup_admits_only_one_account_job_per_user(tmp_path, monkeypatch):
+    from test_account_binding import school_http
+
+    school_http(monkeypatch)
+    monkeypatch.setenv('HENU_MASTER_KEY', 'synthetic-intake-master-key')
+
+    async def run():
+        plugin = MemoryPlugin(tmp_path)
+        replies, sent = prepare_delivery(plugin, monkeypatch)
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = plugin
+        await listener.initialize()
+        gate, both_entered = asyncio.Event(), asyncio.Event()
+        entered = 0
+
+        async def bot(_ctx):
+            nonlocal entered
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+            await gate.wait()
+            return 'offline-bot'
+
+        monkeypatch.setattr(context.EventContext, 'get_bot_uuid', bot)
+        command = 'account set --student-id new-student --password synthetic-password --no-calibrate-period-time'
+        first = asyncio.create_task(dispatch(listener, request(1000, command)))
+        second = asyncio.create_task(dispatch(listener, request(1001, command)))
+        await asyncio.wait_for(both_entered.wait(), 1)
+        gate.set()
+        await asyncio.gather(first, second)
+        await asyncio.gather(*listener._account_login.tasks.values())
+        assert sum('正在验证' in reply for reply in replies) == 1
+        assert len(sent) == 1
+
+    asyncio.run(run())
+
+
+def test_cancelled_ack_does_not_strand_the_next_account_request(tmp_path, monkeypatch):
+    from test_account_binding import school_http
+
+    from henu_plugin import account_login
+
+    school_http(monkeypatch)
+    monkeypatch.setenv('HENU_MASTER_KEY', 'synthetic-intake-master-key')
+    clock = [1000.0]
+    monkeypatch.setattr(account_login, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def run():
+        plugin = MemoryPlugin(tmp_path)
+        _, sent = prepare_delivery(plugin, monkeypatch)
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = plugin
+        await listener.initialize()
+        started = asyncio.Event()
+
+        async def pending_ack(*args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(context.EventContext, 'reply', pending_ack)
+        command = 'account set --student-id new-student --password synthetic-password --no-calibrate-period-time'
+        handler = asyncio.create_task(dispatch(listener, request(1100, command)))
+        await started.wait()
+        handler.cancel()
+        try:
+            await handler
+        except asyncio.CancelledError:
+            pass
+        clock[0] += 31
+
+        async def reply(*args, **kwargs):
+            pass
+
+        monkeypatch.setattr(context.EventContext, 'reply', reply)
+        await dispatch(listener, request(1101, command))
+        await asyncio.wait_for(asyncio.gather(*listener._account_login.tasks.values(), return_exceptions=True), 0.5)
+        assert len(sent) == 1
+        assert '验证成功' in sent[-1][3]
+
+    asyncio.run(run())
+
+
+def test_unknown_credential_submission_never_invites_a_retry(tmp_path, monkeypatch):
+    import requests
+    from test_auth_fail_closed import install_school_http
+
+    install_school_http(monkeypatch, page='form', post_result=requests.ConnectionError('response lost'))
+    monkeypatch.setenv('HENU_MASTER_KEY', 'synthetic-intake-master-key')
+
+    async def run():
+        plugin = MemoryPlugin(tmp_path)
+        _, sent = prepare_delivery(plugin, monkeypatch)
+        await deliver_account(plugin, 1200, 'account set --student-id student --password synthetic-password --no-calibrate-period-time')
+        assert '结果未知' in sent[-1][3]
+        assert '勿重复' in sent[-1][3]
+        assert '重试' not in sent[-1][3]
+
+    asyncio.run(run())
