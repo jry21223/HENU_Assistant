@@ -245,7 +245,7 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "缓存已过期" in old and "2026-10-12" in old and "未请求上游" in old
     matrix = {"success": True, "data": {"week": 8, "dayOfWeek": 2, "periods": [{"period": 2, "periodName": "第二大节", "total": 1, "rooms": [{"roomName": "十号楼102", "roomId": "room-102", "capacity": 60}]}]}}
     page = result_card(matrix, "empty_classroom_query").pages()[0]
-    assert "第二大节" in page and "十号楼102" in page and "room-102" in page and "教学周" in page
+    assert "第二大节" in page and "十号楼102" in page and "room-102" not in page and "教学周" in page
     occupancy = {"success": True, "data": {"roomName": "十号楼103", "week": 8, "period": 3, "status": "occupied", "courses": [{"courseName": "大学英语", "sectionText": "5-6节", "weekExpr": "第1-18周"}]}}
     page = result_card(occupancy, "empty_classroom_query").pages()[0]
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
@@ -319,3 +319,25 @@ def test_week_schedule_is_one_compact_card_with_explicit_day_sections():
     assert '当天无课' in pages[0]
     assert '周次：' not in pages[0]
     assert pages[0].count('课程') >= 11
+
+
+def test_account_status_has_no_empty_item_or_internal_next_commands():
+    source = {'success': True, 'account': {'account': {'student_id': '2512345683', 'has_password': True}},
+              'library_defaults': {'location': '', 'seat_no': ''},
+              'next_commands': ['account status', 'schedule now']}
+    page = result_card(source, 'system_status').pages()[0]
+    assert '条目' not in page
+    assert 'account status' not in page and 'schedule now' not in page
+    assert '今天课表' in page
+
+
+def test_library_regions_are_compact_and_next_step_is_a_query_not_a_reservation():
+    data = {'success': True, 'date': '2026-10-20', 'locations': [
+        {'name': f'自习区域{i}', 'location': f'自习区域{i}', 'area_id': str(i)} for i in range(31)],
+        'next_commands': ['library seats --location <区域>', 'library reserve --location <区域>']}
+    pages = result_card(data, 'library_query').pages()
+    assert len(pages) == 1
+    assert '自习区域30' in pages[0]
+    assert 'library reserve' not in pages[0]
+    assert '区域名称' in pages[0] and '开始' in pages[0] and '结束' in pages[0]
+    assert all(len(page.encode()) <= MAX_BYTES for page in pages)

@@ -184,3 +184,32 @@ def test_sdk_primary_listener_routes_reminder_controls(tmp_path, monkeypatch, te
             assert response.data['event_context']['is_prevent_default']
             receive.assert_not_awaited()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('attached', [False, True])
+def test_sdk_classroom_question_is_one_read_only_query_not_help(tmp_path, monkeypatch, attached):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    monkeypatch.chdir(tmp_path)
+    receive = AsyncMock();monkeypatch.setattr(HenuFood, 'receive_message', receive)
+    call = AsyncMock(return_value={'success': False, '_resolved_tool_name': 'empty_classroom_query', 'msg': '未找到指定楼栋，请选择实际教学楼。'})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc = MemoryRPC(None, initialize_plugin);rpc.variables = {};rpc.sent = []
+        plugin = SimpleNamespace(plugin_runtime_handler=rpc)
+        food = FoodCaptureListener();food.plugin = plugin;await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        parts = [pm.Plain(text='查金明校区十号楼第8周星期二第2大节的空教室')]
+        if attached: parts.append(pm.Image(url='https://synthetic.invalid/image.png'))
+        chain = pm.MessageChain(root=parts)
+        incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+        event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice', message_event=incoming, message_chain=chain)
+        await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {'query_id': 0, 'eid': 6, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+        if attached:
+            call.assert_not_awaited();receive.assert_awaited_once()
+        else:
+            call.assert_awaited_once()
+            assert 'empty classroom query --campus-text 金明 --building-text 十号楼 --week 8 --day-of-week 2 --period 2' == call.call_args.args[0]['command']
+            assert '未找到指定楼栋' in str(rpc.sent)
+            receive.assert_not_awaited()
+    asyncio.run(run())

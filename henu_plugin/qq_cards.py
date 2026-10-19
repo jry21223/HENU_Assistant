@@ -239,11 +239,24 @@ def _week_schedule_card(result: dict) -> Card:
     return Card("本周课表", "部分课程周次待核验" if partial else "已按教学周筛选", tuple(lines), "查看单日详情可发送“今天课表”或“明天课表”。")
 
 
+def _without_query_resource_ids(value):
+    """Copy presentation data without internal IDs; keep physical room/seat names."""
+    hidden = {"id", "area_id", "areaId", "resource_id", "resourceId", "room_id", "roomId",
+              "seat_id", "seatId", "section_id", "course_code", "campusCode", "buildingCode", "typeCode"}
+    if isinstance(value, dict):
+        return {key: _without_query_resource_ids(item) for key, item in value.items() if key not in hidden}
+    if isinstance(value, list):
+        return [_without_query_resource_ids(item) for item in value]
+    return value
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    if tool == "library_query" or tool.startswith("empty_classroom"):
+        result = _without_query_resource_ids(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
     if tool == "food":
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
@@ -350,6 +363,7 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         value = result.get(section)
         if isinstance(value, dict):
             safe = {key: item for key, item in value.items() if key in {"name", "room_name", "roomName", "nameMerge", "location", "seat_no", "capacity", "id", "area_id", "start_time", "end_time", "status", "available_slots", "total", "count", "finished", "pending"}}
+            safe = {key: item for key, item in safe.items() if item not in (None, "", [], {})}
             if safe:
                 lines.append(_row(safe))
             if section == "statistics":
@@ -400,6 +414,21 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if result.get("success") and collections and all(not rows for _, rows in collections):
         status = "查询完成 · 没有符合条件的结果" if status == "已完成" else status + " · 无符合结果"
     for key, rows in collections:
+        if tool == "library_query" and key == "locations" and rows:
+            block = f"**图书馆区域 · {len(rows)} 项**"
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = _first(row, "name", "location", "areaName", "area_name") or "未命名区域"
+                count = row.get("available_count")
+                remaining = f"剩余 {count} 座" if type(count) is int and count >= 0 else "余座未知"
+                entry = "- " + escape(name, 100) + " · " + remaining
+                if len((block + "\n" + entry).encode()) > 1800:
+                    lines.append(block)
+                    block = "**图书馆区域（续）**"
+                block += "\n" + entry
+            lines.append(block)
+            continue
         if rows:
             label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天其他课程", "schedule": "课程安排", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
             if schedule_reference:
@@ -413,14 +442,27 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
     next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    if tool == "library_query":
+        next_step = "请回复区域名称、日期及开始和结束时间，我先查可用座位；预约需要另行确认。"
+    if tool.startswith("empty_classroom"):
+        next_step = "可补充校区、教学楼、星期和大节继续查询；结果只反映课程占用。"
+    if tool == "system_status":
+        next_step = "发送“今天课表”查看课程；找自习地点可发送“找自习室”。"
+    if tool in {"sync_schedule", "schedule_sync"} and result.get("success"):
+        next_step = "发送“今天课表”或“本周课表”查看更新后的课程。"
     if tool == "schedule_query" and result.get("success"):
         next_step = "发送“明天课表”查看其他日期；课表有变动时发送“同步课表”。"
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
         next_step = "先查询当前记录核验，不要重复提交。"
-    elif status == "需要绑定或登录":
-        next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
+    elif status == "需要绑定或登录" or code in {"auth_failed", "login_failed", "auth_required", "login_required", "account_not_bound"}:
+        if tool.startswith("yuketang"):
+            next_step = "请私聊发送 help yuketang，按雨课堂专项提示登录。"
+        elif code == "account_not_bound":
+            next_step = "请在私聊发送“绑定账号”，按提示绑定并登录。"
+        else:
+            next_step = "请私聊发送“我的状态”，核对并恢复校园登录后重试。"
     if tool == "schedule_query" and result.get("success") and result.get("unknown_course_count"):
         status = "部分课程周次待核验"
     return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "发送“使用帮助”查看常用操作。")
