@@ -19,12 +19,12 @@ from typing import Any
 
 from .alias import normalize, normalize_building_name, normalize_campus_name, normalize_room_name
 from .models import (
-    matches_campus,
     RESOURCE_TYPE_CLASSROOM,
     RESOURCE_TYPE_LIBRARY_AREA,
     RESOURCE_TYPE_LIBRARY_SEAT,
     RESOURCE_TYPE_SEMINAR_ROOM,
     ResolveCandidate,
+    matches_campus,
 )
 from .registry import get_resource, search_resources
 
