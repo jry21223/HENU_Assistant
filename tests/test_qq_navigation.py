@@ -15,7 +15,7 @@ def test_menu_and_panels_offer_user_tasks_without_executable_writes():
     assert '确认' not in str(config)
 
 
-def test_primary_sdk_listener_handles_binding_guide_before_model(tmp_path, monkeypatch):
+def test_primary_sdk_listener_handles_help_guide_before_model(tmp_path, monkeypatch):
     import asyncio
     from types import SimpleNamespace
     from langbot_plugin.api.entities import events
@@ -27,13 +27,13 @@ def test_primary_sdk_listener_handles_binding_guide_before_model(tmp_path, monke
         listener = SafeIdentityCaptureListener()
         listener.plugin = SimpleNamespace()
         await listener.initialize()
-        ctx = SimpleNamespace(event=SimpleNamespace(text_message='绑定账号', message_chain=MessageChain(root=[Plain(text='绑定账号')]), launcher_type='person'), reply=AsyncMock(), is_prevent_postorder=False, query_id=1)
+        ctx = SimpleNamespace(event=SimpleNamespace(text_message='使用帮助', message_chain=MessageChain(root=[Plain(text='使用帮助')]), launcher_type='person'), reply=AsyncMock(), is_prevent_postorder=False, query_id=1)
         ctx.prevent_default = lambda: None
         ctx.prevent_postorder = lambda: setattr(ctx, 'is_prevent_postorder', True)
         # The production SDK dispatches the first component; exercise its actual handler.
         await listener.registered_handlers[events.PersonMessageReceived][-1](ctx)
         sent = str(ctx.reply.call_args)
-        assert '校园账号' in sent and '绑定Kit' in sent
+        assert '首次使用' in sent and '绑定Kit' in sent
         assert ctx.is_prevent_postorder
     asyncio.run(run())
 

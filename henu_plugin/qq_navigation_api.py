@@ -35,14 +35,32 @@ class NavigationAPI:
 
     @staticmethod
     def panel_content(panel: dict) -> dict:
-        return {key: panel.get(key, [] if key == 'items' else '') for key in ('items', 'remark')}
+        items = [{**item, 'only_admin': item.get('only_admin', False)} for item in panel.get('items', [])]
+        return {'items': items, 'remark': panel.get('remark', '')}
+
+    @staticmethod
+    def menu_content(menu: dict) -> dict:
+        # QQ supplies display icons; they are not fields managed by our menu API.
+        def clean(value):
+            if isinstance(value, dict):
+                return {key: clean(item) for key, item in value.items() if key != 'icon'}
+            if isinstance(value, list):
+                return [clean(item) for item in value]
+            return value
+        return {'items': clean(menu.get('items', []))}
 
     def apply(self, desired: dict, before: dict) -> list[dict]:
         # Fresh read prevents overwriting changes since the backup was captured.
         if self.snapshot() != before:
             raise RuntimeError('QQ navigation changed after backup; inspect again')
+        # Validate every scope before the first mutation, including menu replacement.
+        for scope, target in desired['panels'].items():
+            matches = [record for record in before['panels'][scope]
+                       if record.get('panel', {}).get('remark') == target['panel']['remark']]
+            if len(matches) > 1 or any(record.get('target_type') != 'all' for record in matches):
+                raise RuntimeError('Ambiguous managed QQ panel; inspect manually')
         changes = []
-        if before['menu'] != desired['menu']:
+        if self.menu_content(before['menu']) != self.menu_content(desired['menu']):
             self.request('PUT', '/v2/menu', {'menu': desired['menu']})
             changes.append({'kind': 'menu'})
         for scope, target in desired['panels'].items():
@@ -64,7 +82,7 @@ class NavigationAPI:
 
     def verify(self, desired: dict) -> bool:
         actual = self.snapshot()
-        if actual['menu'] != desired['menu']:
+        if self.menu_content(actual['menu']) != self.menu_content(desired['menu']):
             return False
         for scope, target in desired['panels'].items():
             matches = [record for record in actual['panels'][scope]
