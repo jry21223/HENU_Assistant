@@ -260,6 +260,13 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         account = wrapper.get("account", wrapper) if isinstance(wrapper, dict) else {}
         sid = str(account.get("student_id") or "")
         lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定"), "**登录凭据**：" + ("已保存" if account.get("has_password") else "未保存")]
+        attempt = account.get("last_login_attempt") or {}
+        attempt_status = {
+            "verified": "在线校验成功", "failed": "未完成", "unverified": "仅保存，未验证",
+            "pending": "结果待确认", "unknown": "结果未知，勿自动重试",
+        }.get(attempt.get("status")) if isinstance(attempt, dict) else None
+        if attempt_status:
+            lines.append("**最近一次绑定尝试**：" + attempt_status + "（不代表当前会话仍有效）")
         clock = result.get("server_time") or {}
         if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))

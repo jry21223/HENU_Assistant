@@ -560,6 +560,7 @@ def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return {
         "student_id": str(profile.get("student_id", "") or ""),
         "has_password": bool(profile.get("password")),
+        "last_login_attempt": load_json(Path(PROFILE_FILE).with_name("login_attempt.json")),
         "library_default_location": location,
         "library_default_seat_no": seat_no,
         "seminar_groups_total": len(seminar_groups),
@@ -4291,6 +4292,8 @@ def _resolve_campus_and_building(
     campus_text: str,
     building_text: str = "",
     classroom_text: str = "",
+    *,
+    campus_code: str = "",
 ) -> dict[str, Any]:
     """通过资源 registry 将自然语言校区/楼房名解析为代码。
 
@@ -4317,9 +4320,8 @@ def _resolve_campus_and_building(
     full_query = " ".join(query_parts)
 
     # 1. 先解析校区
-    campus_code = ""
     campus_name = ""
-    if campus_text:
+    if campus_text and not campus_code:
         result = resolve_resource(campus_text, resource_type="campus", limit=3)
         campus_candidates = result.get("candidates", [])
         if campus_candidates and campus_candidates[0].get("score", 0) >= 0.7:
@@ -4428,10 +4430,19 @@ def empty_classroom_query(
             "msg": "空教室模块未加载，请检查 campus_core/empty_classroom/ 是否完整",
         }
 
+    if (building_code or building_text) and not (campus_code or campus_text):
+        return {
+            "success": False,
+            "code": "building_requires_campus",
+            "msg": "指定楼栋时必须同时明确校区",
+        }
+
     # ── 文本参数解析 ──
     resolution: dict[str, Any] = {}
     if not campus_code and campus_text:
-        resolution = _resolve_campus_and_building(campus_text, building_text, classroom_text)
+        resolution = _resolve_campus_and_building(
+            campus_text, "" if building_code else building_text, classroom_text
+        )
         if not resolution.get("campus_code"):
             # 解析失败，返回候选列表
             return resolution
@@ -4439,12 +4450,56 @@ def empty_classroom_query(
         if not building_code and resolution.get("building_code"):
             building_code = resolution["building_code"]
 
-    client = _get_empty_classroom_client()
-    if client is None:
+    if campus_code and building_text and not building_code:
+        resolution = _resolve_campus_and_building(
+            "", building_text, campus_code=campus_code
+        )
+        if not resolution.get("building_code"):
+            return resolution
+        building_code = resolution["building_code"]
+
+    cache_only = freshness == "cache_only"
+    if cache_only and view not in ("free", "day_matrix", "occupancy"):
+        return {
+            "success": False,
+            "code": "metadata_cache_unavailable",
+            "msg": "该元数据查询不支持只读缓存，请明确选择实时查询",
+        }
+    client = None if cache_only else _get_empty_classroom_client()
+    if client is None and not cache_only:
         return {
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
         }
+
+    if building_code and cache_only:
+        from campus_core.resource_registry.models import build_resource_id
+        from campus_core.resource_registry.registry import get_resource
+
+        record = get_resource(build_resource_id(
+            "building", campus_code=campus_code, building_code=building_code
+        ))
+        if record is None:
+            return {
+                "success": False,
+                "code": "building_validation_unavailable",
+                "msg": "本地无该校区楼栋记录，无法在只读缓存模式核验",
+            }
+    elif building_code:
+        try:
+            valid_buildings = client.fetch_buildings(campus_code)
+        except Exception:
+            return {
+                "success": False,
+                "code": "building_validation_failed",
+                "msg": "无法核验楼栋所属校区，请稍后重试",
+            }
+        if not any(b.building_code == building_code for b in valid_buildings):
+            return {
+                "success": False,
+                "code": "building_not_in_campus",
+                "msg": "楼栋不属于所选校区，请重新选择",
+            }
 
     # ── 无登录态也能查的 view ──
     if view in ("terms", "campuses", "buildings", "classrooms", "types"):
