@@ -232,12 +232,14 @@ async def handle_click(adapter, event, event_id):
     handle = data[5:]
     state = getattr(bot, "_henu_buttons", {})
     item = state.get(handle)
+    if not item:
+        # Old cards can outlive the five-minute cache or a host restart.
+        # Unknown/expired is not evidence that this QQ account lacks permission.
+        await bot.ack_interaction(event.get("id") or "", code=1)
+        return True
     actor = str(event.get("user_openid") or "")
-    valid = (
-        item
-        and item["expires"] > time.monotonic()
-        and event_id
-        and event.get("chat_type") == 2
+    authorized = (
+        event.get("chat_type") == 2
         and actor == item["owner"] == item["target"]
         # Official C2C callbacks may omit message_id. The unpredictable handle
         # is minted per card and stored only after its send receipt. If QQ
@@ -248,12 +250,20 @@ async def handle_click(adapter, event, event_id):
         )
         and (not resolved.get("button_id") or str(resolved["button_id"]) == handle)
     )
-    if not valid:
+    if not authorized:
         await bot.ack_interaction(event.get("id") or "", code=4)
+        return True
+    if item["expires"] <= time.monotonic() or not event_id:
+        await bot.ack_interaction(event.get("id") or "", code=1)
+        return True
+    if item.get("used"):
+        await bot.ack_interaction(event.get("id") or "", code=3)
         return True
     for key, sibling in list(state.items()):
         if sibling["group"] == item["group"]:
-            state.pop(key, None)
+            # Keep the bounded, expiring owner binding to classify replays.
+            # Mark every sibling before awaiting so concurrent taps cannot run twice.
+            sibling["used"] = True
     await bot.ack_interaction(event.get("id") or "", code=0)
     from langbot_plugin.api.entities.builtin.platform import events, entities, message
     from langbot_plugin.api.entities.builtin.provider.session import LauncherTypes

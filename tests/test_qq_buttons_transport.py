@@ -236,11 +236,60 @@ def test_valid_callback_enqueues_one_scoped_plugin_message():
         }
         assert await host.handle_click(adapter, data, "event-123")
         assert await host.handle_click(adapter, data, "event-123")
+        data["data"]["resolved"].update(
+            button_data="henu:" + "b" * 24, button_id="b" * 24
+        )
+        assert await host.handle_click(adapter, data, "event-456")
+        assert [c.kwargs["code"] for c in bot.ack_interaction.await_args_list] == [
+            0,
+            3,
+            3,
+        ]
         call = adapter.ap.query_pool.add_query
         assert call.await_count == 1
         assert call.call_args.kwargs["sender_id"] == "alice"
         assert str(call.call_args.kwargs["message_chain"]) == "HENU_BUTTON " + "a" * 24
         assert adapter._session_event_ids["c2c_alice"]["event_id"] == "event-123"
-        assert not bot._henu_buttons
+
+    asyncio.run(run())
+
+
+def test_expired_or_unknown_card_is_not_an_account_permission_denial():
+    import time
+
+    host = load("qq_buttons_stale", Path("ops/qq_cards_transport.py"))
+
+    async def run():
+        for expired, missing, user, code in [
+            (True, False, "alice", 1),
+            (False, True, "alice", 1),
+            (False, False, "bob", 4),
+            (True, False, "bob", 4),
+        ]:
+            item = {
+                "owner": "alice",
+                "target": "alice",
+                "scene": "c2c",
+                "message_id": "card-123",
+                "expires": time.monotonic() + (-1 if expired else 300),
+                "group": "card",
+            }
+            bot = SimpleNamespace(
+                ack_interaction=AsyncMock(),
+                _henu_buttons={} if missing else {"a" * 24: item},
+            )
+            queue = AsyncMock()
+            adapter = SimpleNamespace(
+                bot=bot, ap=SimpleNamespace(query_pool=SimpleNamespace(add_query=queue))
+            )
+            event = {
+                "id": "interaction",
+                "chat_type": 2,
+                "user_openid": user,
+                "data": {"resolved": {"button_data": "henu:" + "a" * 24}},
+            }
+            assert await host.handle_click(adapter, event, "event-id")
+            bot.ack_interaction.assert_awaited_once_with("interaction", code=code)
+            queue.assert_not_awaited()
 
     asyncio.run(run())
