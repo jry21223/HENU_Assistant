@@ -31,6 +31,11 @@ REGIONS = [
 ]
 
 CASES = [
+    {"id": "week_grouped", "turns": ["把我这周的课按天给我看看"],
+     "checks": [{"calls": [{"tool": "schedule_query", "params": {"view": "week"}}],
+                 "presentation_calls": [{"tool": "schedule_query", "params": {"view": "week"}}],
+                 "presentation_contains": ["本周课表", "星期一", "星期日", "离散数学"],
+                 "excludes": ["下一页"]}]},
     {"id": "two_tasks", "turns": ["帮我看看明天有没有课，再查一下金明图书馆各处还剩多少座位，先不预约。"],
      "checks": [{"calls": [{"tool": "schedule_query", "params": {"target_date": "2026-10-21"}}, {"tool": "library_query", "params": {"view": "locations"}}], "contains": ["明天", "金明", "12", "8"], "excludes": ["下一页"], "scope": {"campus": "金明", "outside": ["明伦", "401", "第一自习室"]}, "warn_contains": ["明伦"]}]},
     {"id": "complete_request", "turns": ["查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。"],
@@ -62,7 +67,14 @@ def synthetic_tool(command, *, prepare=True):
     if spec.resolved_tool == "schedule_query":
         day = p.get("target_date") or "2026-10-20"
         rows = [] if day == "2026-10-21" else [{"course": "高等数学", "period": "第1–2节", "clock_start": "08:00", "clock_end": "09:40", "location": "十号楼101"}]
-        result = {"success": True, "date": day, "day_schedule": rows, "week_filter_applied": True, "teaching_week": 8, "msg": f"{day} 第8教学周，共{len(rows)}门课。"}
+        if p.get('view') == 'week':
+            courses = [{**rows[0], 'course': name} for name in ['高等数学', '计算机网络', '离散数学']]
+            result = {'success': True, 'week_filter_applied': True,
+                      'teaching_week': {'week': 8, 'week_start_date': '2026-10-19'},
+                      'schedule': {'星期一': courses}, 'msg': '第8教学周，匹配3项课程。',
+                      'reply_text': '第8教学周。星期一：高等数学、计算机网络；……其余课程已省略，请查询指定日期。'}
+        else:
+            result = {"success": True, "date": day, "day_schedule": rows, "week_filter_applied": True, "teaching_week": 8, "msg": f"{day} 第8教学周，共{len(rows)}门课。"}
     elif spec.resolved_tool == "library_query" and p.get("view") == "locations":
         result = {"success": True, "source": "live", "date": p.get("target_date") or "2026-10-20", "locations": copy.deepcopy(REGIONS)}
     elif spec.resolved_tool == "library_query" and p.get("view") == "seats":
@@ -128,6 +140,7 @@ def evaluate(case, args, tools, prompt):
         messages.append({"role": "user", "content": question})
         calls, problems, answer = [], [], ""
         prepared, authoritative, offered = None, None, False
+        sources, selected = {}, []
         presentation_attempts = []
         for _ in range(8):
             r = requests.post(args.base_url.rstrip('/') + '/chat/completions', headers={"Authorization": "Bearer " + os.environ['AGENT_EVAL_API_KEY']}, json={"model": args.model, "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 1600, "stream": False}, timeout=60)
@@ -144,8 +157,12 @@ def evaluate(case, args, tools, prompt):
                         if authoritative:
                             raise ValueError('authoritative_receipt')
                         prepared = store.render(owner, turn_id, params)
+                        selected = [{'source': sources[item['ref']],
+                                     'text': '\n'.join(store.requests[(*owner, turn_id)].cards[item['ref']].card.pages())}
+                                    for item in params['cards']]
                         result = {'success': True, 'reply_ready': True, 'llm_hint': '系统展示所选业务卡片，无需重复。'}
                     except (KeyError, ValueError, TypeError) as exc:
+                        prepared, selected = None, []
                         result = {'success': False, 'error_code': str(exc), 'llm_hint': 'campus仅用于library locations整表筛选；seats本身已限定区域，不传campus。只引用本轮display_ref。'}
                         problems.append('invalid_presentation')
                     presentation_attempts.append({'params': params, 'success': result['success'], 'error_code': result.get('error_code')})
@@ -154,11 +171,12 @@ def evaluate(case, args, tools, prompt):
                 command = params.get('command', '')
                 spec, result = synthetic_tool(command, prepare=not presentation_mode)
                 if presentation_mode:
-                    prepared = None
+                    prepared, selected = None, []
                     if result.get('confirmation_required') or result.get('external_committed'):
                         authoritative = '\n'.join(result_card(result).pages())
                     elif not authoritative:
                         result['display_ref'] = store.capture(owner, turn_id, store.with_region(owner, turn_id, result))
+                        sources[result['display_ref']] = {'tool': spec.resolved_tool, 'params': spec.params}
                         offered = True
                     HenuCliSafe()._prepare_delivery_result(result)
                 calls.append({"command": command, "tool": spec.resolved_tool, "params": spec.params})
@@ -177,13 +195,13 @@ def evaluate(case, args, tools, prompt):
             problems.append('no_final_answer')
         if presentation_mode and offered and not prepared and not authoritative and case['id'] != 'missing_time':
             problems.append('missing_presentation')
-        def matches(expected):
+        def matches(expected, options=None):
             return any(c['tool'] == expected['tool']
                        and all(c['params'].get(k) == v for k, v in expected.get('params', {}).items())
                        and (not expected.get('area') or c['params'].get('area_id') == expected['area'] or c['params'].get('location') == next(r['location'] for r in REGIONS if r['area_id'] == expected['area']))
                        and (not expected.get('campus') or str(c['params'].get('campus_text') or '').removesuffix('校区') == expected['campus'].removesuffix('校区') or c['params'].get('campus_code') == '01')
                        and (not expected.get('building') or c['params'].get('building_text') == expected['building'] or c['params'].get('building_code') == '1001')
-                       for c in calls)
+                       for c in (calls if options is None else options))
         for expected in check.get('calls', []):
             if not matches(expected):
                 problems.append('missing_call:' + json.dumps(expected, ensure_ascii=False))
@@ -191,6 +209,11 @@ def evaluate(case, args, tools, prompt):
             problems.append('missing_preview_with_exact_window')
         problems += ['forbidden_tool:' + c['tool'] for c in calls if c['tool'] in check.get('forbidden_tools', [])]
         problems += ['missing_text:' + s for s in check.get('contains', []) if s not in answer]
+        if presentation_mode:
+            card_text = '\n\n'.join(c['text'] for c in selected)
+            problems += ['missing_card_text:' + s for s in check.get('presentation_contains', []) if s not in card_text]
+            problems += ['missing_selected_source:' + json.dumps(e, ensure_ascii=False)
+                         for e in check.get('presentation_calls', []) if not matches(e, [c['source'] for c in selected])]
         problems += ['unexpected_text:' + s for s in check.get('excludes', []) if s in answer]
         if check.get('scope') and outside_scope_result(answer, check['scope']):
             problems.append('outside_campus_result')

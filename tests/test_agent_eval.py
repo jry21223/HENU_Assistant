@@ -76,3 +76,24 @@ def test_classroom_eval_accepts_the_school_suffix_but_not_another_campus(monkeyp
     monkeypatch.setattr('ops.evaluate_qq_agent.requests.post', lambda *args, **kwargs: SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'choices': [{'message': next(messages)}]}))
     result = evaluate(case, SimpleNamespace(base_url='https://synthetic.invalid', model='synthetic'), [], 'synthetic')
     assert result['passed'] is expected, result
+
+
+@pytest.mark.parametrize('note', ['', '本周课表，星期一、星期日、离散数学'])
+def test_week_eval_rejects_replacing_a_week_card_with_daily_cards(monkeypatch, note):
+    case = next(c for c in CASES if c['id'] == 'week_grouped')
+    count = [0]
+    def post(*args, **kwargs):
+        count[0] += 1
+        if count[0] == 1:
+            msg = {'role': 'assistant', 'content': '', 'tool_calls': [{'id': cmd, 'type': 'function', 'function': {'name': 'henu_cli', 'arguments': json.dumps({'command': cmd})}} for cmd in ['schedule week', 'schedule day --date 2026-10-19']]}
+        elif count[0] == 2:
+            result = json.loads(next(m['content'] for m in reversed(kwargs['json']['messages']) if m['role'] == 'tool'))
+            msg = {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'show', 'type': 'function', 'function': {'name': 'henu_present', 'arguments': json.dumps({'cards': [{'ref': result['display_ref']}], 'note': note})}}]}
+        else:
+            msg = {'role': 'assistant', 'content': '已展示。'}
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'choices': [{'message': msg}]})
+    monkeypatch.setenv('AGENT_EVAL_API_KEY', 'synthetic-key')
+    monkeypatch.setattr('ops.evaluate_qq_agent.requests.post', post)
+    report = evaluate(case, SimpleNamespace(base_url='https://synthetic.invalid', model='synthetic', presentation=True), [], 'synthetic')
+    assert not report['passed']
+    assert 'missing_card_text:本周课表' in report['turns'][0]['problems']

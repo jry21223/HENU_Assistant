@@ -58,6 +58,7 @@ def test_week_schedule_uses_the_same_card_from_menu_and_agent(harness):
         assert await handle_menu_query(h.plugin, menu)
         direct = menu.reply.call_args.args[0].root[0].text
         result = await h.tool.call({'command': 'schedule week'}, h.session, 2)
+        assert '摘要中的省略不影响卡片' in result['llm_hint']
         receipt = await h.presenter.call({'cards': [{'ref': result['display_ref']}]}, h.session, 2)
         assert receipt['success'], receipt
         natural = h.context(2)

@@ -281,8 +281,10 @@ class HenuCliSafe(HenuCli):
 
         parts = [
             f"henu_cli 本次执行{status}",
-            f"mode={mode or 'unknown'}",
         ]
+        if result.get('display_ref'):
+            parts.append('display_ref保存裁剪前的业务卡片；摘要中的省略不影响卡片，无需为展示补查；查完目标后用henu_present引用')
+        parts.append(f"mode={mode or 'unknown'}")
         if command:
             parts.append(f"command={command}")
         if resolved_tool:
