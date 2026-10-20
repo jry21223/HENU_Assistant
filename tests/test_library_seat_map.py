@@ -60,6 +60,25 @@ def test_seat_map_to_reservation_preview_never_submits(monkeypatch):
             }
         )
         monkeypatch.setattr(lib, "query_seats", gateway)
+        # The installed engine also performs a read-only library-plan preflight.
+        # Exercise that public CLI boundary without ever allowing a campus write.
+        from components.cli_tools.base import BaseHenuTool
+
+        async def read_plan(self, params, session, query_id):
+            assert params["command"].startswith("library plan ")
+            return {
+                "success": True,
+                "area": {"id": "30", "name": "701 七层南自习室"},
+                "seats": [{"id": "seat-001", "no": "001"}],
+                "target_date": "2026-11-01",
+                "reservation_rules": {
+                    "effective_start": "14:00",
+                    "effective_end": "16:00",
+                    "booking_window": {"open_now": True},
+                },
+            }
+
+        monkeypatch.setattr(BaseHenuTool, "call", read_plan)
         origin = context()
         choices = await lib.region_actions(
             plugin,
@@ -161,3 +180,90 @@ def test_school_query_uses_exact_window_keeps_reserved_seats_off_buttons(monkeyp
         ("2026-11-01", "08:00", "23:00")
     ]
     assert [p for p, _ in calls] == ["/v4/Space/map"]
+
+
+async def select_area(plugin, result):
+    from henu_plugin import library_seat_map as lib, qq_buttons as buttons
+
+    choices = await lib.region_actions(plugin, context(query=1), result)
+    campus = context("HENU_BUTTON " + choices["actions"][0]["id"], query=2)
+    await buttons.handle(plugin, campus)
+    _, choices = wire(campus)
+    area = context("HENU_BUTTON " + choices["actions"][0]["id"], query=3)
+    await buttons.handle(plugin, area)
+    return area
+
+
+def test_explicit_time_window_survives_campus_and_area_selection(monkeypatch):
+    from henu_plugin import library_seat_map as lib
+
+    async def run():
+        query = AsyncMock(
+            return_value={"success": True, "seats": ["002"], "total_count": 2}
+        )
+        monkeypatch.setattr(lib, "query_seats", query)
+        response = await select_area(
+            SimpleNamespace(),
+            {
+                "date": "2026-11-01",
+                "start": "08:00",
+                "end": "23:00",
+                "locations": [
+                    {
+                        "area_id": "30",
+                        "location": "701 七层南自习室",
+                        "campus": "金明校区",
+                    }
+                ],
+            },
+        )
+        assert query.call_args.args[3:] == ("2026-11-01", "08:00", "23:00")
+        assert "选择座位" in str(response.reply.call_args)
+
+    asyncio.run(run())
+
+
+def test_old_async_map_response_is_discarded_after_new_library_selection(monkeypatch):
+    from henu_plugin import library_seat_map as lib
+
+    async def run():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def query(plugin, sender, area, target="", start="", end=""):
+            if not target:
+                return {"success": True, "windows": []}
+            started.set()
+            await release.wait()
+            return {"success": True, "seats": ["002"], "total_count": 2}
+
+        monkeypatch.setattr(lib, "query_seats", query)
+        plugin = SimpleNamespace()
+        rows = {
+            "locations": [
+                {"area_id": "30", "location": "701 七层南自习室", "campus": "金明校区"}
+            ]
+        }
+        await select_area(plugin, rows)
+        previous = context("2026-11-01 08:00-23:00", query=4)
+        work = asyncio.create_task(
+            lib.handle_library_text(plugin, previous, "2026-11-01 08:00-23:00")
+        )
+        await asyncio.wait_for(started.wait(), 1)
+        await lib.region_actions(
+            plugin,
+            context(query=5),
+            {
+                "locations": [
+                    {
+                        "area_id": "43",
+                        "location": "401 第一自习室",
+                        "campus": "明伦校区",
+                    }
+                ]
+            },
+        )
+        release.set()
+        await work
+        assert previous.reply.await_count == 1  # Only its already-sent loading note.
+
+    asyncio.run(run())

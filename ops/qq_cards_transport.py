@@ -208,7 +208,14 @@ async def handle_click(adapter, event, event_id):
         and event_id
         and event.get("chat_type") == 2
         and actor == item["owner"] == item["target"]
-        and str(resolved.get("message_id") or "") == item["message_id"]
+        # Official C2C callbacks may omit message_id. The unpredictable handle
+        # is minted per card and stored only after its send receipt. If QQ
+        # supplies message/button IDs, they must still match that exact card.
+        and (
+            not resolved.get("message_id")
+            or str(resolved["message_id"]) == item["message_id"]
+        )
+        and (not resolved.get("button_id") or str(resolved["button_id"]) == handle)
     )
     if not valid:
         await bot.ack_interaction(event.get("id") or "", code=4)

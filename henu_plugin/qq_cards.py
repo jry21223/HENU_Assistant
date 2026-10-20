@@ -653,10 +653,17 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
         return
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
-    pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    if result.get('confirmation_required') and len(pages) == 1:
+    if result.get('confirmation_required'):
         from henu_plugin.qq_buttons import confirmation_actions, envelope
-        pages[0] = envelope(pages[0], await confirmation_actions(plugin, bot, session, query_id))
+        wire = await confirmation_actions(plugin, bot, session, query_id)
+        pages = result_card(result).pages()
+        if not wire or len(pages) != 1:
+            pages = Card('预览已更新', '', ('请重新发起操作，本次没有提交。',)).pages()
+        else:
+            pages[0] = envelope(pages[0], wire)
+        cache(plugin).put(key, pages)
+    else:
+        pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
     await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
 
 

@@ -63,6 +63,14 @@ async def region_actions(plugin, ctx, result):
         "version": version,
         "expires": time.monotonic() + 300,
         "stage": "campus",
+        "window": parse_window(
+            str(result.get("date") or "")
+            + " "
+            + str(result.get("start") or "")
+            + "-"
+            + str(result.get("end") or ""),
+            campus_now(),
+        ),
     }
     while len(current) > 128:
         current.pop(next(iter(current)))
@@ -224,6 +232,8 @@ async def query_seats(plugin, sender, area, target="", start="", end=""):
             except asyncio.CancelledError:
                 await worker
                 raise
+        except Exception:
+            return {"success": False}
         finally:
             await adapter.abort()
 
@@ -255,8 +265,18 @@ async def show_windows(plugin, ctx, state, result):
 
 
 async def show_map(plugin, ctx, state, window, offset=0):
+    key = await owner(ctx)
+    area = dict(state["area"])
+    generation = secrets.token_urlsafe(12)
+    state["version"] = generation
     await say(ctx, "图书馆选座", ["正在查所选时段的座位。"])
-    result = await query_seats(plugin, ctx.event.sender_id, state["area"], *window)
+    result = await query_seats(plugin, ctx.event.sender_id, area, *window)
+    if (
+        states(plugin).get(key) is not state
+        or state["version"] != generation
+        or state["area"] != area
+    ):
+        return
     if not result.get("success"):
         state["stage"] = "window"
         await say(
@@ -272,7 +292,6 @@ async def show_map(plugin, ctx, state, window, offset=0):
         stage="seats",
         window=window,
         seats=result["seats"],
-        version=secrets.token_urlsafe(12),
         expires=time.monotonic() + 300,
     )
     image_ok = False
@@ -287,9 +306,15 @@ async def show_map(plugin, ctx, state, window, offset=0):
             image_ok = True
         except Exception:
             pass  # Unknown image delivery: never resend automatically.
+    if (
+        states(plugin).get(key) is not state
+        or state["version"] != generation
+        or state["area"] != area
+    ):
+        return
     day, start, end = window
     lines = [
-        escape(state["area"]["campus"] + " · " + state["area"]["location"]),
+        escape(area["campus"] + " · " + area["location"]),
         day + " " + start + "–" + end,
         "剩余 "
         + str(len(result["seats"]))
@@ -340,9 +365,19 @@ async def preview(plugin, ctx, state, seat):
         await say(ctx, "这个座位暂不可选", ["请刷新座位，查看所选时段的空闲座位。"])
         return
     # Refresh before creating any pending write. Do not silently substitute.
-    result = await query_seats(
-        plugin, ctx.event.sender_id, state["area"], *state["window"]
+    key = await owner(ctx)
+    area, window, generation = (
+        dict(state["area"]),
+        tuple(state["window"]),
+        state["version"],
     )
+    result = await query_seats(plugin, ctx.event.sender_id, area, *window)
+    if (
+        states(plugin).get(key) is not state
+        or state["version"] != generation
+        or state["area"] != area
+    ):
+        return
     if not result.get("success") or seat not in result["seats"]:
         await say(ctx, "座位状态变了", ["这个座位目前无法确认可用，请刷新座位后重选。"])
         return
@@ -354,8 +389,8 @@ async def preview(plugin, ctx, state, seat):
 
     tool = HenuCliSafe()
     tool.plugin = plugin
-    day, start, end = state["window"]
-    location = state["area"]["location"]
+    day, start, end = window
+    location = area["location"]
     command = (
         "library reserve --location "
         + shlex.quote(location)
@@ -375,6 +410,12 @@ async def preview(plugin, ctx, state, seat):
     )
     result = await tool.call({"command": command}, session, ctx.query_id)
     await ctx.set_query_var("_henu_card", None)
+    if (
+        states(plugin).get(key) is not state
+        or state["version"] != generation
+        or state["area"] != area
+    ):
+        return
     if not result.get("confirmation_required"):
         await say(
             ctx,
@@ -390,13 +431,20 @@ async def preview(plugin, ctx, state, seat):
         return
     state["stage"] = "preview"
     wire = await confirmation_actions(
-        plugin, str(await ctx.get_bot_uuid()), session, ctx.query_id
+        plugin,
+        str(await ctx.get_bot_uuid()),
+        session,
+        ctx.query_id,
+        expected_command=command,
     )
+    if not wire:
+        await say(ctx, '预览已失效', ['待确认内容已更新，请重新选座。本次没有提交。'])
+        return
     await say(
         ctx,
         "确认预约",
         [
-            escape(state["area"]["campus"] + " · " + location),
+            escape(area["campus"] + " · " + location),
             day + " " + start + "–" + end,
             "座位 " + escape(seat) + "号",
             "尚未提交。请核对日期、时段和座位；确认后才会预约。",
@@ -413,6 +461,7 @@ async def dispatch_library(plugin, ctx, payload):
         return
     kind = payload["kind"]
     if kind == "library_campus":
+        state["version"] = secrets.token_urlsafe(12)
         rows = [r for r in state["rows"] if r["campus"] == payload["campus"]]
         specs = [
             (
@@ -432,11 +481,22 @@ async def dispatch_library(plugin, ctx, payload):
             await actions(plugin, ctx, specs),
         )
     elif kind == "library_area":
+        state["version"] = secrets.token_urlsafe(12)
         state["area"] = next(
             r for r in state["rows"] if r["area_id"] == payload["area"]
         )
         state["stage"] = "window"
-        result = await query_seats(plugin, ctx.event.sender_id, state["area"])
+        if state.get("window"):
+            await show_map(plugin, ctx, state, state["window"])
+            return
+        area, generation = dict(state["area"]), state["version"]
+        result = await query_seats(plugin, ctx.event.sender_id, area)
+        if (
+            states(plugin).get(key) is not state
+            or state["version"] != generation
+            or state["area"] != area
+        ):
+            return
         await show_windows(plugin, ctx, state, result)
     elif kind == "library_window":
         await show_map(plugin, ctx, state, tuple(payload["window"]))
@@ -461,6 +521,8 @@ async def handle_library_text(plugin, ctx, text):
     )
     if not window and not seat:
         return False
+    if getattr(ctx, "is_prevent_postorder", False):
+        return True
     ctx.prevent_default()
     ctx.prevent_postorder()
     if window:

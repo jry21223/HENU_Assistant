@@ -185,7 +185,7 @@ def test_valid_callback_enqueues_one_scoped_plugin_message():
             "data": {
                 "resolved": {
                     "button_data": "henu:" + "a" * 24,
-                    "message_id": "card-123",
+                    "button_id": "a" * 24,
                 }
             },
         }

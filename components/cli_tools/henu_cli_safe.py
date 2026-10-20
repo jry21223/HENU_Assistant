@@ -8,6 +8,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from components.cli_tools.henu_cli import HenuCli
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
 from henu_plugin.qq_cards import PRIVATE_NOTICE, public_spec, stage_card
+from henu_plugin.qq_buttons import confirmation_context
 
 
 class HenuCliSafe(HenuCli):
@@ -22,6 +23,7 @@ class HenuCliSafe(HenuCli):
     _MAX_REPLY_TEXT = 1200
     _MAX_LIST_ITEMS = 8
 
+    @confirmation_context
     async def call(
         self,
         params: dict[str, Any],

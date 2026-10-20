@@ -41,3 +41,34 @@ def patch_host(source):
     result = "".join(lines)
     ast.parse(result)
     return result
+
+
+def patch_tool(source):
+    """Retain all production business overrides; decorate only the tool call."""
+    if "@confirmation_context" in source:
+        return source
+    tree = ast.parse(source)
+    classes = [
+        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HenuCliSafe"
+    ]
+    if len(classes) != 1:
+        raise ValueError("ambiguous safe CLI class")
+    methods = [
+        n
+        for n in classes[0].body
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "call"
+    ]
+    if len(methods) != 1:
+        raise ValueError("ambiguous safe CLI call")
+    node = methods[0]
+    lines = source.splitlines(keepends=True)
+    lines.insert(
+        min([node.lineno] + [d.lineno for d in node.decorator_list]) - 1,
+        " " * node.col_offset + "@confirmation_context\n",
+    )
+    # This module already imports sibling henu_plugin modules before its class.
+    index = classes[0].lineno - 1
+    lines.insert(index, "from henu_plugin.qq_buttons import confirmation_context\n\n")
+    result = "".join(lines)
+    ast.parse(result)
+    return result

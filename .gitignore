@@ -59,3 +59,4 @@ henu_profile.json
 period_time_*.json
 xiqueer_*.json
 .food-drafts/
+.ruff_cache/

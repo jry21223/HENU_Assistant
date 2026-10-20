@@ -1,4 +1,4 @@
-"""A lossless HD diagram from the school's seat coordinates and states."""
+"""An aligned HD diagram preserving school seat placement and states."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from collections import Counter
 import io
 import math
 from pathlib import Path
+from statistics import median
 
 COLORS = {
     "free": (35, 155, 112),
@@ -54,6 +55,48 @@ def render_seat_map(title, window, rows, fetched):
         ):
             raise ValueError("invalid school coordinates")
         geometry.append((row, name, x, y, w, h))
+    # The school supplies hand-drawn hit boxes, not a finished layout grid.
+    # Merge only sub-seat coordinate jitter; retain larger gaps and room shape.
+    standard_w = median(item[4] for item in geometry)
+    standard_h = median(item[5] for item in geometry)
+
+    def aligned(values, tolerance):
+        groups = []
+        for value in sorted(set(values)):
+            if not groups or value - groups[-1][0] > tolerance:
+                groups.append([value])
+            else:
+                groups[-1].append(value)
+        return {value: median(group) for group in groups for value in group}
+
+    columns = aligned([x + w / 2 for _, _, x, _, w, _ in geometry], standard_w * 0.4)
+    rows_y = aligned([y + h / 2 for _, _, _, y, _, h in geometry], standard_h * 0.4)
+    occupied = [
+        (columns[x + w / 2], rows_y[y + h / 2]) for _, _, x, y, w, h in geometry
+    ]
+    if len(set(occupied)) != len(occupied):
+        raise ValueError("school seat positions overlap after alignment")
+    by_row, by_column = {}, {}
+    for x, y in occupied:
+        by_row.setdefault(y, []).append(x)
+        by_column.setdefault(x, []).append(y)
+    # A column used only in another part of the room must not shrink every
+    # seat. Only actual neighbours in the same row/column constrain the size.
+    gaps_x = [
+        b - a
+        for values in by_row.values()
+        for a, b in zip(sorted(values), sorted(values)[1:])
+    ]
+    gaps_y = [
+        b - a
+        for values in by_column.values()
+        for a, b in zip(sorted(values), sorted(values)[1:])
+    ]
+    width = min(standard_w * 0.92, min(gaps_x) * 0.84 if gaps_x else standard_w) * 39.36
+    height = (
+        min(standard_h * 0.92, min(gaps_y) * 0.84 if gaps_y else standard_h) * 22.14
+    )
+    size_px = max(12, round(min(width, height)))
     image = Image.new("RGB", (4096, 2560), "white")
     draw = ImageDraw.Draw(image)
     font_file = str(Path(__file__).with_name("assets") / "NotoSansSC-SeatMap.otf")
@@ -87,8 +130,10 @@ def render_seat_map(title, window, rows, fetched):
             fill=(45, 55, 68),
         )
     for row, name, x, y, w, h in geometry:
-        left, top = 80 + x * 39.36, 300 + y * 22.14
-        right, bottom = left + w * 39.36, top + h * 22.14
+        center_x = 80 + columns[x + w / 2] * 39.36
+        center_y = 300 + rows_y[y + h / 2] * 22.14
+        left, top = round(center_x - size_px / 2), round(center_y - size_px / 2)
+        right, bottom = left + size_px, top + size_px
         draw.rounded_rectangle(
             (left, top, right, bottom),
             radius=8,

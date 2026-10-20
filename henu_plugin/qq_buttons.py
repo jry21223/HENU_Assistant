@@ -8,12 +8,37 @@ import json
 import re
 import secrets
 import time
+from contextvars import ContextVar
+from functools import wraps
 
-from henu_plugin.confirmation import conversation_context, validate_pending_operation
+from henu_plugin.confirmation import (
+    conversation_context,
+    validate_pending_operation,
+    operation_fingerprint,
+    split_confirm_token,
+)
 from henu_plugin.qq_cards import scope, card_chain, Card
 
 MARKER = "\n[HENU_ACTIONS_V1:"
 COMMAND = re.compile(r"HENU_BUTTON ([A-Za-z0-9_-]{24})")
+_preview_command = ContextVar("henu_preview_command", default="")
+
+
+def confirmation_context(call):
+    """Retain the real invocation command through awaits and nested read calls."""
+
+    @wraps(call)
+    async def wrapped(self, params, session, query_id):
+        command = split_confirm_token(
+            params.get("command", "") if isinstance(params, dict) else ""
+        )[0]
+        context_token = _preview_command.set(command)
+        try:
+            return await call(self, params, session, query_id)
+        finally:
+            _preview_command.reset(context_token)
+
+    return wrapped
 
 
 def envelope(page, wire):
@@ -66,16 +91,25 @@ async def actions(plugin, ctx, specs):
     )
 
 
-async def confirmation_actions(plugin, bot, session, query_id):
+async def confirmation_actions(
+    plugin, bot, session, query_id, *, expected_command=None
+):
     owner = scope(bot, session)
     if not owner or owner[1] != "person":
         return None
     key = re.sub(r"[^0-9A-Za-z._-]+", "_", owner[3]).strip("._-")
+    expected = split_confirm_token(
+        expected_command if expected_command is not None else _preview_command.get()
+    )[0]
+    if not expected:
+        return None
     try:
         raw = await plugin.get_plugin_storage("user:" + key + ":pending_operation")
         pending = json.loads(raw)
         if (
             pending.get("conversation") != conversation_context(session)
+            or pending.get("command") != expected
+            or pending.get("fingerprint") != operation_fingerprint(key, expected)
             or int(pending.get("created_query_id") or -1) > query_id
             or float(pending.get("expires_at") or 0) <= time.time()
         ):
