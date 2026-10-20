@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
@@ -8,6 +9,7 @@ from langbot_plugin.api.entities.builtin.provider import session as provider_ses
 from components.cli_tools.henu_cli import HenuCli
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
 from henu_plugin.qq_cards import PRIVATE_NOTICE, public_spec, stage_card
+from henu_plugin.qq_buttons import confirmation_context
 
 
 class HenuCliSafe(HenuCli):
@@ -22,12 +24,25 @@ class HenuCliSafe(HenuCli):
     _MAX_REPLY_TEXT = 1200
     _MAX_LIST_ITEMS = 8
 
+    @confirmation_context
     async def call(
         self,
         params: dict[str, Any],
         session: provider_session.Session,
         query_id: int,
     ) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            from henu_plugin.qq_cards import scope
+            from henu_plugin.library_seat_map import selection_guard
+            from henu_plugin.presentation import presentations
+            proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=self.plugin.plugin_runtime_handler)
+            owner = scope(str(await proxy.get_bot_uuid() or ''), session)
+            if owner:
+                presentations(self.plugin).begin(owner, query_id, selection_guard(self.plugin, owner), started)
+        except Exception:
+            pass  # Presentation context never enables or blocks a campus operation.
         kind = getattr(session.launcher_type, "value", session.launcher_type)
         command = params.get("command", "") if isinstance(params, dict) else ""
         if kind == "group" and not public_spec(inspect_cli_command(command)):
@@ -70,9 +85,31 @@ class HenuCliSafe(HenuCli):
                 {
                     "location": self._first_text(item, "location", "name", "areaName", "title"),
                     "area_id": self._first_text(item, "area_id", "areaId", "id"),
+                    **({key: item.get(key) for key in ('campus', 'floor', 'available_count')}
+                       if item.get('campus') else {}),
                 }
                 for item in locations
             ]
+            campuses, seen = {}, set()
+            for row in result["location_options"]:
+                campus = row.get("campus") or "校区待确认"
+                identity = (campus, row["area_id"] or row["location"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                totals = campuses.setdefault(campus, {"regions": 0, "available_seats": 0, "unknown_regions": 0})
+                totals["regions"] += 1
+                count = row.get("available_count")
+                if type(count) is int and count >= 0:
+                    if totals["available_seats"] is not None:
+                        totals["available_seats"] += count
+                else:
+                    totals["unknown_regions"] += 1
+                    totals["available_seats"] = None
+            summary = result.get("result_summary")
+            if not isinstance(summary, dict):
+                summary = {}
+            result["result_summary"] = {**summary, "library_campuses": campuses}
             result["total"] = int(result.get("total") or len(locations))
             result["returned_count"] = len(locations)
             result["truncated"] = False
@@ -105,9 +142,9 @@ class HenuCliSafe(HenuCli):
             result["reply_text"] = self._qq_safe_text(self._build_reply_text(result))
 
         result["qq_reply_hint"] = (
-            "最终回复用户时优先复述 reply_text；不要直接发送完整 JSON；"
-            "除非用户明确要求翻页、筛选或预约，否则不要重复调用 henu_cli；"
-            "实时数据失败时只复述工具错误，不猜测开放状态或推荐无关替代方案。"
+            "reply_text 是本次工具结果的摘要，可按用户问题筛选、合并和解释，不必逐字复述；"
+            "完成当前需求所需的只读查询可以连续调用，不要为每个查询步骤让用户选菜单；"
+            "已知条件沿用，缺少必要信息才追问。不得编造实时数据或将查询当成预约成功。"
         )
 
     def _build_reply_text(self, result: dict[str, Any]) -> str:
@@ -166,24 +203,17 @@ class HenuCliSafe(HenuCli):
         lines = [f"{header}，共 {total} 个（{source_text}）。"]
         display_locations = locations if len(locations) <= 12 else locations[:6] + locations[-6:]
         if len(locations) > len(display_locations):
-            ids = [self._first_text(item, "area_id", "areaId", "id") for item in locations]
-            ids = [value for value in ids if value]
-            if "43" in ids:
-                lines.append("后部区域包含 area_id=43，请从 location_options 读取对应名称。")
-            lines.append(f"完整的 {{location, area_id}} 在 location_options（共 {len(locations)} 个）。")
-            if ids:
-                lines.append("area_id 可选值：" + ", ".join(ids))
+            lines.append('下方展示部分区域。')
         for location in display_locations:
             name = self._first_text(location, "location", "name", "areaName", "title") or "未命名区域"
-            area_id = self._first_text(location, "area_id", "areaId", "id")
-            suffix = f"（area_id: {area_id}）" if area_id else ""
-            lines.append(f"- {name}{suffix}")
+            campus = self._first_text(location, 'campus') or '校区待确认'
+            count = location.get('available_count')
+            count_text = f'剩余{count}座' if type(count) is int and count >= 0 else '余座未知'
+            display_name = name.translate(str.maketrans('()', '（）'))
+            lines.append(f"- {campus} · {display_name} · {count_text}")
         if len(locations) > len(display_locations):
             lines.append(f"……中间还有 {len(locations) - len(display_locations)} 个区域未展开。")
-        lines.append(
-            "下一步请从上面选择准确的区域名或 area_id，调用 "
-            "library seats --location <区域> --date <日期> --time <开始时间>；不要凭记忆猜区域名。"
-        )
+        lines.append('要查具体座位，告诉我区域、日期和起止时间。')
         return "\n".join(lines)
 
     def _format_seats_reply(self, result: dict[str, Any]) -> str:
@@ -247,27 +277,34 @@ class HenuCliSafe(HenuCli):
         resolved_tool = str(cli.get("resolved_tool") or "").strip()
         status = "成功" if result.get("success") else "失败"
         next_commands = result.get("next_commands") if isinstance(result.get("next_commands"), list) else []
-        next_text = "、".join(str(item) for item in next_commands[:3]) if next_commands else "等待用户补充需求"
+        next_text = "、".join(str(item) for item in next_commands[:3])
 
         parts = [
             f"henu_cli 本次执行{status}",
-            f"mode={mode or 'unknown'}",
         ]
+        if result.get('display_ref'):
+            parts.append('display_ref保存裁剪前的业务卡片；摘要中的省略不影响卡片，无需为展示补查；查完目标后用henu_present引用')
+        parts.append(f"mode={mode or 'unknown'}")
         if command:
             parts.append(f"command={command}")
         if resolved_tool:
             parts.append(f"tool={resolved_tool}")
-        parts.append("最终回复用户时优先复述 reply_text，不要发送完整 JSON")
-        parts.append(f"如需继续，只能根据用户明确要求或 next_commands 选择：{next_text}")
+        parts.append("依据当前需求合并工具事实，reply_text 仅供参考，不发送完整 JSON")
+        if result.get('display_ref'):
+            parts.append('查完本轮目标后调用henu_present引用display_ref展示业务卡片；campus仅用于library locations整表，其他结果不传')
+        parts.append("可自主连续调用必要的只读工具，已知条件不重复问；写操作仍须本人另行确认")
+        if next_text:
+            parts.append(f"可用命令参考（不是用户授权，也不限制其他必要只读查询）：{next_text}")
 
         if self._is_empty_classroom_result(result) or self._text_mentions_empty_classroom(command, resolved_tool):
             parts.append(
-                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
+                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty classroom query 或 help empty classroom"
             )
         if isinstance(result.get("locations"), list):
             parts.append(
                 "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
             )
+            parts.append("校区区域数和合计仅引用 result_summary.library_campuses；有未知区域余座时不报完整合计")
         if isinstance(result.get("seats"), list):
             parts.append(
                 "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"

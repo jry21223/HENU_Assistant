@@ -34,7 +34,7 @@ def page_request_text(chain: list) -> str:
 TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
     "preferences": "图书馆偏好",
-    "sync_schedule": "课表导入", "schedule_query": "我的课表",
+    "sync_schedule": "课表更新", "schedule_query": "我的课表",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
     "course_selection_query": "教务选课", "course_selection_plan": "选课方案",
     "course_selection_submit": "选课提交", "course_monitor_config": "选课监控设置",
@@ -44,7 +44,7 @@ TOOL_TITLES = {
     "library_cancel": "取消座位预约", "seminar_group": "研讨室成员组",
     "seminar_query": "研讨室", "seminar_reserve": "研讨室预约",
     "seminar_signin": "研讨室签到", "seminar_cancel": "取消研讨室预约",
-    "set_calibration_source": "节次校准", "system_status": "账号与服务状态",
+    "set_calibration_source": "节次校准", "system_status": "我的状态",
     "yunfz_leave_query": "河宝请假", "yunfz_signin_query": "河宝签到",
     "yunfz_checksleep_query": "河宝查寝", "yunfz_activity_query": "河宝活动",
     "yunfz_collection_query": "河宝信息收集", "empty_classroom_query": "空教室",
@@ -95,19 +95,33 @@ class Card:
     next_step: str = ""
 
     def pages(self) -> list[str]:
-        # Greedy line pagination with space reserved for header/footer.
+        header = [PREFIX + escape(self.title, 60), ""]
+        if self.status and self.status not in {'已完成', '服务回执', '需要查询地点', '确认校区'}:
+            header += ["**" + escape(self.status, 70) + "**", ""]
+        suffix = ["", escape(self.next_step, 160)] if self.next_step else []
+        full = "\n".join(header + list(self.lines) + suffix)
+        if len(full.encode()) <= MAX_BYTES:
+            return [full]
+        paging = '第 20/20 页 · 回复“下一页”“上一页”或“卡片第 N 页”'
+        notice = '最多展示 20 页，其余内容请缩小查询范围后重新查询。'
         chunks: list[list[str]] = [[]]
-        budget = MAX_BYTES - 1200
+        budget = MAX_BYTES - len("\n".join(header + suffix + [paging, notice]).encode()) - 16
         for raw in self.lines:
             line = raw
             # Never split an escape pair or silently cut one large paragraph.
             while len(line.encode("utf-8")) > budget:
-                end = min(650, len(line))
-                while len(line[:end].encode("utf-8")) > budget or line[:end].endswith("\\"):
+                end = min(budget, len(line))
+                while len(line[:end].encode("utf-8")) > budget:
+                    end -= 1
+                boundaries = list(re.finditer(r"[\n，。；！？,;!? ]", line[:end]))
+                if boundaries:
+                    end = boundaries[-1].end()
+                trailing = len(line[:end]) - len(line[:end].rstrip("\\"))
+                if trailing % 2:
                     end -= 1
                 chunks.append([line[:end]])
                 line = line[end:]
-            if len(chunks[-1]) >= 8 or len(("\n".join(chunks[-1]) + "\n" + line).encode("utf-8")) > budget:
+            if len(("\n".join(chunks[-1]) + "\n" + line).encode("utf-8")) > budget:
                 chunks.append([])
             chunks[-1].append(line)
         chunks = [chunk for chunk in chunks if chunk] or [[]]
@@ -115,9 +129,7 @@ class Card:
         chunks = chunks[:MAX_PAGES]
         pages = []
         for number, chunk in enumerate(chunks, 1):
-            lines = [PREFIX + escape(self.title, 60), "", "**" + escape(self.status, 70) + "**", "", *chunk]
-            if self.next_step:
-                lines += ["", "**下一步**", escape(self.next_step, 160)]
+            lines = header + chunk + suffix
             if len(chunks) > 1:
                 lines += ["", f"第 {number}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”"]
             if omitted:
@@ -147,6 +159,27 @@ def _row(item: Any) -> str:
         fields.append(("可预约", "；".join(_first(s, "label") or (_first(s, "start_time") + "–" + _first(s, "end_time")) for s in slots[:3] if isinstance(s, dict)) or "无可预约时段"))
     parts = [f"{label}：{escape(value, 100)}" for label, value in fields if value]
     return "- **" + escape(name, 100) + "**" + ("\n  " + " · ".join(parts) if parts else "")
+
+
+
+def _schedule_row_lines(item: Any) -> list[str]:
+    if not isinstance(item, dict):
+        return _row_lines(item)
+    name = _first(item, "course", "course_name", "name") or "未命名课程"
+    period = _first(item, "period")
+    start, end = _first(item, "clock_start"), _first(item, "clock_end")
+    clock = f"{start}–{end}" if start and end else ""
+    location = _first(item, "location", "classroom", "place") or "未标注"
+    # Keep numeric suffixes faithfully; do not guess whether they denote capacity.
+    location = location.translate(str.maketrans("[]()", "［］（）"))
+    raw = _first(item, "time")
+    weeks = re.search(r"\d+(?:-\d+)?(?:[,，]\d+(?:-\d+)?)*周(?:[（(]?[单双]周[）)]?)?", raw)
+    lines = ["- **" + escape(name, 100) + "**"]
+    lines.append("  " + escape(period.replace("-", "–") or "节次未标注") + (" · " + escape(clock) if clock else ""))
+    lines.append("  地点：" + escape(location, 160))
+    if weeks:
+        lines.append("  周次：" + escape(weeks.group().replace("-", "–").translate(str.maketrans("()", "（）"))))
+    return ["\n".join(lines)]
 
 
 def _row_lines(item: Any, depth: int = 0) -> list[str]:
@@ -180,17 +213,134 @@ def _row_lines(item: Any, depth: int = 0) -> list[str]:
 LIST_FIELDS = ("locations", "seats", "rooms", "records", "tasks", "appointments", "courses", "exams", "items", "plans", "course_options", "candidates", "groups", "data", "commands", "tips", "examples", "titles", "categories", "date_options", "date_rows")
 
 
+def _week_schedule_card(result: dict) -> Card:
+    from datetime import date, timedelta
+
+    calendar = result.get("teaching_week") or {}
+    try:
+        monday = date.fromisoformat(calendar.get("week_start_date", ""))
+    except (ValueError, TypeError):
+        monday = None
+    partial = bool(result.get("unknown_course_count"))
+    lines = [escape(result.get("msg") or f"第{calendar.get('week', '未知')}教学周")]
+    schedule = result["schedule"]
+    for offset, day in enumerate(("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")):
+        target = monday + timedelta(days=offset) if monday else None
+        heading = "## " + day + (f" · {target.month}月{target.day}日" if target else "")
+        rows = schedule.get(day) or []
+        block = heading
+        def order(row):
+            match = re.search(r"\d+", str(row.get("period") or "")) if isinstance(row, dict) else None
+            return int(match.group()) if match else 999
+        for row in sorted(rows, key=order):
+            if not isinstance(row, dict):
+                entry = _row(row)
+            else:
+                period = _first(row, "period") or "节次未标注"
+                name = _first(row, "course", "course_name", "name") or "未命名课程"
+                location = (_first(row, "location", "classroom", "place") or "地点未标注").translate(str.maketrans("[]()", "［］（）"))
+                entry = "**" + escape(period.replace("-", "–"), 50) + " · " + escape(name, 100) + "**\n" + escape(location, 160)
+            # Keep a weekday heading with every continuation block.
+            if len((block + "\n\n" + entry).encode("utf-8")) > 1900:
+                lines.append(block)
+                block = heading + "（续）"
+            block += "\n\n" + entry
+        if not rows:
+            block += "\n" + ("无已确认课程（有周次待核验）" if partial else "当天无课")
+        lines.append(block + "\n")
+    return Card("本周课表", "有课程周次未确定" if partial else "", tuple(lines), "发送“今天课表”或“明天课表”看单日安排。")
+
+
+def _without_query_resource_ids(value):
+    """Copy presentation data without internal IDs; keep physical room/seat names."""
+    hidden = {"id", "area_id", "areaId", "resource_id", "resourceId", "room_id", "roomId",
+              "seat_id", "seatId", "section_id", "course_code", "campusCode", "buildingCode", "typeCode"}
+    if isinstance(value, dict):
+        return {key: _without_query_resource_ids(item) for key, item in value.items() if key not in hidden}
+    if isinstance(value, list):
+        return [_without_query_resource_ids(item) for item in value]
+    return value
+
+
+def _classroom_query_card(result: dict) -> Card:
+    query = result.get('query') if isinstance(result.get('query'), dict) else {}
+    freshness = result.get('freshness') if isinstance(result.get('freshness'), dict) else {}
+    scope = []
+    if query.get('week'):
+        scope.append('第' + str(query['week']) + '周')
+    day = query.get('dayOfWeek')
+    if type(day) is int and 1 <= day <= 7:
+        scope.append('星期' + '一二三四五六日'[day - 1])
+    period = query.get('periodName') or ('第' + str(query['period']) + '大节' if query.get('period') else '')
+    if period:
+        scope.append(str(period))
+    location = ' · '.join(str(query[key]) for key in ('campusName', 'buildingName') if query.get(key))
+    lines = [escape(' · '.join(scope + ([location] if location else [])))] if scope or location else []
+    stale = bool(result.get('stale') or result.get('is_stale') or freshness.get('stale'))
+    rooms = [] if stale else [room for room in result['rooms'] if isinstance(room, dict)]
+    if stale:
+        lines.append('缓存已过期，未将其中教室列为可用；请重新查询。')
+        if freshness.get('fetchedAt'):
+            lines.append('上次核验：' + escape(str(freshness['fetchedAt'])[:10], 20))
+        if freshness.get('liveChecked') is False:
+            lines.append('本次未请求上游重新核验。')
+    elif not rooms:
+        lines.append('这次没有查到空教室。')
+    else:
+        block = ''
+        for room in rooms:
+            name = _first(room, 'roomName', 'room_name', 'classroomName', 'name') or '未标名教室'
+            capacity = room.get('capacity')
+            row = '- **' + escape(name, 100) + '**'
+            if type(capacity) is int and capacity > 0:
+                row += ' · ' + str(capacity) + '座'
+            if len((block + '\n' + row).encode()) > 1800:
+                lines.append(block)
+                block = ''
+            block += ('\n' if block else '') + row
+        if block:
+            lines.append(block)
+    if rooms:
+        lines.append('按教务课表筛选，临时占用以现场为准。')
+    status = '数据已过期' if stale else (str(len(rooms)) + '间空教室' if rooms else '')
+    return Card('空教室', status, tuple(lines))
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    if tool == "library_query" or tool.startswith("empty_classroom"):
+        result = _without_query_resource_ids(result)
+    if tool == 'library_query' and result.get('success') and isinstance(result.get('seats'), list) and isinstance(result.get('area'), dict):
+        day = str(result.get('target_date') or result.get('date') or '')
+        clock = str(result.get('time_window') or (str(result.get('start') or '') + '–' + str(result.get('end') or '')))
+        window = re.search(r'(\d{2}:\d{2}).*?(\d{2}:\d{2})', clock)
+        if day and window:
+            from henu_plugin.library_seat_map import seat_card
+            return seat_card(result['area'], (day, *window.groups()), result, bool(result.get('_qq_seat_image')))
+    if (tool == 'library_query' and result.get('success') and isinstance(result.get('locations'), list)
+            and result.get('source') != 'live_empty' and not result.get('stale') and not result.get('is_stale')
+            and not (isinstance(result.get('freshness'), dict) and result['freshness'].get('stale'))):
+        from henu_plugin.library_availability import availability_card
+        return availability_card(result)
+    if tool == 'empty_classroom_query' and result.get('success') and isinstance(result.get('rooms'), list):
+        return _classroom_query_card(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
     if tool == "food":
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
     if cli.get("mode") == "help":
         title = "使用帮助" + (" · " + str(cli.get("topic")) if cli.get("topic") != "root" else "")
+    if (tool == "schedule_query" and result.get("success")
+            and result.get("week_filter_applied") is True
+            and isinstance(result.get("schedule"), dict)):
+        return _week_schedule_card(result)
     msg = str(result.get("reply_text") or result.get("msg") or "")
+    schedule_reference = tool == "schedule_query" and result.get("success") and result.get("week_filter_applied") is not True
+    if schedule_reference:
+        title = "课表参考"
+        msg = "以下按星期匹配，尚未确认这些课程在目标日期实际上课。"
     food_rows = None
     if tool == "food" and "{" in msg:
         try:
@@ -225,6 +375,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         status = "缓存已过期 · 仅供参考"
     elif tool.startswith("yuketang") and result.get("bridge") == "pending":
         status = "本地已保存 · 远端待同步"
+    if schedule_reference:
+        status = "教学周未核验 · 仅供参考"
     lines = []
     query = result.get("resolved_query") if isinstance(result.get("resolved_query"), dict) else result.get("query", {})
     if not isinstance(query, dict):
@@ -263,15 +415,15 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         wrapper = result.get("account") or {}
         account = wrapper.get("account", wrapper) if isinstance(wrapper, dict) else {}
         sid = str(account.get("student_id") or "")
-        lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定"), "**登录凭据**：" + ("已保存" if account.get("has_password") else "未保存")]
-        lines.append("已保存凭据不代表当前登录有效；个人查询会按需核验校园服务。")
+        lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定")]
+        lines.append("账号已保存，查询时会检查登录。" if account.get("has_password") else "还没保存校园账号，请私聊发送“绑定账号”。")
         attempt = account.get("last_login_attempt") or {}
         attempt_status = {
-            "verified": "在线校验成功", "failed": "未完成", "unverified": "仅保存，未验证",
-            "pending": "结果待确认", "unknown": "结果未知，勿自动重试",
+            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没检查过登录。",
+            "pending": "上次登录还在处理中，请稍等。", "unknown": "上次登录结果不确定，请勿重复提交密码。",
         }.get(attempt.get("status")) if isinstance(attempt, dict) else None
         if attempt_status:
-            lines.append("**最近一次绑定尝试**：" + attempt_status + "（不代表当前会话仍有效）")
+            lines.append(attempt_status)
         clock = result.get("server_time") or {}
         if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))
@@ -281,6 +433,7 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         value = result.get(section)
         if isinstance(value, dict):
             safe = {key: item for key, item in value.items() if key in {"name", "room_name", "roomName", "nameMerge", "location", "seat_no", "capacity", "id", "area_id", "start_time", "end_time", "status", "available_slots", "total", "count", "finished", "pending"}}
+            safe = {key: item for key, item in safe.items() if item not in (None, "", [], {})}
             if safe:
                 lines.append(_row(safe))
             if section == "statistics":
@@ -331,29 +484,66 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if result.get("success") and collections and all(not rows for _, rows in collections):
         status = "查询完成 · 没有符合条件的结果" if status == "已完成" else status + " · 无符合结果"
     for key, rows in collections:
+        if tool == "library_query" and key == "locations" and rows:
+            block = f"**图书馆区域 · {len(rows)} 项**"
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = _first(row, "name", "location", "areaName", "area_name") or "未命名区域"
+                count = row.get("available_count")
+                remaining = f"剩余 {count} 座" if type(count) is int and count >= 0 else "余座未知"
+                campus = str(row.get('campus') or '校区待确认')
+                entry = "- " + escape((campus + ' · ' + name).translate(str.maketrans('()', '（）')), 100) + " · " + remaining
+                if len((block + "\n" + entry).encode()) > 1800:
+                    lines.append(block)
+                    block = "**图书馆区域（续）**"
+                block += "\n" + entry
+            lines.append(block)
+            continue
         if rows:
             label = {"current_courses": "正在上课", "next_course": "下一节课", "day_schedule": "当天其他课程", "schedule": "课程安排", "locations": "图书馆区域", "seats": "座位", "rooms": "房间", "records": "预约记录", "tasks": "签到任务", "courses": "课程", "course_options": "课程选项", "exams": "考试", "plans": "方案", "commands": "可用命令", "groups": "成员组", "data": "查询结果", "items": "查询结果", "candidates": "候选课程", "appointments": "预约", "tips": "使用提示", "examples": "命令示例", "titles": "预约主题", "categories": "预约分类", "date_options": "可选日期", "date_rows": "预约时段"}.get(key, key)
+            if schedule_reference:
+                label = {"current_courses": "按当前时段匹配（供核对）", "下一节课": "后续时段匹配（供核对）", "day_schedule": "该星期其他课程", "schedule": "按星期匹配的课程"}.get(key, label)
             lines.append(f"**{escape(label, 60)} · {len(rows)} 项**")
             for row in rows:
-                lines.extend(_row_lines(row))
+                lines.extend(_schedule_row_lines(row) if tool == "schedule_query" else _row_lines(row))
     if result.get("week_filter_applied") is False and "未按教学周过滤" not in msg:
         lines.append("课表未按教学周过滤，请核对实际教学周。")
     if tool.startswith("yuketang") and tool != "yuketang_exam_list":
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
     next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""
+    if tool == "library_query":
+        next_step = "请回复区域名称、日期及开始和结束时间，我先查可用座位；预约需要另行确认。"
+    if tool.startswith("empty_classroom"):
+        next_step = "可补充校区、教学楼、星期和大节继续查询；结果只反映课程占用。"
+    if tool == "system_status":
+        next_step = "发送“今天课表”查课程，或“找自习室”查空教室。"
+    if tool in {"sync_schedule", "schedule_sync"} and result.get("success"):
+        next_step = "发送“今天课表”或“本周课表”查看更新后的课程。"
+    if tool == "schedule_query" and result.get("success"):
+        next_step = "发“明天课表”看明天；课表有变动时发“同步课表”。"
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
         next_step = "先查询当前记录核验，不要重复提交。"
-    elif status == "需要绑定或登录":
-        next_step = "私聊发送 " + ("help yuketang" if tool.startswith("yuketang") else "help account") + "，按提示绑定并登录。"
+    elif status == "需要绑定或登录" or code in {"auth_failed", "login_failed", "auth_required", "login_required", "account_not_bound"}:
+        if tool.startswith("yuketang"):
+            next_step = "请私聊发送 help yuketang，按雨课堂专项提示登录。"
+        elif code == "account_not_bound":
+            next_step = "请在私聊发送“绑定账号”，按提示绑定并登录。"
+        else:
+            next_step = "请私聊发送“我的状态”，核对并恢复校园登录后重试。"
+    if tool == "schedule_query" and result.get("success") and result.get("unknown_course_count"):
+        status = "部分课程周次待核验"
     return Card(title, status, tuple(lines or ["服务未返回可展示的详细信息。"]), next_step or "发送“使用帮助”查看常用操作。")
 
 
 def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     if private:
         return result_card({}, private=True).pages()
+    if title == '校园账号与校准' and text == '已取消账号凭据录入。':
+        title, text = '绑定校园账号', '已取消填写，原来的账号保留。'
     status = "服务回执"
     if "尚未发布" in text or "尚未提交" in text or "待确认" in text:
         status = "待本人核对 · 尚未提交"
@@ -402,8 +592,8 @@ class CardCache:
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
 
-    def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
-        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
+    def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
+        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], current)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
         if on_read is not None:
@@ -482,10 +672,55 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     key = scope(bot, session)
     if key is None:
         return
-    cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
-    result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
-    pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
+    authoritative = bool(result.get("confirmation_required") or result.get("external_committed"))
+    if not authoritative:
+        getter = getattr(proxy, "get_query_vars", None)
+        variables = await getter() if callable(getter) else {}
+        previous = variables.get("_henu_card") if isinstance(variables, dict) else None
+        if (isinstance(previous, dict) and previous.get("owner") == list(key)
+                and previous.get("authoritative")):
+            # Later reads in this query cannot hide the exact pending operation
+            # or its final receipt behind an ordinary synthesized answer.
+            return
+    from henu_plugin.presentation import publication_lock
+    if not authoritative:
+        from henu_plugin.presentation import presentations, build_seat_image
+        import asyncio
+        store = presentations(plugin)
+        snapshot = store.with_region(key, query_id, result)
+        image, reserved = await asyncio.to_thread(build_seat_image, snapshot) if snapshot.get('_qq_seat_map') else (None, None)
+    async with publication_lock(plugin, key, query_id):
+        if not authoritative:
+            getter = getattr(proxy, 'get_query_vars', None)
+            variables = await getter() if callable(getter) else {}
+            previous = variables.get('_henu_card') if isinstance(variables, dict) else None
+            if isinstance(previous, dict) and previous.get('owner') == list(key) and previous.get('authoritative'):
+                return
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
+        await proxy.set_query_var('_henu_presentation', None)
+        if result.get('confirmation_required'):
+            from henu_plugin.qq_buttons import confirmation_actions, envelope
+            wire = await confirmation_actions(plugin, bot, session, query_id)
+            pages = result_card(result).pages()
+            if not wire or len(pages) != 1:
+                pages = Card('预览已更新', '', ('请重新发起操作，本次没有提交。',)).pages()
+            else:
+                pages[0] = envelope(pages[0], wire)
+            cache(plugin).put(key, pages)
+        elif result.get("external_committed"):
+            pages = result_card(result).pages()
+            cache(plugin).put(key, pages)
+        else:
+            result['display_ref'] = store.capture(key, query_id, snapshot, image=image, reserved=reserved)
+            pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
+        await proxy.set_query_var("_henu_card", {
+            "owner": list(key), "page": pages[0],
+            "authoritative": authoritative,
+            # Exact menu shortcuts read page directly. Read results, including a
+            # failed subquery, leave room for synthesis and necessary followups.
+            "prefer_agent": not authoritative,
+        })
 
 
 async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
@@ -501,21 +736,112 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
     return await ctx.reply(card_chain(pages[0]))
 
 
-async def present_card(ctx):
+def agent_answer_pages(answer: str) -> list[str]:
+    """Wrap the synthesized answer without the tool-card row pagination."""
+    body = escape(answer, len(answer) * 2 + 100)
+    # Only headings and emphasis are allowed back through the escaping layer.
+    body = re.sub(r"(?m)^(?:\\#){1,3} ", "## ", body)
+    body = re.sub(r"\\\*\\\*([^\n]+?)\\\*\\\*", r"**\1**", body)
+    return Card("校园查询", "", (body,)).pages()
+
+
+async def _finish_card(ctx, plugin, owner, text):
+    from henu_plugin.presentation import publication_lock
+    async with publication_lock(plugin, owner, getattr(ctx, 'query_id', 0)):
+        latest = await ctx.get_query_vars()
+        card = latest.get('_henu_card') if isinstance(latest, dict) else None
+        protected = isinstance(card, dict) and card.get('owner') == list(owner) and card.get('authoritative')
+        set_card_reply(ctx.event, card['page'] if protected else text)
+        setter = getattr(ctx, 'set_query_var', None)
+        if callable(setter):
+            await setter('_henu_card', None)
+            await setter('_henu_presentation', None)
+        return bool(protected)
+
+
+async def _deliver_presentation(ctx, plugin, owner):
+    from henu_plugin.presentation import presentations, publication_lock
+    from henu_plugin.library_seat_map import selection_guard, install_selection
+    from langbot_plugin.api.entities.builtin.platform.message import Image
+
+    async with publication_lock(plugin, owner, ctx.query_id):
+        latest = await ctx.get_query_vars()
+        card = latest.get('_henu_card')
+        protected = isinstance(card, dict) and card.get('owner') == list(owner) and card.get('authoritative')
+        plan = latest.get('_henu_presentation')
+        if not protected:
+            if not isinstance(plan, dict) or plan.get('owner') != list(owner) or plan.get('query_id') != ctx.query_id:
+                return
+            await ctx.set_query_var('_henu_presentation', None)
+    if protected:
+        await _finish_card(ctx, plugin, owner, '')
+        return
+    if plan.get('expires', 0) <= time.monotonic():
+        await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询，避免沿用旧的课程或余座。')[0])
+        return
+    pages = plan['pages']
+    store = presentations(plugin) if plugin is not None else None
+    guard = store.guard(owner, ctx.query_id) if store and plan.get('seat_selection') and owner[1] == 'person' else None
+    if guard is not None and not store.is_latest(owner, ctx.query_id):
+        await _finish_card(ctx, plugin, owner, text_card('查询条件已更新', '本轮旧座位结果已作废，请按新条件重新查询后选座。')[0])
+        return
+    failed_images = set()
+    for ref in plan.get('images', []):
+        image = store.asset(owner, ctx.query_id, ref).image if store else None
+        if image:
+            try:
+                await ctx.reply(MessageChain([Image(base64=image)]))
+            except Exception:
+                failed_images.add(ref)  # Unknown media delivery; never resend.
+    if failed_images and store:
+        plan = {**plan, **store.render(owner, ctx.query_id, plan['arrangement'], failed_images=failed_images)}
+        pages = plan['pages']
+    if len(pages) + len(plan.get('images', [])) + len(failed_images) > 5:
+        await _finish_card(ctx, plugin, owner, text_card('结果较长', '这次结果太长，请分开查询课表和座位。')[0])
+        return
+    try:
+        for page in pages[:-1]:
+            await ctx.reply(card_chain(page))
+    except Exception:
+        await _finish_card(ctx, plugin, owner, text_card('发送状态待确认', '部分结果发送状态暂未确认，请重新查询；不会自动重复发送。')[0])
+        return
+    protected = await _finish_card(ctx, plugin, owner, pages[-1])
+    if not protected and plugin is not None:
+        if guard is not None:
+            selected = store.asset(owner, ctx.query_id, plan['seat_selection']).selection
+            if not store.is_latest(owner, ctx.query_id) or not install_selection(plugin, owner, selected, guard):
+                page = text_card('查询条件已更新', '本轮旧座位结果已作废，请按新条件重新查询后选座。')[0]
+                set_card_reply(ctx.event, page)
+                cache(plugin).put(owner, [page])
+                return
+        cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1)
+
+
+async def present_card(ctx, *, plugin: Any = None):
     if getattr(ctx.event, "funcs_called", []) or getattr(ctx.event, "finish_reason", "") in {"tool_calls", "function_call"}:
         return
     try:
         variables = await ctx.get_query_vars()
         card = variables.get("_henu_card")
+        plan = variables.get('_henu_presentation')
+        owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
+        if (isinstance(plan, dict) and owner is not None and plan.get('owner') == list(owner)
+                and plan.get('query_id') == getattr(ctx, 'query_id', None)
+                and not (isinstance(card, dict) and card.get('authoritative'))):
+            try:
+                await _deliver_presentation(ctx, plugin, owner)
+            except (ValueError, KeyError):
+                await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询，避免沿用旧的课程或余座。')[0])
+            return
         if not isinstance(card, dict):
             return
-        owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
         if owner is None or card.get("owner") != list(owner):
             return
-        set_card_reply(ctx.event, card["page"])
-        setter = getattr(ctx, "set_query_var", None)
-        if callable(setter):
-            await setter("_henu_card", None)
+        answer = str(getattr(ctx.event, "response_text", "") or "").strip()
+        pages = agent_answer_pages(answer) if card.get('prefer_agent') and answer else [card['page']]
+        protected = await _finish_card(ctx, plugin, owner, pages[0])
+        if not protected and plugin is not None and card.get('prefer_agent') and answer:
+            cache(plugin).put(owner, pages)
     except Exception:
         # Preserve the pipeline's original text response on API failure.
         return

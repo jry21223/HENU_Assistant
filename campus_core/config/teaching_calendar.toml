@@ -1,0 +1,12 @@
+# Public calendar verified against the official image on 2026-10-10.
+# Update only from an authoritative school calendar; do not infer future terms.
+[[semesters]]
+academic_year = "2026-2027"
+semester = 1
+name = "2026-2027学年第一学期"
+start = "2026-08-31"
+last_teaching_day = "2027-01-15"
+weeks = 20
+source = "https://www.henu.edu.cn/__local/4/39/08/673FD79A2B926AF48611CAF1675_5DC70943_54A46.jpg"
+source_page = "https://www.henu.edu.cn/xyfw/xl.htm"
+verified_on = "2026-10-10"

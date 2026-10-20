@@ -1,0 +1,285 @@
+{
+  "source": "school /v4/space/pick",
+  "verified_date": "2026-10-20",
+  "areas": [
+    {
+      "id": "67",
+      "name": "206 第一借书处",
+      "nameMerge": "明伦校区-明伦二层-206 第一借书处",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦二层",
+      "parentId": "65",
+      "topId": "32"
+    },
+    {
+      "id": "8",
+      "name": "二楼南附楼走廊",
+      "nameMerge": "金明校区-金明二楼-二楼南附楼走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "9",
+      "name": "二楼北附楼走廊",
+      "nameMerge": "金明校区-金明二楼-二楼北附楼走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "10",
+      "name": "二楼大厅走廊",
+      "nameMerge": "金明校区-金明二楼-二楼大厅走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "11",
+      "name": "201 经管教外文书库(一)",
+      "nameMerge": "金明校区-金明二楼-201 经管教外文书库(一)",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "12",
+      "name": "202 自然科学书库",
+      "nameMerge": "金明校区-金明二楼-202 自然科学书库",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "13",
+      "name": "208 过刊阅览室",
+      "nameMerge": "金明校区-金明二楼-208 过刊阅览室",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "14",
+      "name": "209 期刊报纸阅览室",
+      "nameMerge": "金明校区-金明二楼-209 期刊报纸阅览室",
+      "premisesName": "金明校区",
+      "storeyName": "金明二楼",
+      "parentId": "2",
+      "topId": "1"
+    },
+    {
+      "id": "15",
+      "name": "三层南附楼走廊",
+      "nameMerge": "金明校区-金明三楼-三层南附楼走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明三楼",
+      "parentId": "3",
+      "topId": "1"
+    },
+    {
+      "id": "16",
+      "name": "三楼北附楼走廊",
+      "nameMerge": "金明校区-金明三楼-三楼北附楼走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明三楼",
+      "parentId": "3",
+      "topId": "1"
+    },
+    {
+      "id": "17",
+      "name": "三楼大厅走廊",
+      "nameMerge": "金明校区-金明三楼-三楼大厅走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明三楼",
+      "parentId": "3",
+      "topId": "1"
+    },
+    {
+      "id": "18",
+      "name": "305 读书室",
+      "nameMerge": "金明校区-金明三楼-305 读书室",
+      "premisesName": "金明校区",
+      "storeyName": "金明三楼",
+      "parentId": "3",
+      "topId": "1"
+    },
+    {
+      "id": "22",
+      "name": "四楼大厅走廊",
+      "nameMerge": "金明校区-金明四楼-四楼大厅走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明四楼",
+      "parentId": "4",
+      "topId": "1"
+    },
+    {
+      "id": "23",
+      "name": "401 数理化医学生物书库",
+      "nameMerge": "金明校区-金明四楼-401 数理化医学生物书库",
+      "premisesName": "金明校区",
+      "storeyName": "金明四楼",
+      "parentId": "4",
+      "topId": "1"
+    },
+    {
+      "id": "24",
+      "name": "501 经管教外文书库(二)",
+      "nameMerge": "金明校区-金明五楼-501 经管教外文书库(二)",
+      "premisesName": "金明校区",
+      "storeyName": "金明五楼",
+      "parentId": "5",
+      "topId": "1"
+    },
+    {
+      "id": "25",
+      "name": "502 科学技术书库",
+      "nameMerge": "金明校区-金明五楼-502 科学技术书库",
+      "premisesName": "金明校区",
+      "storeyName": "金明五楼",
+      "parentId": "5",
+      "topId": "1"
+    },
+    {
+      "id": "26",
+      "name": "五楼大厅走廊",
+      "nameMerge": "金明校区-金明五楼-五楼大厅走廊",
+      "premisesName": "金明校区",
+      "storeyName": "金明五楼",
+      "parentId": "5",
+      "topId": "1"
+    },
+    {
+      "id": "27",
+      "name": "601 社会科学书库",
+      "nameMerge": "金明校区-金明六楼-601 社会科学书库",
+      "premisesName": "金明校区",
+      "storeyName": "金明六楼",
+      "parentId": "6",
+      "topId": "1"
+    },
+    {
+      "id": "28",
+      "name": "602 语言文学艺术书库",
+      "nameMerge": "金明校区-金明六楼-602 语言文学艺术书库",
+      "premisesName": "金明校区",
+      "storeyName": "金明六楼",
+      "parentId": "6",
+      "topId": "1"
+    },
+    {
+      "id": "30",
+      "name": "701 七层南自习室",
+      "nameMerge": "金明校区-金明七楼-701 七层南自习室",
+      "premisesName": "金明校区",
+      "storeyName": "金明七楼",
+      "parentId": "7",
+      "topId": "1"
+    },
+    {
+      "id": "31",
+      "name": "702 七层北自习室",
+      "nameMerge": "金明校区-金明七楼-702 七层北自习室",
+      "premisesName": "金明校区",
+      "storeyName": "金明七楼",
+      "parentId": "7",
+      "topId": "1"
+    },
+    {
+      "id": "37",
+      "name": "111 西馆报刊基藏阅览室",
+      "nameMerge": "明伦校区-明伦一层-111 西馆报刊基藏阅览室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦一层",
+      "parentId": "33",
+      "topId": "32"
+    },
+    {
+      "id": "38",
+      "name": "302 东馆社会科学阅览室",
+      "nameMerge": "明伦校区-明伦三层-302 东馆社会科学阅览室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦三层",
+      "parentId": "34",
+      "topId": "32"
+    },
+    {
+      "id": "39",
+      "name": "307 西馆第二借书处",
+      "nameMerge": "明伦校区-明伦三层-307 西馆第二借书处",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦三层",
+      "parentId": "34",
+      "topId": "32"
+    },
+    {
+      "id": "40",
+      "name": "301 西馆报纸阅览室",
+      "nameMerge": "明伦校区-明伦三层-301 西馆报纸阅览室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦三层",
+      "parentId": "34",
+      "topId": "32"
+    },
+    {
+      "id": "41",
+      "name": "305 西馆期刊阅览室",
+      "nameMerge": "明伦校区-明伦三层-305 西馆期刊阅览室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦三层",
+      "parentId": "34",
+      "topId": "32"
+    },
+    {
+      "id": "42",
+      "name": "402 东馆语言文学艺术书库",
+      "nameMerge": "明伦校区-明伦四层-402 东馆语言文学艺术书库",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦四层",
+      "parentId": "35",
+      "topId": "32"
+    },
+    {
+      "id": "43",
+      "name": "401 第一自习室",
+      "nameMerge": "明伦校区-明伦四层-401 第一自习室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦四层",
+      "parentId": "35",
+      "topId": "32"
+    },
+    {
+      "id": "44",
+      "name": "402 第二自习室",
+      "nameMerge": "明伦校区-明伦四层-402 第二自习室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦四层",
+      "parentId": "35",
+      "topId": "32"
+    },
+    {
+      "id": "47",
+      "name": "404 第三自习室",
+      "nameMerge": "明伦校区-明伦四层-404 第三自习室",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦四层",
+      "parentId": "35",
+      "topId": "32"
+    },
+    {
+      "id": "45",
+      "name": "502 东馆外文书库",
+      "nameMerge": "明伦校区-明伦五层-502 东馆外文书库",
+      "premisesName": "明伦校区",
+      "storeyName": "明伦五层",
+      "parentId": "36",
+      "topId": "32"
+    }
+  ]
+}

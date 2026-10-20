@@ -24,7 +24,7 @@ class QQCardsListener(EventListener):
             await self.paging(ctx)
 
     async def present(self, ctx):
-        await present_card(ctx)
+        await present_card(ctx, plugin=self.plugin)
 
     async def paging(self, ctx):
         return await handle_card_page(self.plugin, ctx)

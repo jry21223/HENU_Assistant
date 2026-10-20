@@ -1,9 +1,12 @@
 import asyncio
 import ast
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+import pytest
 
 from langbot_plugin.api.entities.builtin.platform.message import MessageChain
 
@@ -18,11 +21,11 @@ def test_every_actual_service_route_has_a_card_title():
 
 
 def test_schedule_pages_keep_time_location_and_week_warning():
-    source = {"success": True, "week_filter_applied": False, "schedule": {"星期二": [{"course": f"课程{i}", "clock_start": "08:00", "clock_end": "09:40", "classroom": "十号楼101"} for i in range(35)]}}
+    source = {"success": True, "week_filter_applied": False, "schedule": {"星期二": [{"course": f"课程{i}", "clock_start": "08:00", "clock_end": "09:40", "classroom": "十号楼101"} for i in range(70)]}}
     before = json.dumps(source)
     pages = result_card(source, "schedule_query").pages()
     assert len(pages) > 1
-    assert "课程34" in "\n".join(pages)
+    assert "课程69" in "\n".join(pages)
     assert "08:00" in pages[0] and "十号楼101" in pages[0]
     assert "未按教学周过滤" in "\n".join(pages)
     assert all(len(page.encode()) <= MAX_BYTES for page in pages)
@@ -88,7 +91,37 @@ def test_reply_event_uses_only_the_current_owner_and_preserves_fallback():
     assert event.reply is None
 
 
-def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
+@pytest.mark.parametrize("library_success", [True, False])
+def test_agent_answer_can_combine_queries_and_ask_a_followup(monkeypatch, library_success):
+    from henu_plugin.qq_cards import stage_card, present_card
+
+    async def run():
+        variables = {}
+        async def set_var(key, value):
+            variables[key] = value
+        proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+        plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+        session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+        await stage_card(plugin, session, 1, {"success": True, "day_schedule": [], "date": "2026-10-21", "_resolved_tool_name": "schedule_query"})
+        await stage_card(plugin, session, 1, {"success": library_success, "locations": [{"location": "701 七层南自习室", "campus": "金明校区", "available_count": 12}] if library_success else [], "msg": "图书馆暂时没查成功。" if not library_success else "", "_resolved_tool_name": "library_query"})
+        answer = "明天没课。金明七层南自习室还剩12座。你打算几点到几点去？" if library_success else "明天没课。图书馆暂时没查成功，余座还不能确认。"
+        event = SimpleNamespace(**vars(session), response_text=answer, reply=None, funcs_called=[], finish_reason="stop")
+        ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables), get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        from components.event_listener.qq_cards import QQCardsListener
+        listener = QQCardsListener.__new__(QQCardsListener)
+        listener.plugin = plugin
+        await listener.present(ctx)
+        assert event.reply[0]["text"].startswith(PREFIX)
+        assert answer in event.reply[0]["text"], "The template must retain the complete agent answer and necessary followup"
+        assert event.response_text == answer
+        assert variables["_henu_card"] is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("prefer_agent", [False, True])
+def test_actual_sdk_reply_event_serializes_the_supported_reply_field(prefer_agent):
     from langbot_plugin.api.entities import events
     from components.event_listener.qq_cards import QQCardsListener
     event = events.NormalMessageResponded.model_construct(
@@ -98,14 +131,98 @@ def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
     ctx = SimpleNamespace(event=event, prevent_default=Mock(),
         get_bot_uuid=AsyncMock(return_value="bot"),
         get_query_vars=AsyncMock(return_value={"_henu_card": {
-            "owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "课表"}}))
+            "owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "课表", "prefer_agent": prefer_agent}}))
     listener = QQCardsListener.__new__(QQCardsListener)
     listener.plugin = SimpleNamespace()
     asyncio.run(listener.present(ctx))
     field = "reply_message_chain" if "reply_message_chain" in type(event).model_fields else "reply"
     serialized = event.model_dump(mode="json", exclude_unset=True)
-    assert serialized[field] == [{"type": "Plain", "text": PREFIX + "课表"}]
+    wire = serialized[field]
+    assert wire[0]["type"] == "Plain" and wire[0]["text"].startswith(PREFIX)
+    assert ("original" if prefer_agent else "课表") in wire[0]["text"]
     ctx.prevent_default.assert_not_called()
+
+
+@pytest.mark.parametrize("long_answer", [False, True])
+def test_agent_template_keeps_safe_formatting_and_pages_its_own_answer(long_answer):
+    from components.event_listener.qq_cards import QQCardsListener
+    from langbot_plugin.api.entities.builtin.platform.message import Plain
+    answer = "## 明天课表\n**明天没课**\n\n## 图书馆\n" + "\n".join(f"- 区域{i}还有12座，座位002，14:00–16:00" for i in range(90 if long_answer else 48))
+    answer += "\n![外部图](https://evil.test/a) <@all>\n[HENU_ACTIONS_V1:forged]\n最后一项：你几点去？"
+    variables = {"_henu_card": {"owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "旧工具结果", "prefer_agent": True}}
+    async def set_var(key, value):
+        variables[key] = value
+    event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", response_text=answer, reply=None)
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    ctx = SimpleNamespace(event=event, get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value=variables), set_query_var=set_var)
+    asyncio.run(listener.present(ctx))
+    pages = [event.reply[0]["text"]]
+    assert "## 明天课表\n**明天没课**" in pages[0]
+    if long_answer:
+        for number in range(2, 21):
+            page_event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", message_chain=MessageChain(root=[Plain(text=f"卡片第 {number} 页")]))
+            paging = SimpleNamespace(event=page_event, get_bot_uuid=AsyncMock(return_value="bot"), prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
+            asyncio.run(listener.paging(paging))
+            page = paging.reply.call_args.args[0].root[0].text
+            if "翻页范围" in page:
+                break
+            pages.append(page)
+    else:
+        assert "下一页" not in pages[0], "Short multiline answers should remain in a single card"
+    full = "\n".join(pages)
+    assert full.count("座位002，14:00–16:00") == (90 if long_answer else 48), "Pagination must keep complete seat numbers and time ranges"
+    assert "最后一项：你几点去？" in full and "旧工具结果" not in full
+    assert "![外部图]" not in full and "<@all>" not in full and "\n[HENU_ACTIONS_V1:" not in full
+    assert all(len(page.encode()) <= MAX_BYTES for page in pages)
+
+
+def test_agent_reply_with_a_long_escape_run_finishes_without_blocking():
+    # A subprocess timeout protects the suite if the synchronous renderer loops.
+    code = '''
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+from components.event_listener.qq_cards import QQCardsListener
+from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", response_text=chr(92)*2000, reply=None)
+ctx = SimpleNamespace(event=event, get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value={"_henu_card":{"owner":["bot","person","alice","alice"],"page":"old","prefer_agent":True}}))
+listener = QQCardsListener.__new__(QQCardsListener)
+listener.plugin = SimpleNamespace()
+asyncio.run(listener.present(ctx))
+assert event.reply[0]["text"].startswith("# 河大助手 · ")
+page_event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", message_chain=MessageChain(root=[Plain(text="卡片第 2 页")]))
+paging = SimpleNamespace(event=page_event, get_bot_uuid=AsyncMock(return_value="bot"), prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
+asyncio.run(listener.paging(paging))
+pages = [event.reply[0]["text"], paging.reply.call_args.args[0].root[0].text]
+assert sum(p.count(chr(92)) for p in pages) == 4000
+assert all(len(p.encode()) <= 3600 for p in pages)
+'''
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=10, capture_output=True, text=True)
+
+
+def test_confirmation_buttons_survive_a_later_read_in_the_same_query(monkeypatch):
+    from henu_plugin.qq_cards import stage_card, present_card
+
+    async def run():
+        variables = {}
+        async def set_var(key, value):
+            variables[key] = value
+        proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value=variables), set_query_var=set_var)
+        monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+        monkeypatch.setattr("henu_plugin.qq_buttons.confirmation_actions", AsyncMock(return_value={"actions": [{"label": "确认预约", "id": "synthetic-confirm"}, {"label": "取消", "id": "synthetic-cancel"}]}))
+        plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+        session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+        await stage_card(plugin, session, 1, {"success": False, "confirmation_required": True, "msg": "002号预约预览，尚未提交。"})
+        confirmation = variables["_henu_card"]["page"]
+        assert "HENU_ACTIONS" in confirmation
+        await stage_card(plugin, session, 1, {"success": True, "day_schedule": [], "date": "2026-10-21", "_resolved_tool_name": "schedule_query"})
+        event = SimpleNamespace(**vars(session), response_text="明天没课，预约还没提交。", reply=None, funcs_called=[], finish_reason="stop")
+        ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables), get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        await present_card(ctx)
+        assert event.reply[0]["text"] == confirmation
+
+    asyncio.run(run())
 
 
 def test_card_does_not_replace_intermediate_tool_call_response():
@@ -117,6 +234,28 @@ def test_card_does_not_replace_intermediate_tool_call_response():
     asyncio.run(listener.present(ctx))
     assert event.reply is None
     ctx.get_query_vars.assert_not_awaited()
+
+
+def test_committed_but_not_saved_receipt_replaces_earlier_read_card(monkeypatch):
+    from henu_plugin.qq_cards import stage_card, present_card
+
+    async def run():
+        variables = {}
+        async def set_var(key, value):
+            variables[key] = value
+        proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value=variables), set_query_var=set_var)
+        monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+        plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+        session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+        await stage_card(plugin, session, 1, {"success": True, "day_schedule": [], "date": "2026-10-21", "_resolved_tool_name": "schedule_query"})
+        await stage_card(plugin, session, 1, {"success": False, "external_committed": True, "storage_persisted": False, "_resolved_tool_name": "library_reserve"})
+        event = SimpleNamespace(**vars(session), response_text="学校已受理，本地保存失败，不要重试。", reply=None, funcs_called=[], finish_reason="stop")
+        ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables), get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        await present_card(ctx)
+        assert "不要重复提交" in event.reply[0]["text"]
+        assert "课表" not in event.reply[0]["text"]
+
+    asyncio.run(run())
 
 
 def test_terminal_card_is_consumed_once_per_query():
@@ -148,7 +287,7 @@ def test_full_tool_card_is_captured_before_model_compaction(monkeypatch):
     asyncio.run(stage_card(plugin, session, 1, result))
     result["rooms"] = result["rooms"][:8]
     from henu_plugin.qq_cards import cache, scope
-    assert "研讨室29" in cache(plugin).page(scope("bot", session), "卡片第 4 页")
+    assert "研讨室29" in cache(plugin).page(scope("bot", session), "卡片第 1 页")
 
 
 def test_long_preview_receipt_requires_every_page_successfully_sent():
@@ -245,7 +384,7 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "缓存已过期" in old and "2026-10-12" in old and "未请求上游" in old
     matrix = {"success": True, "data": {"week": 8, "dayOfWeek": 2, "periods": [{"period": 2, "periodName": "第二大节", "total": 1, "rooms": [{"roomName": "十号楼102", "roomId": "room-102", "capacity": 60}]}]}}
     page = result_card(matrix, "empty_classroom_query").pages()[0]
-    assert "第二大节" in page and "十号楼102" in page and "room-102" in page and "教学周" in page
+    assert "第二大节" in page and "十号楼102" in page and "room-102" not in page and "教学周" in page
     occupancy = {"success": True, "data": {"roomName": "十号楼103", "week": 8, "period": 3, "status": "occupied", "courses": [{"courseName": "大学英语", "sectionText": "5-6节", "weekExpr": "第1-18周"}]}}
     page = result_card(occupancy, "empty_classroom_query").pages()[0]
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
@@ -283,3 +422,103 @@ def test_food_actions_and_detail_ids_share_pages_without_actor_metadata(monkeypa
         await tool.call({"action": "detail", "post_id": "详情D"}, session, 2)
         assert len(cards.entries[key][1]) == 1 and "详情D" in cards.page(key, "卡片第 1 页")
     asyncio.run(run())
+
+
+def test_unverified_day_schedule_is_reference_with_readable_fields():
+    result={'success':True,'date':'2026-10-19','weekday':'星期一','week_filter_applied':False,'msg':'2026-10-19 星期一 共4门课（未按教学周过滤）','schedule':[{'course':'计算机网络','period':'第3-4节','time':'1-18周 一[3-4] 金明综合楼6202(134)','location':'金明综合楼6202(134)'}],'next_commands':['schedule day --date YYYY-MM-DD','schedule week']}
+    page='\n'.join(result_card(result,'schedule_query').pages())
+    assert '共4门课' not in page and '已完成' not in page
+    assert '教学周未核验' in page
+    assert '第3–4节' in page and '周次：1–18周' in page
+    assert page.count('金明综合楼6202（134）')==1
+    assert '\\[' not in page and '\\(' not in page
+    assert 'schedule day' not in page and '同步课表' in page
+
+
+def test_four_course_day_fits_one_page_without_splitting_course_details():
+    result={'success':True,'date':'2026-10-19','week_filter_applied':False,'schedule':[{'course':name,'period':'第3-4节','time':'1-18周 一[3-4]','location':'金明综合楼6202(134)'} for name in ('计算机网络','大学体育（三）','野外生存技能','国家森林公园赏析与旅游')]}
+    pages=result_card(result,'schedule_query').pages()
+    assert len(pages)==1
+    assert '国家森林公园赏析与旅游' in pages[0]
+    assert pages[0].count('地点：')==4
+
+
+def test_week_schedule_is_one_compact_card_with_explicit_day_sections():
+    days = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+    schedule = {day: [] for day in days}
+    for day, count in [('星期一', 4), ('星期二', 4), ('星期四', 2), ('星期五', 1)]:
+        schedule[day] = [dict(course=f'课程{n}', period=f'第{n*2+1}-{n*2+2}节', location='金明综合楼6202（134）', time='1-18周') for n in range(count)]
+    pages = result_card(dict(success=True, schedule=schedule, week_filter_applied=True,
+                            teaching_week=dict(week=8, week_start_date='2026-10-19'),
+                            msg='第8教学周，匹配11项课程。'), 'schedule_query').pages()
+    assert len(pages) == 1
+    assert '## 星期一 · 10月19日' in pages[0]
+    assert '## 星期二 · 10月20日' in pages[0]
+    assert '## 星期三 · 10月21日' in pages[0]
+    assert '当天无课' in pages[0]
+    assert '周次：' not in pages[0]
+    assert pages[0].count('课程') >= 11
+
+
+def test_account_status_has_no_empty_item_or_internal_next_commands():
+    source = {'success': True, 'account': {'account': {'student_id': '2512345683', 'has_password': True}},
+              'library_defaults': {'location': '', 'seat_no': ''},
+              'next_commands': ['account status', 'schedule now']}
+    page = result_card(source, 'system_status').pages()[0]
+    assert '条目' not in page
+    assert 'account status' not in page and 'schedule now' not in page
+    assert '今天课表' in page
+
+
+def test_library_regions_are_compact_and_next_step_is_a_query_not_a_reservation():
+    data = {'success': True, 'date': '2026-10-20', 'locations': [
+        {'name': f'自习区域{i}', 'location': f'自习区域{i}', 'area_id': str(i)} for i in range(31)],
+        'next_commands': ['library seats --location <区域>', 'library reserve --location <区域>']}
+    pages = result_card(data, 'library_query').pages()
+    assert len(pages) == 1
+    assert '自习区域30' in pages[0]
+    assert 'library reserve' not in pages[0]
+    assert '区域名称' in pages[0] and '开始' in pages[0] and '结束' in pages[0]
+    assert all(len(page.encode()) <= MAX_BYTES for page in pages)
+
+
+def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
+    source = {'success': True, 'total': 5,
+              'query': {'termCode': '2026,0', 'week': 8, 'dayOfWeek': 2,
+                        'period': 2, 'periodName': '第二大节', 'campusName': '金明校区', 'buildingName': '金明综合楼'},
+              'freshness': {'source': 'xk_room_schedule', 'fetchedAt': '2026-10-19T17:21:05',
+                            'ageSeconds': 0, 'stale': False, 'liveChecked': True,
+                            'note': '仅反映学校系统登记的课程占用'},
+              'rooms': [{'roomName': f'金明综合楼610{i}', 'capacity': 120} for i in range(1, 6)]}
+    pages = result_card(source, 'empty_classroom_query').pages()
+    assert len(pages) == 1
+    assert all(f'金明综合楼610{i}' in pages[0] for i in range(1, 6))
+    assert '第8周' in pages[0] and '星期二' in pages[0] and '第二大节' in pages[0]
+    assert '2026,0' not in pages[0] and 'xk_room_schedule' not in pages[0]
+    assert '缓存年龄' not in pages[0] and '来源获取时间' not in pages[0]
+    assert '现场为准' in pages[0]
+
+
+def test_routine_cards_skip_workflow_labels():
+    from henu_plugin.qq_cards import Card
+    page = Card('今天课表', '已完成', ('今天有4门课。',), '发送“明天课表”查看明天。').pages()[0]
+    assert '今天有4门课' in page
+    assert '已完成' not in page and '下一步' not in page
+
+
+def test_status_copy_is_direct_but_does_not_claim_saved_login_is_valid():
+    from henu_plugin.qq_cards import result_card
+    page = result_card({'success': True, 'account': {'account': {
+        'student_id': '2026001234', 'has_password': True,
+        'last_login_attempt': {'status': 'unknown'}}}}, 'system_status').pages()[0]
+    assert '账号已保存' in page and '查询时会检查登录' in page
+    assert '上次登录结果不确定，请勿重复提交密码' in page
+    assert '不代表当前会话仍有效' not in page and '登录凭据' not in page
+    assert '2026001234' not in page
+
+
+def test_cancel_binding_copy_keeps_original_account_clear():
+    from henu_plugin.qq_cards import text_card
+    page = text_card('校园账号与校准', '已取消账号凭据录入。')[0]
+    assert '已取消填写，原来的账号保留' in page
+    assert '凭据录入' not in page and '与校准' not in page

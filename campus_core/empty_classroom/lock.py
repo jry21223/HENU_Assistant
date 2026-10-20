@@ -24,9 +24,18 @@ class FileLock:
                 lock.release()
     """
 
-    def __init__(self, lock_path: Path, timeout: float = 8.0):
+    def __init__(
+        self,
+        lock_path: Path,
+        timeout: float = 8.0,
+        stale_after: float = 60.0,
+    ):
         self._lock_path = Path(lock_path)
         self._timeout = timeout
+        # Retained as a source-compatible argument. OS advisory locks are
+        # released by the kernel when a process exits, so wall-clock stale
+        # detection is both unnecessary and unsafe for long-running calls.
+        del stale_after
         self._fd: int | None = None
 
     def acquire(self) -> bool:
@@ -35,52 +44,61 @@ class FileLock:
         deadline = time.monotonic() + self._timeout
 
         while time.monotonic() < deadline:
+            fd: int | None = None
             try:
-                # POSIX: O_CREAT | O_EXCL 保证原子性
-                self._fd = os.open(
-                    str(self._lock_path),
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                )
-                os.write(self._fd, str(os.getpid()).encode())
+                fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                self._lock_fd(fd)
+                self._fd = fd
                 return True
-            except FileExistsError:
-                # 检查锁是否过期（超过 60 秒视为僵尸锁）
-                if self._is_stale():
-                    self._break_stale()
-                    continue
-                time.sleep(0.1)
             except OSError:
-                time.sleep(0.1)
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                time.sleep(0.05)
 
         return False
 
     def release(self) -> None:
         """释放锁。"""
-        if self._fd is not None:
-            try:
-                os.close(self._fd)
-            except OSError:
-                pass
-            self._fd = None
+        if self._fd is None:
+            return
         try:
-            self._lock_path.unlink(missing_ok=True)
+            self._unlock_fd(self._fd)
         except OSError:
             pass
-
-    def _is_stale(self) -> bool:
-        """检查锁文件是否超过 60 秒（僵尸锁）。"""
         try:
-            mtime = self._lock_path.stat().st_mtime
-            return (time.time() - mtime) > 60
-        except OSError:
-            return False
-
-    def _break_stale(self) -> None:
-        """移除僵尸锁文件。"""
-        try:
-            self._lock_path.unlink(missing_ok=True)
+            os.close(self._fd)
         except OSError:
             pass
+        self._fd = None
+
+    @staticmethod
+    def _lock_fd(fd: int) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    @staticmethod
+    def _unlock_fd(fd: int) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            return
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
     def __enter__(self) -> bool:
         return self.acquire()

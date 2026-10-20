@@ -29,6 +29,7 @@ from henu_mcp.core.course_schedule import (
     save_json,
 )
 from henu_mcp.core.kingo_auth import KINGO_WARNING
+from henu_mcp.core.schedule_weeks import filter_courses
 from henu_mcp.core.reservation_request import reservation_request_error
 from henu_mcp.core.course_planner import generate_ranked_plans
 from henu_mcp.core.course_monitor import (
@@ -503,6 +504,10 @@ def get_current_course_status(
     now_minutes = now.hour * 60 + now.minute
     weekday_cn = WEEKDAY_CN[now.weekday()]
     day_courses = list((schedule_data.get("schedule") or {}).get(weekday_cn, []) or [])
+    filtered = filter_courses(day_courses, now.date())
+    if not filtered["success"]:
+        return filtered
+    day_courses = filtered["schedule"]
 
     current_courses: list[dict[str, Any]] = []
     future_courses: list[tuple[int, dict[str, Any]]] = []
@@ -531,14 +536,20 @@ def get_current_course_status(
     elif day_courses:
         msg = "当前没有正在上的课，且今天后续没有课程"
     else:
-        msg = "今天课表为空"
+        msg = "本教学周今天没有匹配课程"
 
+    if filtered["unknown_course_count"]:
+        msg += "；部分课程周次待核验，未计入，尚不能据此确认无课或没有下一节课。"
     return {
         "success": True,
         "now": now.strftime("%Y-%m-%d %H:%M:%S"),
         "timezone": timezone,
         "weekday": weekday_cn,
         "msg": msg,
+        "teaching_week": filtered["teaching_week"],
+        "week_filter_applied": True,
+        "week_filter_complete": filtered["week_filter_complete"],
+        "unknown_course_count": filtered["unknown_course_count"],
         "day_schedule": day_courses,
         "day_schedule_count": len(day_courses),
         "current_courses": current_courses,
@@ -2081,62 +2092,42 @@ def _latest_schedule_impl() -> dict[str, Any]:
         return {"success": False, "msg": f"获取课表失败: {e}"}
 
 
-def _day_schedule_impl(
-    target_date: str = "",
-    timezone: str = "Asia/Shanghai",
-) -> dict[str, Any]:
-    """
-    获取某一天的课表。
-
-    注意：当前视图按星期几从完整周课表中提取，不按教学周做额外过滤。
-    """
+def _day_schedule_impl(target_date: str = "", timezone: str = "Asia/Shanghai") -> dict[str, Any]:
+    """Return only courses matching the target date's verified teaching week."""
     try:
         target_day, date_text = _resolve_schedule_target_date(target_date=target_date, timezone=timezone)
-    except ValueError as exc:
-        return {"success": False, "msg": str(exc)}
-
-    try:
         data = load_latest_clean_schedule(OUTPUT_DIR)
     except Exception as exc:
         return {"success": False, "msg": f"获取课表失败: {exc}"}
-
     weekday_cn = WEEKDAY_CN[target_day.weekday()]
-    schedule = data.get("schedule", {}) or {}
-    day_courses = list(schedule.get(weekday_cn, []) or [])
-    today = _now_dt(timezone).date()
-    day_offset = (target_day - today).days
-
-    if day_courses:
-        msg = f"{date_text} {weekday_cn} 共 {len(day_courses)} 门课（未按教学周过滤）"
-    else:
-        msg = f"{date_text} {weekday_cn} 课表为空（按星期提取，未按教学周过滤）"
-
-    return {
-        "success": True,
-        "date": date_text,
-        "weekday": weekday_cn,
-        "schedule": day_courses,
-        "schedule_count": len(day_courses),
-        "day_offset": day_offset,
-        "is_today": day_offset == 0,
-        "is_tomorrow": day_offset == 1,
-        "week_filter_applied": False,
-        "msg": msg,
-    }
+    courses = list((data.get("schedule") or {}).get(weekday_cn, []) or [])
+    result = filter_courses(courses, target_day)
+    day_offset = (target_day - _now_dt(timezone).date()).days
+    return {**result, "date": date_text, "weekday": weekday_cn,
+            "day_offset": day_offset, "is_today": day_offset == 0, "is_tomorrow": day_offset == 1}
 
 
-def _week_schedule_compat_impl() -> dict[str, Any]:
-    """
-    兼容旧客户端的 week 视图。
-
-    由于当前周次无法从教务系统稳定获取，此处返回未按教学周过滤的完整周课表。
-    """
+def _week_schedule_compat_impl(timezone: str = "Asia/Shanghai") -> dict[str, Any]:
+    """Return the current teaching week's matching courses, grouped by weekday."""
     result = _latest_schedule_impl()
     if not result.get("success"):
         return result
-    result["week_filter_applied"] = False
-    result["msg"] = "week 视图已降级为完整周课表：当前周次无法稳定获取，结果未按教学周过滤。"
-    return result
+    target = _now_dt(timezone).date()
+    filtered, unknown = {}, 0
+    for day, courses in (result.get("schedule") or {}).items():
+        part = filter_courses(courses, target)
+        if not part["success"]:
+            return part
+        filtered[day] = part["schedule"]
+        unknown += part["unknown_course_count"]
+    metadata = filter_courses([], target)
+    if not metadata["success"]:
+        return metadata
+    total = sum(len(rows) for rows in filtered.values())
+    return {**metadata, "schedule": filtered, "schedule_count": total,
+            "unknown_course_count": unknown, "week_filter_complete": unknown == 0,
+            "msg": f"第{metadata['teaching_week']['week']}教学周，匹配 {total} 项课程。" +
+                   (f"{unknown} 项课程周次待核验，未计入。" if unknown else "")}
 
 
 def _current_course_impl(
@@ -3421,14 +3412,14 @@ def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "
     try:
         from campus_core.resource_registry import (
             build_resource_id,
-            upsert_resource,
+            upsert_resources,
             ResourceRecord,
         )
         from datetime import datetime
 
         library_id = "henu_library"
         now = datetime.now().isoformat()
-
+        records = []
         for seat in seats:
             seat_no = str(seat.get("seatNo", seat.get("seat_no", seat.get("name", ""))))
             area_id = str(seat.get("areaId", seat.get("area_id", fallback_area_id)))
@@ -3463,7 +3454,8 @@ def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "
                 },
                 updated_at=now,
             )
-            upsert_resource(record)
+            records.append(record)
+        upsert_resources(records)
     except Exception:
         pass
 
@@ -3944,8 +3936,8 @@ def schedule_query(
 
     view:
     - current: 当前正在上的课 + 下一节课
-    - day: 某一天的课表（按星期提取，不按教学周过滤）
-    - week: 兼容旧客户端，返回未按教学周过滤的完整周课表
+    - day: 目标日期按校历教学周筛选的课表
+    - week: 当前教学周筛选后的周课表
     - full: 最新完整课表
 
     参数：
@@ -3961,7 +3953,7 @@ def schedule_query(
     if normalized_view == "day":
         return _day_schedule_impl(target_date=target_date, timezone=timezone)
     if normalized_view == "week":
-        return _week_schedule_compat_impl()
+        return _week_schedule_compat_impl(timezone=timezone)
     if normalized_view == "full":
         return _latest_schedule_impl()
     return {"success": False, "msg": "view 仅支持 current/day/week/full"}

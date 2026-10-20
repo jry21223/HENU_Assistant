@@ -95,6 +95,9 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
     if not argv:
         return _error_spec(raw, "命令不能为空。", help_topic="")
 
+    if len(argv) >= 2 and argv[0].lower() == "empty" and argv[1].lower() == "classroom":
+        argv = ("empty_classroom", *argv[2:])
+
     head = argv[0].lower()
     if head in {"help", "-h", "--help"}:
         topic = _normalize_topic(argv[1:])

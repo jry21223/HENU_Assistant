@@ -128,3 +128,88 @@ def test_sdk_primary_food_listener_pages_only_pure_control(tmp_path, monkeypatch
             assert rpc.sent == [[{"type":"Plain", "text":PREFIX + "第二页"}]]
             assert response.data["event_context"]["is_prevent_default"]
     asyncio.run(run())
+
+
+def test_sdk_food_primary_delivers_navigation_before_normal_stage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    receive=AsyncMock()
+    monkeypatch.setattr(HenuFood,'receive_message',receive)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc=MemoryRPC(None,initialize_plugin);rpc.variables={};rpc.sent=[]
+        plugin=SimpleNamespace(plugin_runtime_handler=rpc)
+        food=FoodCaptureListener();food.plugin=plugin;await food.initialize()
+        rpc.plugin_container=SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'),component_instance=food)])
+        chain=pm.MessageChain(root=[pm.Plain(text='使用帮助')])
+        incoming=pe.FriendMessage(sender=entities.Friend(id='alice',nickname='合成',remark=''),message_chain=chain)
+        event=events.PersonMessageReceived(launcher_type='person',launcher_id='alice',sender_id='alice',message_event=incoming,message_chain=chain)
+        response=await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context':{'query_id':0,'eid':4,'event_name':'PersonMessageReceived','event':event.model_dump(mode='json')}})
+        assert '从这里开始' in str(rpc.sent)
+        assert response.data['event_context']['is_prevent_default']
+        receive.assert_not_awaited()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('text', ['开启课前提醒', '关闭课前提醒', '课前提醒', '测试课前提醒'])
+@pytest.mark.parametrize('attached', [False, True])
+def test_sdk_primary_listener_routes_reminder_controls(tmp_path, monkeypatch, text, attached):
+    from henu_plugin.schedule_reminders import ScheduleReminders
+    monkeypatch.chdir(tmp_path)
+    receive = AsyncMock()
+    monkeypatch.setattr(HenuFood, 'receive_message', receive)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc = MemoryRPC(None, initialize_plugin);rpc.variables = {};rpc.sent = []
+        storage = {}
+        async def get(key): return storage.get(key)
+        async def put(key, value): storage[key] = value
+        plugin = SimpleNamespace(plugin_runtime_handler=rpc, get_plugin_storage=get, set_plugin_storage=put)
+        reminders = ScheduleReminders(plugin)
+        reminders.query = AsyncMock(return_value={'success': True, 'week_filter_applied': True, 'period_times': {'1': {'start': '08:00', 'end': '08:45'}}})
+        plugin.schedule_reminders = reminders
+        food = FoodCaptureListener();food.plugin = plugin;await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        parts = [pm.Plain(text=text)]
+        if attached: parts.append(pm.Image(url='https://synthetic.invalid/image.png'))
+        chain = pm.MessageChain(root=parts)
+        incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+        event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice', message_event=incoming, message_chain=chain)
+        response = await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {'query_id': 0, 'eid': 5, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+        if attached:
+            assert not rpc.sent
+            assert not storage
+            receive.assert_awaited_once()
+        else:
+            assert '课前提醒' in str(rpc.sent)
+            assert response.data['event_context']['is_prevent_default']
+            receive.assert_not_awaited()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('attached', [False, True])
+def test_sdk_classroom_question_is_one_read_only_query_not_help(tmp_path, monkeypatch, attached):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    monkeypatch.chdir(tmp_path)
+    receive = AsyncMock();monkeypatch.setattr(HenuFood, 'receive_message', receive)
+    call = AsyncMock(return_value={'success': False, '_resolved_tool_name': 'empty_classroom_query', 'msg': '未找到指定楼栋，请选择实际教学楼。'})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    async def run():
+        async def initialize_plugin(_): pass
+        rpc = MemoryRPC(None, initialize_plugin);rpc.variables = {};rpc.sent = []
+        plugin = SimpleNamespace(plugin_runtime_handler=rpc)
+        food = FoodCaptureListener();food.plugin = plugin;await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        parts = [pm.Plain(text='查金明校区十号楼第8周星期二第2大节的空教室')]
+        if attached: parts.append(pm.Image(url='https://synthetic.invalid/image.png'))
+        chain = pm.MessageChain(root=parts)
+        incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+        event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice', message_event=incoming, message_chain=chain)
+        await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {'query_id': 0, 'eid': 6, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+        if attached:
+            call.assert_not_awaited();receive.assert_awaited_once()
+        else:
+            call.assert_awaited_once()
+            assert 'empty classroom query --campus-text 金明 --building-text 十号楼 --week 8 --day-of-week 2 --period 2' == call.call_args.args[0]['command']
+            assert '未找到指定楼栋' in str(rpc.sent)
+            receive.assert_not_awaited()
+    asyncio.run(run())

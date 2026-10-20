@@ -24,6 +24,7 @@ from .registry import (
     list_resources,
     search_resources,
     upsert_resource,
+    upsert_resources,
 )
 from .resolver import resolve_resource
 from .seed import preload_seed_if_needed
@@ -48,6 +49,7 @@ __all__ = [
     "generate_aliases",
     # Registry
     "upsert_resource",
+    "upsert_resources",
     "get_resource",
     "search_resources",
     "list_resources",
