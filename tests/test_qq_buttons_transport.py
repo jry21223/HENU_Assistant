@@ -44,6 +44,7 @@ def test_button_card_on_wire_binds_actual_reply_and_strips_control_metadata(
         assert requests[0]["markdown"]["content"] == page
         button = requests[0]["keyboard"]["content"]["rows"][0]["buttons"][0]
         assert button["action"]["type"] == 1
+        assert "group_id" not in button  # Live QQ rejects opaque group IDs (40011021).
         assert button["action"]["data"] == "henu:" + "a" * 24
         assert client._henu_buttons["a" * 24]["message_id"] == "card-123"
 
@@ -98,6 +99,40 @@ def test_callback_image_uses_passive_event_id_and_upload_does_not_send(monkeypat
         assert bot.upload_media.call_args.kwargs["file_type"] == 1
 
     asyncio.run(run())
+
+
+def test_rejection_diagnostics_never_log_provider_echoed_identity(monkeypatch, capsys):
+    host = load("qq_buttons_redaction", Path("ops/qq_cards_transport.py"))
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "post",
+        AsyncMock(
+            return_value=httpx.Response(
+                400,
+                json={
+                    "code": 40011021,
+                    "message": "学号2026001234 rows.buttons.group_id无效 password=short",
+                },
+            )
+        ),
+    )
+    client = SimpleNamespace(
+        base_url="https://api.sgroup.qq.com",
+        access_token="test",
+        check_access_token=AsyncMock(return_value=True),
+        next_reply_msg_seq=AsyncMock(side_effect=[1, 2]),
+        send_private_text_msg=AsyncMock(return_value={"id": "fallback"}),
+    )
+    asyncio.run(
+        host.send_card(client, "c2c", "alice", host.PREFIX + "查询", msg_id="source")
+    )
+    logged = capsys.readouterr().out
+    assert (
+        "2026001234" not in logged
+        and "password" not in logged
+        and "short" not in logged
+    )
+    assert "40011021" in logged
 
 
 def test_callback_rejects_other_user_and_old_message_without_dispatch():

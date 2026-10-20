@@ -121,7 +121,6 @@ async def send_card(
             buttons.append(
                 {
                     "id": row["id"],
-                    "group_id": group,
                     "render_data": {
                         "label": row["label"],
                         "visited_label": "已选择",
@@ -176,6 +175,37 @@ async def send_card(
         except ValueError:
             return None  # Already accepted: never retry a malformed receipt.
     if response.status_code in {400, 403}:
+        try:
+            rejection = response.json()
+            code = rejection.get("code", rejection.get("err_code"))
+            # Never log provider free text: even a format rejection may echo
+            # names, student numbers or short secrets that regexes miss.
+            reason = next(
+                (
+                    field
+                    for field in (
+                        "rows.buttons.group_id",
+                        "rows.buttons.action.permission",
+                        "markdown.content",
+                    )
+                    if field in str(rejection.get("message") or "")
+                ),
+                "",
+            )
+            if type(code) not in (int, float):
+                code = None
+        except ValueError:
+            code = None
+            reason = ""
+        print(
+            "[henu.qq.card] rejected HTTP "
+            + str(response.status_code)
+            + " code="
+            + str(code)
+            + " "
+            + reason,
+            flush=True,
+        )
         fallback_sequence = max(
             sequence + 1, await client.next_reply_msg_seq(msg_id or event_id)
         )

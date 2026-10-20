@@ -39,7 +39,15 @@ def states(plugin):
 
 
 async def say(ctx, title, lines, wire=None):
-    pages = Card(title, "", tuple(lines)).pages()
+    blocks, block = [], ""
+    for line in lines:
+        if len((block + "\n" + line).encode()) > 1800:
+            blocks.append(block)
+            block = ""
+        block += ("\n" if block else "") + line
+    if block:
+        blocks.append(block)
+    pages = Card(title, "", tuple(blocks)).pages()
     for index, page in enumerate(pages):
         await ctx.reply(
             card_chain(envelope(page, wire if index == len(pages) - 1 else None))
@@ -82,7 +90,10 @@ async def region_actions(plugin, ctx, result):
                 c.replace("校区", "") + "选座",
                 {"kind": "library_campus", "campus": c, "version": version},
             )
-            for c in dict.fromkeys(r["campus"] for r in rows)
+            for c in sorted(
+                set(r["campus"] for r in rows),
+                key=lambda c: ({"金明校区": 0, "明伦校区": 1}.get(c, 2), c),
+            )
         ],
     )
 
@@ -438,7 +449,7 @@ async def preview(plugin, ctx, state, seat):
         expected_command=command,
     )
     if not wire:
-        await say(ctx, '预览已失效', ['待确认内容已更新，请重新选座。本次没有提交。'])
+        await say(ctx, "预览已失效", ["待确认内容已更新，请重新选座。本次没有提交。"])
         return
     await say(
         ctx,
@@ -462,24 +473,35 @@ async def dispatch_library(plugin, ctx, payload):
     kind = payload["kind"]
     if kind == "library_campus":
         state["version"] = secrets.token_urlsafe(12)
+        state["campus"] = payload["campus"]
         rows = [r for r in state["rows"] if r["campus"] == payload["campus"]]
+        floors = list(dict.fromkeys(r.get("floor") or "楼层待确认" for r in rows))
+        if len(floors) == 1:
+            await show_regions(plugin, ctx, state, rows)
+            return
         specs = [
             (
-                str(r["location"]).replace(" ", "")[:10],
-                {
-                    "kind": "library_area",
-                    "area": r["area_id"],
-                    "version": state["version"],
-                },
+                floor,
+                {"kind": "library_floor", "floor": floor, "version": state["version"]},
             )
-            for r in rows[:25]
+            for floor in floors
         ]
         await say(
             ctx,
-            "选择区域",
-            [escape(payload["campus"])] + [escape(r["location"]) for r in rows],
+            "选择楼层",
+            [escape(payload["campus"]), "先选楼层，再选阅览室或自习室。"],
             await actions(plugin, ctx, specs),
         )
+    elif kind == "library_floor":
+        rows = [
+            r
+            for r in state["rows"]
+            if r["campus"] == state["campus"]
+            and (r.get("floor") or "楼层待确认") == payload["floor"]
+        ]
+        await show_regions(plugin, ctx, state, rows)
+    elif kind == "library_regions":
+        await show_regions(plugin, ctx, state, state["region_rows"], payload["offset"])
     elif kind == "library_area":
         state["version"] = secrets.token_urlsafe(12)
         state["area"] = next(
@@ -504,6 +526,39 @@ async def dispatch_library(plugin, ctx, payload):
         await preview(plugin, ctx, state, payload["seat"])
     elif kind == "library_refresh":
         await show_map(plugin, ctx, state, state["window"], payload.get("offset", 0))
+
+
+async def show_regions(plugin, ctx, state, rows, offset=0):
+    state.update(
+        region_rows=rows,
+        version=secrets.token_urlsafe(12),
+        expires=time.monotonic() + 300,
+    )
+    selected = rows[offset : offset + 8]
+    specs = [
+        (
+            str(r["location"]).replace(" ", "")[:10],
+            {"kind": "library_area", "area": r["area_id"], "version": state["version"]},
+        )
+        for r in selected
+    ]
+    if offset + 8 < len(rows):
+        specs.append(
+            (
+                "更多区域",
+                {
+                    "kind": "library_regions",
+                    "offset": offset + 8,
+                    "version": state["version"],
+                },
+            )
+        )
+    await say(
+        ctx,
+        "选择区域",
+        [escape(state["campus"])] + [escape(r["location"]) for r in selected],
+        await actions(plugin, ctx, specs),
+    )
 
 
 async def handle_library_text(plugin, ctx, text):

@@ -267,3 +267,38 @@ def test_old_async_map_response_is_discarded_after_new_library_selection(monkeyp
         assert previous.reply.await_count == 1  # Only its already-sent loading note.
 
     asyncio.run(run())
+
+
+def test_large_campus_uses_floor_buttons_then_legible_room_buttons():
+    from pathlib import Path
+    from henu_plugin import library_seat_map as lib, qq_buttons as buttons
+    from henu_plugin.library_availability import region_counts
+
+    async def run():
+        raw = json.loads(
+            (
+                Path(__file__).parents[1]
+                / "docs/evidence/library-regions-20261020.json"
+            ).read_text()
+        )
+        plugin = SimpleNamespace()
+        choices = await lib.region_actions(
+            plugin, context(), {"locations": region_counts(raw["areas"])}
+        )
+        campus_choice = next(a for a in choices["actions"] if a["label"] == "金明选座")
+        campus = context("HENU_BUTTON " + campus_choice["id"], query=2)
+        await buttons.handle(plugin, campus)
+        text, floors = wire(campus)
+        assert campus.reply.await_count == 1 and "第 1/" not in text
+        assert len(floors["actions"]) <= 8
+        seventh = next(a for a in floors["actions"] if "七" in a["label"])
+        floor = context("HENU_BUTTON " + seventh["id"], query=3)
+        await buttons.handle(plugin, floor)
+        text, rooms = wire(floor)
+        assert floor.reply.await_count == 1
+        assert [a["label"] for a in rooms["actions"]] == [
+            "701七层南自习室",
+            "702七层北自习室",
+        ]
+
+    asyncio.run(run())
