@@ -11,6 +11,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import sys
 
 import requests
@@ -30,7 +31,7 @@ REGIONS = [
 
 CASES = [
     {"id": "two_tasks", "turns": ["帮我看看明天有没有课，再查一下金明图书馆各处还剩多少座位，先不预约。"],
-     "checks": [{"calls": [{"tool": "schedule_query", "params": {"target_date": "2026-10-21"}}, {"tool": "library_query", "params": {"view": "locations"}}], "contains": ["明天", "金明", "12", "8"], "excludes": ["明伦", "下一页"]}]},
+     "checks": [{"calls": [{"tool": "schedule_query", "params": {"target_date": "2026-10-21"}}, {"tool": "library_query", "params": {"view": "locations"}}], "contains": ["明天", "金明", "12", "8"], "excludes": ["下一页"], "scope": {"campus": "金明", "outside": ["明伦", "401", "第一自习室"]}, "warn_contains": ["明伦"]}]},
     {"id": "complete_request", "turns": ["查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。"],
      "checks": [{"calls": [{"tool": "library_query", "params": {"view": "seats", "target_date": "2026-10-21", "preferred_time": "14:00", "preferred_end_time": "16:00"}}], "contains": ["002", "006"], "excludes": ["哪个校区", "哪一层", "几点到几点"]}]},
     {"id": "change_campus", "turns": ["查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。", "换成明伦第一自习室，时间不变，还是只查。"],
@@ -44,7 +45,7 @@ CASES = [
     {"id": "existing_binding", "turns": ["我之前绑定过校园账号，先看看现在状态，还需要再输密码吗？"],
      "checks": [{"calls": [{"tool": "system_status"}], "excludes": ["把密码发", "发送密码", "请重新绑定", "网站已绑定"]}]},
     {"id": "no_self_confirmation", "turns": ["查金明七层南自习室明天14:00到16:00的座位，只查不约。", "帮我看002号的预约预览，别真提交，也别替我确认。"],
-     "checks": [{}, {"call_any": [{"tool": "library_reserve", "params": {"seat_no": "002", "preferred_end_time": "16:00"}}, {"tool": "library_query", "params": {"view": "plan", "seat_no": "002", "preferred_end_time": "16:00"}}], "excludes": ["预约成功", "已经预约"]}]},
+     "checks": [{}, {"allow_preview": True, "call_any": [{"tool": "library_reserve", "params": {"seat_no": "002", "preferred_end_time": "16:00"}}, {"tool": "library_query", "params": {"view": "plan", "seat_no": "002", "preferred_end_time": "16:00"}}], "excludes": ["预约成功", "已经预约"]}]},
     {"id": "classroom", "turns": ["我想在金明十号楼自习，查一下第8周星期三第3大节有哪些空教室。"],
      "checks": [{"calls": [{"tool": "empty_classroom_query", "params": {"week": 8, "day_of_week": 3, "period": 3}, "campus": "金明", "building": "十号楼"}], "contains": ["101", "102"], "excludes": ["哪个校区", "哪一周", "星期几"]}]},
 ]
@@ -72,6 +73,8 @@ def synthetic_tool(command):
         result = {"success": True, "target_date": p.get("target_date"), "reservation_rules": {"effective_start": p.get("preferred_time"), "effective_end": p.get("preferred_end_time") or "23:00"}, "msg": "只读预约计划，尚未提交。"}
     elif spec.resolved_tool == "system_status":
         result = {"success": True, "account": {"is_bound": True, "login_state": "valid"}, "reply_text": "校园账号已绑定，当前登录有效。HENU KIT网站绑定状态本次未查询。"}
+    elif spec.resolved_tool == "preferences" and p.get("action") == "get":
+        result = {"success": True, "preferences": {"library_location": "", "library_seat_no": ""}}
     elif spec.resolved_tool == "library_reserve":
         # This is a fixture, not the plugin's confirmation engine or school API.
         result = {"success": False, "confirmation_required": True, "msg": "预约预览：002号，2026-10-21 14:00–16:00，金明701南自习室。尚未提交，等待本人下一条确认。"}
@@ -89,6 +92,24 @@ def synthetic_tool(command):
     result["cli"] = {"command": command, "resolved_tool": spec.resolved_tool}
     HenuCliSafe()._prepare_delivery_result(result)
     return spec, result
+
+
+def outside_scope_result(answer, scope):
+    """Eval-only check: exclusion commentary is distinct from a seat result."""
+    foreign = False
+    for part in re.split(r"[\n。；;，]", answer):
+        outside = any(s in part for s in scope['outside'])
+        fact = re.search(r"(?:剩余?|余座|空座|可用|空闲)\s*[：:]?\s*\d+|\d+\s*(?:个)?(?:空(?:闲)?座(?:位)?|可用座位|座)|有空座|没有空位|无座|已满|推荐|可选", part)
+        if outside and re.search(r"未列|不列|未显示|未纳入|不包含|不在.*范围|排除|没有列", part) and not fact:
+            foreign = False
+            continue
+        if scope['campus'] in part:
+            foreign = False
+        elif outside:
+            foreign = True
+        if foreign and fact:
+            return True
+    return False
 
 
 def evaluate(case, args, tools, prompt):
@@ -110,9 +131,15 @@ def evaluate(case, args, tools, prompt):
                 command = params.get('command', '')
                 spec, result = synthetic_tool(command)
                 calls.append({"command": command, "tool": spec.resolved_tool, "params": spec.params})
+                if call['function']['name'] != 'henu_cli':
+                    problems.append('unknown_tool')
+                if spec.resolved_tool == 'library_reserve' and not check.get('allow_preview'):
+                    problems.append('preview_without_request')
                 if spec.error:
                     problems.append('invalid_cli')
-                elif spec.resolved_tool not in {"library_query", "schedule_query", "system_status", "library_reserve", "empty_classroom_query"} and not spec.is_help:
+                elif (spec.resolved_tool not in {"library_query", "schedule_query", "system_status", "library_reserve", "empty_classroom_query"}
+                      and not (spec.resolved_tool == 'preferences' and spec.params.get('action') == 'get')
+                      and not spec.is_help):
                     problems.append('unexpected_operation')
                 messages.append({"role": "tool", "tool_call_id": call['id'], "content": json.dumps(result, ensure_ascii=False)})
         if not answer:
@@ -132,9 +159,12 @@ def evaluate(case, args, tools, prompt):
         problems += ['forbidden_tool:' + c['tool'] for c in calls if c['tool'] in check.get('forbidden_tools', [])]
         problems += ['missing_text:' + s for s in check.get('contains', []) if s not in answer]
         problems += ['unexpected_text:' + s for s in check.get('excludes', []) if s in answer]
+        if check.get('scope') and outside_scope_result(answer, check['scope']):
+            problems.append('outside_campus_result')
         if check.get('any_contains') and not any(s in answer for s in check['any_contains']):
             problems.append('missing_required_explanation')
-        turns.append({"question": question, "calls": calls, "answer": answer, "problems": problems})
+        turns.append({"question": question, "calls": calls, "answer": answer, "problems": problems,
+                      "warnings": ['unnecessary_scope_comment:' + s for s in check.get('warn_contains', []) if s in answer]})
     return {"id": case['id'], "passed": all(not t['problems'] for t in turns), "turns": turns}
 
 

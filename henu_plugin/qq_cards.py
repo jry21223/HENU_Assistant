@@ -651,6 +651,16 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
     key = scope(bot, session)
     if key is None:
         return
+    authoritative = bool(result.get("confirmation_required") or result.get("external_committed"))
+    if not authoritative:
+        getter = getattr(proxy, "get_query_vars", None)
+        variables = await getter() if callable(getter) else {}
+        previous = variables.get("_henu_card") if isinstance(variables, dict) else None
+        if (isinstance(previous, dict) and previous.get("owner") == list(key)
+                and previous.get("authoritative")):
+            # Later reads in this query cannot hide the exact pending operation
+            # or its final receipt behind an ordinary synthesized answer.
+            return
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
     if result.get('confirmation_required'):
@@ -662,15 +672,17 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
         else:
             pages[0] = envelope(pages[0], wire)
         cache(plugin).put(key, pages)
+    elif result.get("external_committed"):
+        pages = result_card(result).pages()
+        cache(plugin).put(key, pages)
     else:
         pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
     await proxy.set_query_var("_henu_card", {
         "owner": list(key), "page": pages[0],
-        # Exact menu shortcuts read page directly. A successful read tool used
-        # by the agent must leave room for its synthesis and followup questions.
-        "prefer_agent": result.get("success") is True
-        and not result.get("confirmation_required")
-        and not result.get("external_committed"),
+        "authoritative": authoritative,
+        # Exact menu shortcuts read page directly. Read results, including a
+        # failed subquery, leave room for synthesis and necessary followups.
+        "prefer_agent": not authoritative,
     })
 
 
