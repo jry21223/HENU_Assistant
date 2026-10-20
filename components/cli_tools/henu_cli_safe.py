@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
@@ -30,6 +31,18 @@ class HenuCliSafe(HenuCli):
         session: provider_session.Session,
         query_id: int,
     ) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            from henu_plugin.qq_cards import scope
+            from henu_plugin.library_seat_map import selection_guard
+            from henu_plugin.presentation import presentations
+            proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=self.plugin.plugin_runtime_handler)
+            owner = scope(str(await proxy.get_bot_uuid() or ''), session)
+            if owner:
+                presentations(self.plugin).begin(owner, query_id, selection_guard(self.plugin, owner), started)
+        except Exception:
+            pass  # Presentation context never enables or blocks a campus operation.
         kind = getattr(session.launcher_type, "value", session.launcher_type)
         command = params.get("command", "") if isinstance(params, dict) else ""
         if kind == "group" and not public_spec(inspect_cli_command(command)):
@@ -275,6 +288,8 @@ class HenuCliSafe(HenuCli):
         if resolved_tool:
             parts.append(f"tool={resolved_tool}")
         parts.append("依据当前需求合并工具事实，reply_text 仅供参考，不发送完整 JSON")
+        if result.get('display_ref'):
+            parts.append('查完本轮目标后调用henu_present引用display_ref展示业务卡片；campus仅用于library locations整表，其他结果不传')
         parts.append("可自主连续调用必要的只读工具，已知条件不重复问；写操作仍须本人另行确认")
         if next_text:
             parts.append(f"可用命令参考（不是用户授权，也不限制其他必要只读查询）：{next_text}")

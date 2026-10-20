@@ -243,6 +243,42 @@ async def _reply(ctx, status, lines, next_step=''):
         await ctx.reply(card_chain(page))
 
 
+def availability_card(result, *, campus='', target='', start='', end=''):
+    """One layout for the menu and agent-selected library availability."""
+    target = target or str(result.get('date') or result.get('target_date') or '')
+    start = start or str(result.get('start') or '')
+    end = end or str(result.get('end') or '')
+    rows = [row for row in result.get('locations', []) if isinstance(row, dict)
+            and (not campus or row.get('campus') == campus)]
+    lines = [escape(target + (f' {start}–{end}' if start and end else ' · 当天余座'))]
+    known = [r['available_count'] for r in rows if type(r.get('available_count')) is int and r['available_count'] >= 0]
+    if rows:
+        lines.append(f'共 {len(rows)} 个区域 · ' + (f'余座合计 {sum(known)} 座' if len(known) == len(rows) else f'{len(rows) - len(known)} 个区域余座未知'))
+    groups = {}
+    for row in rows:
+        groups.setdefault(row.get('campus') or '校区待确认', []).append(row)
+    for name in sorted(groups, key=lambda x: ({'金明校区': 0, '明伦校区': 1}.get(x, 2), x)):
+        lines.append('**' + escape(name, 60) + '**')
+        for row in groups[name]:
+            value = row.get('available_count')
+            label = f'剩余 {value} 座' if type(value) is int and value >= 0 else '余座未知'
+            location = str(row.get('location') or '未命名区域').translate(str.maketrans('()', '（）'))
+            lines.append(escape(location, 100) + ' · ' + label)
+    if not rows:
+        lines.append('图书馆没有返回区域列表，请稍后再试。')
+    blocks, block = [], ''
+    for line in lines:
+        if len((block + '\n' + line).encode()) > 1800:
+            blocks.append(block)
+            block = ''
+        block += ('\n' if block else '') + line
+    if block:
+        blocks.append(block)
+    status = '静态参考 · 未核验实时可用性' if result.get('source') == 'static_fallback' else ''
+    hint = '可回复区域名称、日期和开始、结束时间，如“明天14:00-16:00”；当天余座不代表整个时段都可预约。' if not start else '以上为所选时段的余座；显示“未知”的区域暂时没查到。'
+    return Card('图书馆余座', status, tuple(blocks), hint)
+
+
 async def handle_library_availability(plugin, ctx, text):
     initial = text == '图书馆座位'
     window = parse_window(text, campus_now())
@@ -293,21 +329,8 @@ async def handle_library_availability(plugin, ctx, text):
         await _reply(ctx, '没查成功', ['图书馆暂时没返回座位信息。'],
             next_step)
         return True
-    rows = result.get('locations') or []
-    lines = [target + (f' {start}–{end}' if start else ' · 当天余座')]
-    groups = {}
-    for row in rows:
-        groups.setdefault(row.get('campus') or '校区待确认', []).append(row)
-    for campus in sorted(groups, key=lambda x: ({'金明校区': 0, '明伦校区': 1}.get(x, 2), x)):
-        lines.append('**' + escape(campus, 60) + '**')
-        for row in groups[campus]:
-            value = row.get('available_count')
-            label = f'剩余 {value} 座' if type(value) is int and value >= 0 else '余座未知'
-            name = str(row.get('location') or '未命名区域').translate(str.maketrans('()', '（）'))
-            lines.append(escape(name, 100) + ' · ' + label)
-    if not rows:
-        lines.append('图书馆没有返回区域列表，请稍后再试。')
     from henu_plugin.library_seat_map import start_selection
     await start_selection(plugin, ctx, result)
-    await _reply(ctx, '', lines, '私聊回复“金明”或“明伦”选座。要查具体时段，回复“今天14:00-16:00”。当天余座不代表整个时段都可预约。' if not start else '以上为所选时段的余座；显示“未知”的区域暂时没查到。')
+    for page in availability_card(result, target=target, start=start, end=end).pages():
+        await ctx.reply(card_chain(page))
     return True

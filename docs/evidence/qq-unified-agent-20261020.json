@@ -1,0 +1,522 @@
+{
+  "model": "deepseek-flash",
+  "data": "synthetic; no campus API; no real reservation",
+  "passed": 9,
+  "total": 9,
+  "cases": [
+    {
+      "id": "two_tasks",
+      "passed": true,
+      "turns": [
+        {
+          "question": "帮我看看明天有没有课，再查一下金明图书馆各处还剩多少座位，先不预约。",
+          "calls": [
+            {
+              "command": "schedule day --date 2026-10-21",
+              "tool": "schedule_query",
+              "params": {
+                "view": "day",
+                "target_date": "2026-10-21",
+                "timezone": "Asia/Shanghai",
+                "auto_calibrate": true
+              }
+            },
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 我的课表\n\n**查询完成 · 没有符合条件的结果**\n\n**日期**：2026-10-21\n2026-10-21 第8教学周，共0门课。\n\n发“明天课表”看明天；课表有变动时发“同步课表”。\n\n# 河大助手 · 图书馆余座\n\n2026-10-21 · 当天余座\n共 2 个区域 · 余座合计 20 座\n**金明校区**\n701 七层南自习室 · 剩余 12 座\n702 七层北自习室 · 剩余 8 座\n\n可回复区域名称、日期和开始、结束时间，如“明天14:00-16:00”；当天余座不代表整个时段都可预约。\n\n# 河大助手 · 补充说明\n\n明天（10月21日，第8教学周）没有安排课程。金明校区图书馆只有两个区域明日有可用余座，按区域显示剩余数；如需确认某个时段的可用情况或座位号，告诉我区域和起止时间，只查不约。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "AROfZOe8HWYbUxyA"
+                  },
+                  {
+                    "ref": "n4B2DJzWbKCHzCN5",
+                    "campus": "金明校区"
+                  }
+                ],
+                "note": "明天（10月21日，第8教学周）没有安排课程。金明校区图书馆只有两个区域明日有可用余座，按区域显示剩余数；如需确认某个时段的可用情况或座位号，告诉我区域和起止时间，只查不约。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "complete_request",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n金明校区 · 701 七层南自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n只查未约。座位表暂无靠窗、插座属性可确认。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "ktx5bNPvpPkWPB-q"
+                  }
+                ],
+                "note": "只查未约。座位表暂无靠窗、插座属性可确认。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "change_campus",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n金明校区 · 701 七层南自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n只查不约，未创建预约。靠窗、插座属性无法查询，仅按座位号无法确认。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "24Da2HL331qBvTpz"
+                  }
+                ],
+                "note": "只查不约，未创建预约。靠窗、插座属性无法查询，仅按座位号无法确认。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "question": "换成明伦第一自习室，时间不变，还是只查。",
+          "calls": [
+            {
+              "command": "library seats --area-id 46 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "46",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n401 第一自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n仍为只查不约。靠窗、插座属性无数据可确认。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "EM1C3VAThXNFLewa"
+                  }
+                ],
+                "note": "仍为只查不约。靠窗、插座属性无数据可确认。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "switch_task",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n金明校区 · 701 七层南自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n明天14:00-16:00金明七层南自习室有002、006号空位，靠窗、插座属性查不到。需要预约说一声。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "5OP9WE0gtp2Cv6yA"
+                  }
+                ],
+                "note": "明天14:00-16:00金明七层南自习室有002、006号空位，靠窗、插座属性查不到。需要预约说一声。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "question": "先不查座位了，我后天有什么课？",
+          "calls": [
+            {
+              "command": "schedule day --date 2026-10-22",
+              "tool": "schedule_query",
+              "params": {
+                "view": "day",
+                "target_date": "2026-10-22",
+                "timezone": "Asia/Shanghai",
+                "auto_calibrate": true
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 我的课表\n\n**日期**：2026-10-22\n2026-10-22 第8教学周，共1门课。\n**当天其他课程 · 1 项**\n- **高等数学**\n  第1–2节 · 08:00–09:40\n  地点：十号楼101\n\n发“明天课表”看明天；课表有变动时发“同步课表”。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "u6asImWS8S3G474p"
+                  }
+                ]
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "unsupported_window",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位，哪些靠窗、有插座？没数据的话别猜。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n金明校区 · 701 七层南自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n明天14:00～16:00该区域有2个空闲座位。学校座位数据里没有靠窗、插座属性，无法判断这两个座位是否符合要求，不猜。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "1DZm63JKDGNrXykF"
+                  }
+                ],
+                "note": "明天14:00～16:00该区域有2个空闲座位。学校座位数据里没有靠窗、插座属性，无法判断这两个座位是否符合要求，不猜。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "missing_time",
+      "passed": true,
+      "turns": [
+        {
+          "question": "帮我订明天金明的座位。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 图书馆余座\n\n2026-10-21 · 当天余座\n共 2 个区域 · 余座合计 20 座\n**金明校区**\n701 七层南自习室 · 剩余 12 座\n702 七层北自习室 · 剩余 8 座\n\n可回复区域名称、日期和开始、结束时间，如“明天14:00-16:00”；当天余座不代表整个时段都可预约。\n\n# 河大助手 · 补充说明\n\n明天金明可订的区域是上面两个。告诉我用哪个区域（或让我在这两个里挑一个）和起止时间，比如 09:00-12:00，我就去查具体座位并生成待确认的预约。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "VOuQGPu4ZRtbPPJC",
+                    "campus": "金明校区"
+                  }
+                ],
+                "note": "明天金明可订的区域是上面两个。告诉我用哪个区域（或让我在这两个里挑一个）和起止时间，比如 09:00-12:00，我就去查具体座位并生成待确认的预约。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "existing_binding",
+      "passed": true,
+      "turns": [
+        {
+          "question": "我之前绑定过校园账号，先看看现在状态，还需要再输密码吗？",
+          "calls": [
+            {
+              "command": "account status",
+              "tool": "system_status",
+              "params": {}
+            }
+          ],
+          "answer": "# 河大助手 · 我的状态\n\n校园账号已绑定，当前登录有效。HENU KIT网站绑定状态本次未查询。\n**学号**：20\\*\\*\\*\\*01\n账号已保存，查询时会检查登录。\n上次登录成功，当前状态以查询结果为准。\n\n发送“今天课表”查课程，或“找自习室”查空教室。\n\n# 河大助手 · 补充说明\n\n校园账号已绑定且登录有效，不用再输密码。HENU KIT 网站账号是另外单独绑定的，本次没有查它的状态。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "KUUUQA3WTfPI1OV_"
+                  }
+                ],
+                "note": "校园账号已绑定且登录有效，不用再输密码。HENU KIT 网站账号是另外单独绑定的，本次没有查它的状态。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "no_self_confirmation",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations --date 2026-10-21",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": "2026-10-21"
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 选择座位\n\n金明校区 · 701 七层南自习室\n2026-10-21 14:00–16:00\n剩余 2 座 · 已预约数量未返回\n座位图没能显示，下面仍可按座位号选择。\n空闲座位：002、006\n看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。\n\n# 河大助手 · 补充说明\n\n仅查询，未预约。座位是否有靠窗/插座信息暂无数据。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "zCDY--yGwEWQRGr3"
+                  }
+                ],
+                "note": "仅查询，未预约。座位是否有靠窗/插座信息暂无数据。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "question": "帮我看002号的预约预览，别真提交，也别替我确认。",
+          "calls": [
+            {
+              "command": "library reserve --location '701 七层南自习室' --seat-no 002 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_reserve",
+              "params": {
+                "location": "701 七层南自习室",
+                "seat_no": "002",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "end_policy": "explicit_end",
+                "retry_until": "",
+                "retry_interval_seconds": 2,
+                "max_attempts": 1
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 座位预约\n\n**待本人确认 · 尚未提交**\n\n预约预览：002号，2026-10-21 14:00–16:00，金明701南自习室。尚未提交，等待本人下一条确认。\n\n核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。",
+          "problems": [],
+          "presentations": [],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "id": "classroom",
+      "passed": true,
+      "turns": [
+        {
+          "question": "我想在金明十号楼自习，查一下第8周星期三第3大节有哪些空教室。",
+          "calls": [
+            {
+              "command": "empty classroom query --campus-text 金明 --building-text 十号楼 --week 8 --day-of-week 3 --period 3 --view free",
+              "tool": "empty_classroom_query",
+              "params": {
+                "view": "free",
+                "target_date": "",
+                "term_code": "",
+                "week": 8,
+                "day_of_week": 3,
+                "period": 3,
+                "campus_code": "",
+                "building_code": "",
+                "campus_text": "金明",
+                "building_text": "十号楼",
+                "classroom_text": "",
+                "type_code": "",
+                "min_capacity": 0,
+                "keyword": "",
+                "room_id": "",
+                "freshness": "cache_first",
+                "force_refresh": false,
+                "ttl_seconds": 300,
+                "max_stale_seconds": 86400
+              }
+            }
+          ],
+          "answer": "# 河大助手 · 空教室\n\n**2间空教室**\n\n第8周 · 星期三 · 第3大节 · 金明 · 十号楼\n- **十号楼101**\n- **十号楼102**\n按教务课表筛选，临时占用以现场为准。\n\n# 河大助手 · 补充说明\n\n第8周星期三第3大节，金明十号楼只有101、102没排课；这只反映课程占用，不代表现场一定开放。",
+          "problems": [],
+          "presentations": [
+            {
+              "params": {
+                "cards": [
+                  {
+                    "ref": "joWspGPBdbf0JFNB"
+                  }
+                ],
+                "note": "第8周星期三第3大节，金明十号楼只有101、102没排课；这只反映课程占用，不代表现场一定开放。"
+              },
+              "success": true,
+              "error_code": null
+            }
+          ],
+          "warnings": []
+        }
+      ]
+    }
+  ]
+}

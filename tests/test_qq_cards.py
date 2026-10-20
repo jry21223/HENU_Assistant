@@ -21,11 +21,11 @@ def test_every_actual_service_route_has_a_card_title():
 
 
 def test_schedule_pages_keep_time_location_and_week_warning():
-    source = {"success": True, "week_filter_applied": False, "schedule": {"星期二": [{"course": f"课程{i}", "clock_start": "08:00", "clock_end": "09:40", "classroom": "十号楼101"} for i in range(35)]}}
+    source = {"success": True, "week_filter_applied": False, "schedule": {"星期二": [{"course": f"课程{i}", "clock_start": "08:00", "clock_end": "09:40", "classroom": "十号楼101"} for i in range(70)]}}
     before = json.dumps(source)
     pages = result_card(source, "schedule_query").pages()
     assert len(pages) > 1
-    assert "课程34" in "\n".join(pages)
+    assert "课程69" in "\n".join(pages)
     assert "08:00" in pages[0] and "十号楼101" in pages[0]
     assert "未按教学周过滤" in "\n".join(pages)
     assert all(len(page.encode()) <= MAX_BYTES for page in pages)
@@ -287,7 +287,7 @@ def test_full_tool_card_is_captured_before_model_compaction(monkeypatch):
     asyncio.run(stage_card(plugin, session, 1, result))
     result["rooms"] = result["rooms"][:8]
     from henu_plugin.qq_cards import cache, scope
-    assert "研讨室29" in cache(plugin).page(scope("bot", session), "卡片第 4 页")
+    assert "研讨室29" in cache(plugin).page(scope("bot", session), "卡片第 1 页")
 
 
 def test_long_preview_receipt_requires_every_page_successfully_sent():

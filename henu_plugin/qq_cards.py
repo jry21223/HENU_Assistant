@@ -95,19 +95,33 @@ class Card:
     next_step: str = ""
 
     def pages(self) -> list[str]:
-        # Greedy line pagination with space reserved for header/footer.
+        header = [PREFIX + escape(self.title, 60), ""]
+        if self.status and self.status not in {'已完成', '服务回执', '需要查询地点', '确认校区'}:
+            header += ["**" + escape(self.status, 70) + "**", ""]
+        suffix = ["", escape(self.next_step, 160)] if self.next_step else []
+        full = "\n".join(header + list(self.lines) + suffix)
+        if len(full.encode()) <= MAX_BYTES:
+            return [full]
+        paging = '第 20/20 页 · 回复“下一页”“上一页”或“卡片第 N 页”'
+        notice = '最多展示 20 页，其余内容请缩小查询范围后重新查询。'
         chunks: list[list[str]] = [[]]
-        budget = MAX_BYTES - 1200
+        budget = MAX_BYTES - len("\n".join(header + suffix + [paging, notice]).encode()) - 16
         for raw in self.lines:
             line = raw
             # Never split an escape pair or silently cut one large paragraph.
             while len(line.encode("utf-8")) > budget:
-                end = min(650, len(line))
-                while len(line[:end].encode("utf-8")) > budget or line[:end].endswith("\\"):
+                end = min(budget, len(line))
+                while len(line[:end].encode("utf-8")) > budget:
+                    end -= 1
+                boundaries = list(re.finditer(r"[\n，。；！？,;!? ]", line[:end]))
+                if boundaries:
+                    end = boundaries[-1].end()
+                trailing = len(line[:end]) - len(line[:end].rstrip("\\"))
+                if trailing % 2:
                     end -= 1
                 chunks.append([line[:end]])
                 line = line[end:]
-            if len(chunks[-1]) >= 8 or len(("\n".join(chunks[-1]) + "\n" + line).encode("utf-8")) > budget:
+            if len(("\n".join(chunks[-1]) + "\n" + line).encode("utf-8")) > budget:
                 chunks.append([])
             chunks[-1].append(line)
         chunks = [chunk for chunk in chunks if chunk] or [[]]
@@ -115,12 +129,7 @@ class Card:
         chunks = chunks[:MAX_PAGES]
         pages = []
         for number, chunk in enumerate(chunks, 1):
-            lines = [PREFIX + escape(self.title, 60), ""]
-            if self.status and self.status not in {'已完成', '服务回执', '需要查询地点', '确认校区'}:
-                lines += ["**" + escape(self.status, 70) + "**", ""]
-            lines += chunk
-            if self.next_step:
-                lines += ["", escape(self.next_step, 160)]
+            lines = header + chunk + suffix
             if len(chunks) > 1:
                 lines += ["", f"第 {number}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”"]
             if omitted:
@@ -304,6 +313,18 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
     if tool == "library_query" or tool.startswith("empty_classroom"):
         result = _without_query_resource_ids(result)
+    if tool == 'library_query' and result.get('success') and isinstance(result.get('seats'), list) and isinstance(result.get('area'), dict):
+        day = str(result.get('target_date') or result.get('date') or '')
+        clock = str(result.get('time_window') or (str(result.get('start') or '') + '–' + str(result.get('end') or '')))
+        window = re.search(r'(\d{2}:\d{2}).*?(\d{2}:\d{2})', clock)
+        if day and window:
+            from henu_plugin.library_seat_map import seat_card
+            return seat_card(result['area'], (day, *window.groups()), result, bool(result.get('_qq_seat_image')))
+    if (tool == 'library_query' and result.get('success') and isinstance(result.get('locations'), list)
+            and result.get('source') != 'live_empty' and not result.get('stale') and not result.get('is_stale')
+            and not (isinstance(result.get('freshness'), dict) and result['freshness'].get('stale'))):
+        from henu_plugin.library_availability import availability_card
+        return availability_card(result)
     if tool == 'empty_classroom_query' and result.get('success') and isinstance(result.get('rooms'), list):
         return _classroom_query_card(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
@@ -571,8 +592,8 @@ class CardCache:
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
 
-    def put(self, key: tuple, pages: list[str], *, on_read: Any = None) -> None:
-        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], 0)
+    def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
+        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], current)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
         if on_read is not None:
@@ -661,29 +682,45 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
             # Later reads in this query cannot hide the exact pending operation
             # or its final receipt behind an ordinary synthesized answer.
             return
-    cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
-    result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
-    if result.get('confirmation_required'):
-        from henu_plugin.qq_buttons import confirmation_actions, envelope
-        wire = await confirmation_actions(plugin, bot, session, query_id)
-        pages = result_card(result).pages()
-        if not wire or len(pages) != 1:
-            pages = Card('预览已更新', '', ('请重新发起操作，本次没有提交。',)).pages()
+    from henu_plugin.presentation import publication_lock
+    if not authoritative:
+        from henu_plugin.presentation import presentations, build_seat_image
+        import asyncio
+        store = presentations(plugin)
+        snapshot = store.with_region(key, query_id, result)
+        image, reserved = await asyncio.to_thread(build_seat_image, snapshot) if snapshot.get('_qq_seat_map') else (None, None)
+    async with publication_lock(plugin, key, query_id):
+        if not authoritative:
+            getter = getattr(proxy, 'get_query_vars', None)
+            variables = await getter() if callable(getter) else {}
+            previous = variables.get('_henu_card') if isinstance(variables, dict) else None
+            if isinstance(previous, dict) and previous.get('owner') == list(key) and previous.get('authoritative'):
+                return
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        result_id = str(cli.get("command") or cli.get("resolved_tool") or result.get("_resolved_tool_name") or "henu_cli")
+        await proxy.set_query_var('_henu_presentation', None)
+        if result.get('confirmation_required'):
+            from henu_plugin.qq_buttons import confirmation_actions, envelope
+            wire = await confirmation_actions(plugin, bot, session, query_id)
+            pages = result_card(result).pages()
+            if not wire or len(pages) != 1:
+                pages = Card('预览已更新', '', ('请重新发起操作，本次没有提交。',)).pages()
+            else:
+                pages[0] = envelope(pages[0], wire)
+            cache(plugin).put(key, pages)
+        elif result.get("external_committed"):
+            pages = result_card(result).pages()
+            cache(plugin).put(key, pages)
         else:
-            pages[0] = envelope(pages[0], wire)
-        cache(plugin).put(key, pages)
-    elif result.get("external_committed"):
-        pages = result_card(result).pages()
-        cache(plugin).put(key, pages)
-    else:
-        pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    await proxy.set_query_var("_henu_card", {
-        "owner": list(key), "page": pages[0],
-        "authoritative": authoritative,
-        # Exact menu shortcuts read page directly. Read results, including a
-        # failed subquery, leave room for synthesis and necessary followups.
-        "prefer_agent": not authoritative,
-    })
+            result['display_ref'] = store.capture(key, query_id, snapshot, image=image, reserved=reserved)
+            pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
+        await proxy.set_query_var("_henu_card", {
+            "owner": list(key), "page": pages[0],
+            "authoritative": authoritative,
+            # Exact menu shortcuts read page directly. Read results, including a
+            # failed subquery, leave room for synthesis and necessary followups.
+            "prefer_agent": not authoritative,
+        })
 
 
 async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
@@ -705,40 +742,79 @@ def agent_answer_pages(answer: str) -> list[str]:
     # Only headings and emphasis are allowed back through the escaping layer.
     body = re.sub(r"(?m)^(?:\\#){1,3} ", "## ", body)
     body = re.sub(r"\\\*\\\*([^\n]+?)\\\*\\\*", r"**\1**", body)
-    header = Card("校园查询", "", ()).pages()[0] + "\n"
-    if len((header + body).encode()) <= MAX_BYTES:
-        return [header + body]
-    footer = "\n\n第 20/20 页 · 回复“下一页”“上一页”或“卡片第 N 页”"
-    notice = "\n内容超过20页，请缩小查询范围。"
-    budget = MAX_BYTES - len((header + footer + notice).encode())
-    chunks: list[str] = []
-    current = ""
-    for line in body.splitlines(keepends=True):
-        # Ordinary lines (seat numbers, times, facts) always stay together.
-        if current and len((current + line).encode()) > budget:
-            chunks.append(current)
-            current = ""
-        while len(line.encode()) > budget:
-            end = min(len(line), budget)
-            while len(line[:end].encode()) > budget:
-                end -= 1
-            # An even run is a complete sequence of escaped backslashes.
-            trailing = len(line[:end]) - len(line[:end].rstrip("\\"))
-            if trailing % 2:
-                end -= 1
-            # A pathological single paragraph may exceed a QQ message. Prefer
-            # punctuation/whitespace; split characters only with no boundary.
-            boundaries = list(re.finditer(r"[\s，。；！？,;!?]", line[:end]))
-            if boundaries:
-                end = boundaries[-1].end()
-            chunks.append(line[:end])
-            line = line[end:]
-        current += line
-    if current:
-        chunks.append(current)
-    omitted = len(chunks) > MAX_PAGES
-    chunks = chunks[:MAX_PAGES]
-    return [header + chunk + f"\n\n第 {i}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”" + (notice if omitted else "") for i, chunk in enumerate(chunks, 1)]
+    return Card("校园查询", "", (body,)).pages()
+
+
+async def _finish_card(ctx, plugin, owner, text):
+    from henu_plugin.presentation import publication_lock
+    async with publication_lock(plugin, owner, getattr(ctx, 'query_id', 0)):
+        latest = await ctx.get_query_vars()
+        card = latest.get('_henu_card') if isinstance(latest, dict) else None
+        protected = isinstance(card, dict) and card.get('owner') == list(owner) and card.get('authoritative')
+        set_card_reply(ctx.event, card['page'] if protected else text)
+        setter = getattr(ctx, 'set_query_var', None)
+        if callable(setter):
+            await setter('_henu_card', None)
+            await setter('_henu_presentation', None)
+        return bool(protected)
+
+
+async def _deliver_presentation(ctx, plugin, owner):
+    from henu_plugin.presentation import presentations, publication_lock
+    from henu_plugin.library_seat_map import selection_guard, install_selection
+    from langbot_plugin.api.entities.builtin.platform.message import Image
+
+    async with publication_lock(plugin, owner, ctx.query_id):
+        latest = await ctx.get_query_vars()
+        card = latest.get('_henu_card')
+        protected = isinstance(card, dict) and card.get('owner') == list(owner) and card.get('authoritative')
+        plan = latest.get('_henu_presentation')
+        if not protected:
+            if not isinstance(plan, dict) or plan.get('owner') != list(owner) or plan.get('query_id') != ctx.query_id:
+                return
+            await ctx.set_query_var('_henu_presentation', None)
+    if protected:
+        await _finish_card(ctx, plugin, owner, '')
+        return
+    if plan.get('expires', 0) <= time.monotonic():
+        await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询，避免沿用旧的课程或余座。')[0])
+        return
+    pages = plan['pages']
+    store = presentations(plugin) if plugin is not None else None
+    guard = store.guard(owner, ctx.query_id) if store and plan.get('seat_selection') and owner[1] == 'person' else None
+    if guard is not None and not store.is_latest(owner, ctx.query_id):
+        await _finish_card(ctx, plugin, owner, text_card('查询条件已更新', '本轮旧座位结果已作废，请按新条件重新查询后选座。')[0])
+        return
+    failed_images = set()
+    for ref in plan.get('images', []):
+        image = store.asset(owner, ctx.query_id, ref).image if store else None
+        if image:
+            try:
+                await ctx.reply(MessageChain([Image(base64=image)]))
+            except Exception:
+                failed_images.add(ref)  # Unknown media delivery; never resend.
+    if failed_images and store:
+        plan = {**plan, **store.render(owner, ctx.query_id, plan['arrangement'], failed_images=failed_images)}
+        pages = plan['pages']
+    if len(pages) + len(plan.get('images', [])) + len(failed_images) > 5:
+        await _finish_card(ctx, plugin, owner, text_card('结果较长', '这次结果太长，请分开查询课表和座位。')[0])
+        return
+    try:
+        for page in pages[:-1]:
+            await ctx.reply(card_chain(page))
+    except Exception:
+        await _finish_card(ctx, plugin, owner, text_card('发送状态待确认', '部分结果发送状态暂未确认，请重新查询；不会自动重复发送。')[0])
+        return
+    protected = await _finish_card(ctx, plugin, owner, pages[-1])
+    if not protected and plugin is not None:
+        if guard is not None:
+            selected = store.asset(owner, ctx.query_id, plan['seat_selection']).selection
+            if not store.is_latest(owner, ctx.query_id) or not install_selection(plugin, owner, selected, guard):
+                page = text_card('查询条件已更新', '本轮旧座位结果已作废，请按新条件重新查询后选座。')[0]
+                set_card_reply(ctx.event, page)
+                cache(plugin).put(owner, [page])
+                return
+        cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1)
 
 
 async def present_card(ctx, *, plugin: Any = None):
@@ -747,23 +823,25 @@ async def present_card(ctx, *, plugin: Any = None):
     try:
         variables = await ctx.get_query_vars()
         card = variables.get("_henu_card")
+        plan = variables.get('_henu_presentation')
+        owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
+        if (isinstance(plan, dict) and owner is not None and plan.get('owner') == list(owner)
+                and plan.get('query_id') == getattr(ctx, 'query_id', None)
+                and not (isinstance(card, dict) and card.get('authoritative'))):
+            try:
+                await _deliver_presentation(ctx, plugin, owner)
+            except (ValueError, KeyError):
+                await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询，避免沿用旧的课程或余座。')[0])
+            return
         if not isinstance(card, dict):
             return
-        owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
         if owner is None or card.get("owner") != list(owner):
             return
         answer = str(getattr(ctx.event, "response_text", "") or "").strip()
-        if card.get("prefer_agent") and answer:
-            # The agent owns the answer; the template only owns presentation.
-            pages = agent_answer_pages(answer)
-            if plugin is not None:
-                cache(plugin).put(owner, pages)
-            set_card_reply(ctx.event, pages[0])
-        else:
-            set_card_reply(ctx.event, card["page"])
-        setter = getattr(ctx, "set_query_var", None)
-        if callable(setter):
-            await setter("_henu_card", None)
+        pages = agent_answer_pages(answer) if card.get('prefer_agent') and answer else [card['page']]
+        protected = await _finish_card(ctx, plugin, owner, pages[0])
+        if not protected and plugin is not None and card.get('prefer_agent') and answer:
+            cache(plugin).put(owner, pages)
     except Exception:
         # Preserve the pipeline's original text response on API failure.
         return

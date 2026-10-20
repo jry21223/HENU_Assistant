@@ -275,6 +275,7 @@ class BaseHenuTool(Tool):
             return
         result.pop("_resolved_tool_name", None)
         result.pop("_effective_params", None)
+        result.pop("_qq_seat_map", None)
 
     def _normalize_for_qq_delivery(self, result: Any) -> None:
         if not isinstance(result, dict):
@@ -357,7 +358,7 @@ class BaseHenuTool(Tool):
 
         # Last resort: keep the semantic delivery contract, never only msg/success.
         essential_keys = (
-            "success", "msg", "cli", "next_commands", "reply_text", "qq_reply_hint",
+            "success", "msg", "cli", "next_commands", "reply_text", "qq_reply_hint", "display_ref",
             "llm_hint", "cli_hint", "result_summary", "error_code", "warning",
             "source", "is_live", "date", "target_date", "area", "time_window",
             "total", "returned_count", "truncated", "total_count", "available_count",
@@ -450,7 +451,7 @@ class BaseHenuTool(Tool):
             cli = result.get("cli")
             if isinstance(cli, dict) and cli.get("command"):
                 result["cli"] = {"command": cli["command"]}
-            result["llm_hint"] = "复述 reply_text。"
+            result["llm_hint"] = "调用henu_present引用display_ref展示业务卡片，解释可简短补充。" if result.get('display_ref') else "依据已返回的事实简短说明，不输出内部JSON。"
             value = result.get("reply_text")
             if isinstance(value, str):
                 result["reply_text"] = self._trim_text(value, 70)

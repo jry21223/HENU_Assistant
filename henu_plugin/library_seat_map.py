@@ -38,6 +38,22 @@ def states(plugin):
     return current
 
 
+def selection_guard(plugin, key):
+    current = states(plugin).get(key)
+    return current, current.get('version') if current else None
+
+
+def install_selection(plugin, key, selection, guard):
+    current = states(plugin)
+    before, version = guard
+    if current.get(key) is not before or before and before.get('version') != version:
+        return False
+    current[key] = {**selection, 'stage': 'seats', 'choices': [], 'version': secrets.token_urlsafe(12), 'expires': time.monotonic()+300}
+    while len(current) > 128:
+        current.pop(next(iter(current)))
+    return True
+
+
 async def say(ctx, title, lines, wire=None):
     blocks, block = [], ""
     for line in lines:
@@ -333,15 +349,24 @@ async def show_map(plugin, ctx, state, window):
         or state["area"] != area
     ):
         return
+    for page in seat_card(area, window, result, image_ok).pages():
+        await ctx.reply(card_chain(page))
+
+
+def seat_card(area, window, result, image_ok=False):
+    """Use the same seat facts/layout for menu and natural-language queries."""
     day, start, end = window
+    seats = [str(row.get('no') or row.get('seat_no') or '') if isinstance(row, dict) else str(row) for row in result.get('seats', [])]
+    name = ' · '.join(str(v) for v in (area.get('campus'), area.get('location') or area.get('name')) if v)
+    available = result.get('available_count', len(seats))
+    reserved = result.get('reserved_count')
+    counts = result.get('status_counts')
+    if type(reserved) is not int and isinstance(counts, dict) and counts:
+        reserved = counts.get('2', 0)
     lines = [
-        escape(area["campus"] + " · " + area["location"]),
+        escape(name),
         day + " " + start + "–" + end,
-        "剩余 "
-        + str(len(result["seats"]))
-        + " 座 · 已预约 "
-        + str(result.get("reserved_count", 0))
-        + " 座",
+        f"剩余 {available} 座" + (f" · 已预约 {reserved} 座" if type(reserved) is int else " · 已预约数量未返回"),
         "高清图按学校坐标重绘，颜色对应本次查询时段。"
         if image_ok
         else "座位图没能显示，下面仍可按座位号选择。",
@@ -356,12 +381,12 @@ async def show_map(plugin, ctx, state, window):
             url,
         ):
             lines.append("![学校座位位置图](" + url + ")")
-    if not image_ok:
+    if seats:
         lines.append(
-            "空闲座位：" + "、".join(escape(no) for no in result["seats"][:24])
+            "空闲座位：" + "、".join(escape(no) for no in seats[:24])
         )
     lines.append("看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。")
-    await say(ctx, "选择座位", lines)
+    return Card("选择座位", "", tuple(lines))
 
 
 async def preview(plugin, ctx, state, seat):

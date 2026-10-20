@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 
 import requests
 import yaml
@@ -51,7 +52,7 @@ CASES = [
 ]
 
 
-def synthetic_tool(command):
+def synthetic_tool(command, *, prepare=True):
     spec = inspect_cli_command(command)
     if spec.error:
         return spec, {"success": False, "msg": spec.error}
@@ -72,7 +73,7 @@ def synthetic_tool(command):
     elif spec.resolved_tool == "library_query" and p.get("view") == "plan":
         result = {"success": True, "target_date": p.get("target_date"), "reservation_rules": {"effective_start": p.get("preferred_time"), "effective_end": p.get("preferred_end_time") or "23:00"}, "msg": "只读预约计划，尚未提交。"}
     elif spec.resolved_tool == "system_status":
-        result = {"success": True, "account": {"is_bound": True, "login_state": "valid"}, "reply_text": "校园账号已绑定，当前登录有效。HENU KIT网站绑定状态本次未查询。"}
+        result = {"success": True, "account": {"is_bound": True, "login_state": "valid", "student_id": "2026000001", "has_password": True, "last_login_attempt": {"status": "verified"}}, "reply_text": "校园账号已绑定，当前登录有效。HENU KIT网站绑定状态本次未查询。"}
     elif spec.resolved_tool == "preferences" and p.get("action") == "get":
         result = {"success": True, "preferences": {"library_location": "", "library_seat_no": ""}}
     elif spec.resolved_tool == "library_reserve":
@@ -86,11 +87,14 @@ def synthetic_tool(command):
         elif p.get('campus_code') not in ('', '01'):
             result = {"success": False, "msg": "校区代码不匹配，请使用 campus-text 或查询真实代码。"}
         else:
-            result = {"success": True, "query": p, "total": 2, "rooms": [{"roomName": "十号楼101"}, {"roomName": "十号楼102"}], "msg": "金明十号楼101、102第3大节没有排课。仅反映课程占用，不保证现场开放。"}
+            result = {"success": True, "query": {"week": p.get('week'), "dayOfWeek": p.get('day_of_week'), "period": p.get('period'),
+                "campusName": p.get('campus_text') or '金明校区', "buildingName": p.get('building_text') or '十号楼'},
+                "total": 2, "rooms": [{"roomName": "十号楼101"}, {"roomName": "十号楼102"}], "msg": "金明十号楼101、102第3大节没有排课。仅反映课程占用，不保证现场开放。"}
     else:
         return spec, {"success": False, "msg": "本隔离评测禁止此操作，不执行任何外部写入。"}
     result["cli"] = {"command": command, "resolved_tool": spec.resolved_tool}
-    HenuCliSafe()._prepare_delivery_result(result)
+    if prepare:
+        HenuCliSafe()._prepare_delivery_result(result)
     return spec, result
 
 
@@ -113,23 +117,50 @@ def outside_scope_result(answer, scope):
 
 
 def evaluate(case, args, tools, prompt):
+    from henu_plugin.presentation import Presentations
+    from henu_plugin.qq_cards import result_card
+    presentation_mode = getattr(args, 'presentation', False)
+    store, owner = Presentations(), ('synthetic', 'person', 'synthetic', 'synthetic')
     messages = [{"role": "system", "content": prompt + "\n[HENU_RUNTIME_CONTEXT_V2]\ncampus_timezone=Asia/Shanghai\ncampus_now=2026-10-20T17:40:00+08:00\ncampus_weekday=星期二\naccount_bound=true"}]
     turns = []
-    for question, check in zip(case["turns"], case["checks"]):
+    for turn_id, (question, check) in enumerate(zip(case["turns"], case["checks"]), 1):
+        store.begin(owner, turn_id, (None, None), time.monotonic())
         messages.append({"role": "user", "content": question})
         calls, problems, answer = [], [], ""
+        prepared, authoritative, offered = None, None, False
+        presentation_attempts = []
         for _ in range(8):
             r = requests.post(args.base_url.rstrip('/') + '/chat/completions', headers={"Authorization": "Bearer " + os.environ['AGENT_EVAL_API_KEY']}, json={"model": args.model, "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 1600, "stream": False}, timeout=60)
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
             messages.append({k: v for k, v in msg.items() if k in {"role", "content", "tool_calls", "reasoning_content"}})
             if not msg.get("tool_calls"):
-                answer = msg.get("content") or ""
+                answer = ('\n\n'.join(prepared['pages'] + prepared['more']) if prepared else authoritative) or msg.get("content") or ""
                 break
             for call in msg['tool_calls']:
                 params = json.loads(call['function']['arguments'])
+                if presentation_mode and call['function']['name'] == 'henu_present':
+                    try:
+                        if authoritative:
+                            raise ValueError('authoritative_receipt')
+                        prepared = store.render(owner, turn_id, params)
+                        result = {'success': True, 'reply_ready': True, 'llm_hint': '系统展示所选业务卡片，无需重复。'}
+                    except (KeyError, ValueError, TypeError) as exc:
+                        result = {'success': False, 'error_code': str(exc), 'llm_hint': 'campus仅用于library locations整表筛选；seats本身已限定区域，不传campus。只引用本轮display_ref。'}
+                        problems.append('invalid_presentation')
+                    presentation_attempts.append({'params': params, 'success': result['success'], 'error_code': result.get('error_code')})
+                    messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': json.dumps(result, ensure_ascii=False)})
+                    continue
                 command = params.get('command', '')
-                spec, result = synthetic_tool(command)
+                spec, result = synthetic_tool(command, prepare=not presentation_mode)
+                if presentation_mode:
+                    prepared = None
+                    if result.get('confirmation_required') or result.get('external_committed'):
+                        authoritative = '\n'.join(result_card(result).pages())
+                    elif not authoritative:
+                        result['display_ref'] = store.capture(owner, turn_id, store.with_region(owner, turn_id, result))
+                        offered = True
+                    HenuCliSafe()._prepare_delivery_result(result)
                 calls.append({"command": command, "tool": spec.resolved_tool, "params": spec.params})
                 if call['function']['name'] != 'henu_cli':
                     problems.append('unknown_tool')
@@ -144,11 +175,13 @@ def evaluate(case, args, tools, prompt):
                 messages.append({"role": "tool", "tool_call_id": call['id'], "content": json.dumps(result, ensure_ascii=False)})
         if not answer:
             problems.append('no_final_answer')
+        if presentation_mode and offered and not prepared and not authoritative and case['id'] != 'missing_time':
+            problems.append('missing_presentation')
         def matches(expected):
             return any(c['tool'] == expected['tool']
                        and all(c['params'].get(k) == v for k, v in expected.get('params', {}).items())
                        and (not expected.get('area') or c['params'].get('area_id') == expected['area'] or c['params'].get('location') == next(r['location'] for r in REGIONS if r['area_id'] == expected['area']))
-                       and (not expected.get('campus') or c['params'].get('campus_text') == expected['campus'] or c['params'].get('campus_code') == '01')
+                       and (not expected.get('campus') or str(c['params'].get('campus_text') or '').removesuffix('校区') == expected['campus'].removesuffix('校区') or c['params'].get('campus_code') == '01')
                        and (not expected.get('building') or c['params'].get('building_text') == expected['building'] or c['params'].get('building_code') == '1001')
                        for c in calls)
         for expected in check.get('calls', []):
@@ -164,6 +197,7 @@ def evaluate(case, args, tools, prompt):
         if check.get('any_contains') and not any(s in answer for s in check['any_contains']):
             problems.append('missing_required_explanation')
         turns.append({"question": question, "calls": calls, "answer": answer, "problems": problems,
+                      "presentations": presentation_attempts,
                       "warnings": ['unnecessary_scope_comment:' + s for s in check.get('warn_contains', []) if s in answer]})
     return {"id": case['id'], "passed": all(not t['problems'] for t in turns), "turns": turns}
 
@@ -176,12 +210,17 @@ def main():
     p.add_argument('--tool-file', type=Path, default=ROOT/'components/cli_tools/henu_cli.yaml')
     p.add_argument('--report', type=Path, required=True)
     p.add_argument('--case', action='append')
+    p.add_argument('--presentation', action='store_true', help='Evaluate agent-selected canonical business cards')
     args = p.parse_args()
     definition = yaml.safe_load(args.tool_file.read_text())
     tool = {"type": "function", "function": {"name": "henu_cli", "description": definition['spec']['llm_prompt'], "parameters": definition['spec']['parameters']}}
+    tools = [tool]
+    if args.presentation:
+        display = yaml.safe_load((ROOT/'components/cli_tools/henu_present.yaml').read_text())
+        tools.append({'type': 'function', 'function': {'name': 'henu_present', 'description': display['spec']['llm_prompt'], 'parameters': display['spec']['parameters']}})
     cases = [c for c in CASES if not args.case or c['id'] in args.case]
     with ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(lambda c: evaluate(c, args, [tool], args.prompt_file.read_text()), cases))
+        results = list(pool.map(lambda c: evaluate(c, args, tools, args.prompt_file.read_text()), cases))
     report = {"model": args.model, "data": "synthetic; no campus API; no real reservation", "passed": sum(r['passed'] for r in results), "total": len(results), "cases": results}
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({k: report[k] for k in ('passed', 'total')}, ensure_ascii=False))

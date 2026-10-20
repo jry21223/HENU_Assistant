@@ -440,6 +440,11 @@ class SeatReservationMixin:
             "truncated": False,
             "seats": available_seats,
             "status_counts": status_counts,
+            # LangBot presentation snapshot, removed before model delivery.
+            # Keep occupied seats too: a map of only free seats is misleading.
+            "_qq_seat_map": [{key: seat.get(key) for key in (
+                "no", "point_x", "point_y", "width", "height", "status", "status_name"
+            )} for seat in seats if isinstance(seat, dict)],
         }
 
     def _find_target_seat(self, seats: list[dict[str, Any]], seat_no: str) -> dict[str, Any] | None:

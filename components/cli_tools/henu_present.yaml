@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Tool
+metadata:
+  name: henu_present
+  label:
+    en_US: Campus Result Cards
+    zh_Hans: 展示校园查询结果
+  description:
+    en_US: Select current-request campus results for the shared card templates.
+    zh_Hans: 用与菜单一致的业务卡片展示本轮查询结果，可附简短解释或追问；不执行校园操作。
+spec:
+  parameters:
+    type: object
+    additionalProperties: false
+    properties:
+      cards:
+        type: array
+        maxItems: 4
+        description: 本轮最终要展示的结果，按展示顺序排列；不包括中间定位、偏好读取或已被改口替换的结果。
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            ref: {type: string, description: 本轮 henu_cli 返回的 display_ref，不能编造或引用历史轮次}
+            campus: {type: string, enum: [金明校区, 明伦校区, 龙子湖校区], description: 仅图书馆区域列表可选；用户明确校区时填实际校区，只展示该校区}
+          required: [ref]
+      note:
+        type: string
+        maxLength: 1200
+        description: 可选的简短解释、比较或必要追问；不重复列课程、余座等已在卡片中的事实。
+    required: [cards]
+  llm_prompt: "需要展示校园工具结果时，在查完当前目标必要的工具后调用 henu_present。cards 引用本轮工具返回的 display_ref；你决定哪些是用户需要的最终结果及顺序，不展示每一次中间查询。只有library locations区域整表需要campus筛选；library seats已经限定到实际区域，课表、状态、空教室也都不传campus。不能跨校区。日期、课程、地点、余座由原业务模板展示，不在最终文本里重新排版。必要解释或追问写 note。只需追问且没有结果时可 cards=[] 配合 note，也可直接简短提问，不为凑卡片调用学校接口。成功后由系统展示；不再复述整张卡片。不得输出 display_ref 或内部JSON。确认／已提交回执由系统保护，不通过本工具更改；本工具不生成预约、不执行确认或任何校园写入。"
+execution:
+  python:
+    path: henu_present.py
+    attr: HenuPresent

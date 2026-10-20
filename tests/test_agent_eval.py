@@ -40,3 +40,39 @@ def test_campus_check_rejects_foreign_counts_but_allows_explicit_exclusion(monke
         monkeypatch.setattr("ops.evaluate_qq_agent.requests.post", post)
         report = evaluate(case, SimpleNamespace(base_url="https://synthetic.invalid", model="synthetic"), [], "synthetic")
         assert report["passed"] is expected
+
+
+def test_model_eval_checks_rendered_business_cards_not_the_final_ack(monkeypatch):
+    case = {'id': 'card_layout', 'turns': ['我后天有什么课？'], 'checks': [{'contains': ['我的课表', '2026-10-22', '高等数学']}]}
+    count = [0]
+    def post(*args, **kwargs):
+        count[0] += 1
+        if count[0] == 1:
+            msg = {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'read', 'type': 'function', 'function': {'name': 'henu_cli', 'arguments': json.dumps({'command': 'schedule day --date 2026-10-22'})}}]}
+        elif count[0] == 2:
+            result = json.loads(next(m['content'] for m in reversed(kwargs['json']['messages']) if m['role'] == 'tool'))
+            msg = {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'show', 'type': 'function', 'function': {'name': 'henu_present', 'arguments': json.dumps({'cards': [{'ref': result['display_ref']}]})}}]}
+        else:
+            msg = {'role': 'assistant', 'content': '已展示。'}
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'choices': [{'message': msg}]})
+    monkeypatch.setenv('AGENT_EVAL_API_KEY', 'synthetic-key')
+    monkeypatch.setattr('ops.evaluate_qq_agent.requests.post', post)
+    report = evaluate(case, SimpleNamespace(base_url='https://synthetic.invalid', model='synthetic', presentation=True), [], 'synthetic')
+    assert report['passed'], report
+    assert '我的课表' in report['turns'][0]['answer']
+
+
+import pytest
+
+
+@pytest.mark.parametrize('campus,expected', [('金明校区', True), ('明伦校区', False)])
+def test_classroom_eval_accepts_the_school_suffix_but_not_another_campus(monkeypatch, campus, expected):
+    case = next(c for c in CASES if c['id'] == 'classroom')
+    messages = iter([
+        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'q', 'type': 'function', 'function': {'name': 'henu_cli', 'arguments': json.dumps({'command': 'empty classroom query --campus-text '+campus+' --building-text 十号楼 --week 8 --day-of-week 3 --period 3 --view free'})}}]},
+        {'role': 'assistant', 'content': '十号楼101、102。'},
+    ])
+    monkeypatch.setenv('AGENT_EVAL_API_KEY', 'synthetic-key')
+    monkeypatch.setattr('ops.evaluate_qq_agent.requests.post', lambda *args, **kwargs: SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'choices': [{'message': next(messages)}]}))
+    result = evaluate(case, SimpleNamespace(base_url='https://synthetic.invalid', model='synthetic'), [], 'synthetic')
+    assert result['passed'] is expected, result
