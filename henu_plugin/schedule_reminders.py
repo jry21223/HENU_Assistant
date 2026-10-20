@@ -140,11 +140,11 @@ class ScheduleReminders:
                     await self.write(data)
                 state = '已开启 · 课前15分钟' if item.get('enabled') else '未开启'
                 message = ('测试已安排，约45–75秒后发送一条明确标注的测试提醒。' if text == '测试课前提醒' else
-                           '连堂课仅提醒一次；按实际教学周和已保存节次时间发送。\n发送“关闭课前提醒”可随时关闭；发送“测试课前提醒”检查后台送达。')
+                           '每次上课前15分钟提醒，连堂课只提醒一次。\n发“关闭课前提醒”可关闭，发“测试课前提醒”试一下能否收到。')
                 last = item.get('last_delivery')
                 if last:
                     message += '\n最近发送：' + {'sent': '接口已受理', 'unknown': '结果未确认，不自动重发'}.get(last, last)
-                message += '\n消息能否送达仍受QQ平台权限和通知设置影响。'
+                message += '\n没收到时，请检查QQ通知设置。'
             await ctx.reply(card_chain(Card('课前提醒', state, (escape(message),)).pages()[0]))
         except Exception:
             await ctx.reply(card_chain(text_card('课前提醒', '设置未完成，请先同步课表并核对节次时间，稍后重试。')[0]))

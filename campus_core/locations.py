@@ -12,6 +12,21 @@ from .time_utils import _now_dt
 LIBRARY_LOCATIONS_FILE = Path(__file__).resolve().parent / "config" / "library_locations.json"
 
 
+def library_region_metadata(area: dict[str, Any]) -> dict[str, str]:
+    """Use the school's campus fields; an area name alone cannot prove campus."""
+    known = {'金明校区', '明伦校区', '郑州校区', '龙子湖校区'}
+    premises = str(area.get('premisesName') or '').strip()
+    parts = str(area.get('nameMerge') or '').split('-')
+    merged = parts[0].strip() if len(parts) >= 2 and parts[0].strip() in known else ''
+    campus = premises if premises in known else merged if not premises else ''
+    if premises and merged and premises != merged:
+        campus = ''
+    storey = str(area.get('storeyName') or '').strip()
+    merged_storey = parts[1].strip() if campus and len(parts) >= 3 else ''
+    floor = '' if storey and merged_storey and storey != merged_storey else storey or merged_storey
+    return {'campus': campus or '校区待确认', 'floor': floor}
+
+
 @lru_cache(maxsize=1)
 def load_library_location_map() -> dict[str, str]:
     try:
@@ -63,10 +78,14 @@ class LocationMixin:
     def _location_summary(cls, area: dict[str, Any], *, source: str = "live") -> dict[str, Any]:
         area_id = cls._area_id(area)
         name = cls._area_name(area)
+        free, total = area.get('free_num'), area.get('total_num')
+        known_count = type(free) is int and type(total) is int and 0 <= free <= total
         return {
             "location": name or area_id,
             "area_id": area_id,
             "source": source,
+            **library_region_metadata(area),
+            'available_count': free if known_count else None,
         }
 
     @classmethod

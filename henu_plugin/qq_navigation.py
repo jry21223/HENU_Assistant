@@ -94,11 +94,12 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
 def account_binding_card() -> list[str]:
     """Render a static input template; no user-supplied values can enter it."""
     from henu_plugin.qq_cards import Card, escape
-    return Card('绑定校园账号', '请在私聊中填写', (
-        escape('校园账号用于个人课表和校园服务，与 HENU KIT 网站账号分别绑定。'),
+    return Card('绑定校园账号', '', (
+        escape('查课表、图书馆等服务用校园账号。它和 HENU KIT 网站账号分别绑定。'),
+        escape('把下面的学号、密码换成你的，整条在私聊发给我：'),
         "account set --student-id 学号 --password '密码'",
-        escape('请把上面的学号和密码换成自己的内容，在同一条私聊中发送；不要保留占位文字，也不要单独发送密码。'),
-        escape('不想绑定时发送“取消”；关联网站账号请先取消，再发送“绑定Kit”。'),
+        escape('不要保留“学号”“密码”这两个占位词，也别单独发密码。'),
+        escape('不绑定了就发“取消”。绑定网站请先取消，再发“绑定Kit”。'),
     )).pages()
 
 

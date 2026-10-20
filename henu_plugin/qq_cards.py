@@ -34,7 +34,7 @@ def page_request_text(chain: list) -> str:
 TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
     "preferences": "图书馆偏好",
-    "sync_schedule": "课表导入", "schedule_query": "我的课表",
+    "sync_schedule": "课表更新", "schedule_query": "我的课表",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
     "course_selection_query": "教务选课", "course_selection_plan": "选课方案",
     "course_selection_submit": "选课提交", "course_monitor_config": "选课监控设置",
@@ -44,7 +44,7 @@ TOOL_TITLES = {
     "library_cancel": "取消座位预约", "seminar_group": "研讨室成员组",
     "seminar_query": "研讨室", "seminar_reserve": "研讨室预约",
     "seminar_signin": "研讨室签到", "seminar_cancel": "取消研讨室预约",
-    "set_calibration_source": "节次校准", "system_status": "账号与服务状态",
+    "set_calibration_source": "节次校准", "system_status": "我的状态",
     "yunfz_leave_query": "河宝请假", "yunfz_signin_query": "河宝签到",
     "yunfz_checksleep_query": "河宝查寝", "yunfz_activity_query": "河宝活动",
     "yunfz_collection_query": "河宝信息收集", "empty_classroom_query": "空教室",
@@ -239,7 +239,7 @@ def _week_schedule_card(result: dict) -> Card:
         if not rows:
             block += "\n" + ("无已确认课程（有周次待核验）" if partial else "当天无课")
         lines.append(block + "\n")
-    return Card("本周课表", "部分课程周次待核验" if partial else "已按教学周筛选", tuple(lines), "查看单日详情可发送“今天课表”或“明天课表”。")
+    return Card("本周课表", "有课程周次未确定" if partial else "", tuple(lines), "发送“今天课表”或“明天课表”看单日安排。")
 
 
 def _without_query_resource_ids(value):
@@ -394,15 +394,15 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         wrapper = result.get("account") or {}
         account = wrapper.get("account", wrapper) if isinstance(wrapper, dict) else {}
         sid = str(account.get("student_id") or "")
-        lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定"), "**登录凭据**：" + ("已保存" if account.get("has_password") else "未保存")]
-        lines.append("已保存凭据不代表当前登录有效；个人查询会按需核验校园服务。")
+        lines += ["**学号**：" + (escape(sid[:2] + "****" + sid[-2:]) if len(sid) > 4 else "未绑定")]
+        lines.append("账号已保存，查询时会检查登录。" if account.get("has_password") else "还没保存校园账号，请私聊发送“绑定账号”。")
         attempt = account.get("last_login_attempt") or {}
         attempt_status = {
-            "verified": "在线校验成功", "failed": "未完成", "unverified": "仅保存，未验证",
-            "pending": "结果待确认", "unknown": "结果未知，勿自动重试",
+            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没检查过登录。",
+            "pending": "上次登录还在处理中，请稍等。", "unknown": "上次登录结果不确定，请勿重复提交密码。",
         }.get(attempt.get("status")) if isinstance(attempt, dict) else None
         if attempt_status:
-            lines.append("**最近一次绑定尝试**：" + attempt_status + "（不代表当前会话仍有效）")
+            lines.append(attempt_status)
         clock = result.get("server_time") or {}
         if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))
@@ -471,7 +471,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
                 name = _first(row, "name", "location", "areaName", "area_name") or "未命名区域"
                 count = row.get("available_count")
                 remaining = f"剩余 {count} 座" if type(count) is int and count >= 0 else "余座未知"
-                entry = "- " + escape(name, 100) + " · " + remaining
+                campus = str(row.get('campus') or '校区待确认')
+                entry = "- " + escape((campus + ' · ' + name).translate(str.maketrans('()', '（）')), 100) + " · " + remaining
                 if len((block + "\n" + entry).encode()) > 1800:
                     lines.append(block)
                     block = "**图书馆区域（续）**"
@@ -496,11 +497,11 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
     if tool.startswith("empty_classroom"):
         next_step = "可补充校区、教学楼、星期和大节继续查询；结果只反映课程占用。"
     if tool == "system_status":
-        next_step = "发送“今天课表”查看课程；找自习地点可发送“找自习室”。"
+        next_step = "发送“今天课表”查课程，或“找自习室”查空教室。"
     if tool in {"sync_schedule", "schedule_sync"} and result.get("success"):
         next_step = "发送“今天课表”或“本周课表”查看更新后的课程。"
     if tool == "schedule_query" and result.get("success"):
-        next_step = "发送“明天课表”查看其他日期；课表有变动时发送“同步课表”。"
+        next_step = "发“明天课表”看明天；课表有变动时发“同步课表”。"
     if result.get("confirmation_required"):
         next_step = "核对本页信息后，在下一条私聊回复“确认”（5 分钟内）；尚未执行。"
     elif result.get("external_committed") and result.get("storage_persisted") is False:
@@ -520,6 +521,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
 def text_card(title: str, text: str, *, private: bool = False) -> list[str]:
     if private:
         return result_card({}, private=True).pages()
+    if title == '校园账号与校准' and text == '已取消账号凭据录入。':
+        title, text = '绑定校园账号', '已取消填写，原来的账号保留。'
     status = "服务回执"
     if "尚未发布" in text or "尚未提交" in text or "待确认" in text:
         status = "待本人核对 · 尚未提交"

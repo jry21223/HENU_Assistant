@@ -55,7 +55,7 @@ def test_empty_classroom_help_topic_documents_rich_views() -> None:
     assert "--classroom-text" in commands
 
 
-def test_library_locations_reply_exposes_names_ids_and_next_command() -> None:
+def test_library_locations_reply_uses_names_and_keeps_internal_ids_out_of_copy() -> None:
     tool = HenuCliSafe.__new__(HenuCliSafe)
     result = {
         "success": True,
@@ -74,8 +74,8 @@ def test_library_locations_reply_exposes_names_ids_and_next_command() -> None:
     hint = tool._build_llm_hint(result)
 
     assert "明伦校区图书馆" in reply
-    assert "area_id: 101" in reply
-    assert "library seats --location" in reply
+    assert "area_id" not in reply and "101" not in reply
+    assert "区域、日期和起止时间" in reply
     assert "唯一有效参数来源" in hint
 
 
@@ -181,8 +181,8 @@ def test_library_location_summary_keeps_all_area_ids_under_qq_budget() -> None:
 
     assert len(result["location_options"]) == 34
     assert {item["area_id"] for item in result["location_options"]} == {*(str(index) for index in range(1, 34)), "43"}
-    assert "location_options" in result["reply_text"]
-    assert "43" in result["reply_text"]
+    assert "area_id" not in result["reply_text"]
+    assert any(r['location'] == '第一自习室' for r in result['location_options'])
     assert len(json.dumps(result, ensure_ascii=False)) <= 2200
 
 

@@ -57,7 +57,8 @@ def region_counts(rows):
         seen.add((identity, name))
         free, total = row.get('free_num'), row.get('total_num')
         known = type(free) is int and type(total) is int and 0 <= free <= total
-        result.append({'location': name, 'campus': merged.split('-')[0] if '-' in merged else '', 'area_id': identity,
+        from campus_core.locations import library_region_metadata
+        result.append({'location': name, **library_region_metadata(row), 'area_id': identity,
                        'available_count': free if known else None})
     return result
 
@@ -268,7 +269,7 @@ async def handle_library_availability(plugin, ctx, text):
         await _reply(ctx, '补充查询时段', ['请提供使用日期及开始、结束时间，例如“今天14:00-16:00”。'])
         return True
     target, start, end = window or (campus_now().date().isoformat(), '', '')
-    await _reply(ctx, '正在查询', [target + (f' {start}–{end}' if start else ' · 日期余量'), '仅查询，不会预约。'])
+    await _reply(ctx, '正在查座位', [target + (f' {start}–{end}' if start else '')])
     try:
         from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
         session = Session(launcher_type=LauncherTypes.GROUP if kind == 'group' else LauncherTypes.PERSON,
@@ -280,25 +281,27 @@ async def handle_library_availability(plugin, ctx, text):
         await ctx.set_query_var('_henu_card', None)
     if not result.get('success'):
         code = result.get('error_code')
-        next_step = '请稍后重试；也可提供日期和起止时间，例如“明天14:00-16:00”。'
+        next_step = '请稍后再试。'
         if code == 'account_not_bound':
-            next_step = '尚未保存校园账号，请在私聊发送“绑定账号”。'
+            next_step = '请私聊发送“绑定账号”，先绑定校园账号。'
         elif code in {'auth_required', 'login_recovery_failed'}:
-            next_step = '已尝试恢复校园登录，请私聊发送“我的状态”核对登录状态后重试；无需重复绑定。'
-        await _reply(ctx, '查询未完成', ['未取得可核验余量，不能当作剩余0座。'],
+            next_step = '校园登录没恢复成功。请私聊发送“我的状态”，不用重新绑定。'
+        await _reply(ctx, '没查成功', ['图书馆暂时没返回座位信息。'],
             next_step)
         return True
     rows = result.get('locations') or []
-    lines = [target + (f' {start}–{end} · 指定时段' if start else ' · 接口日期余量（未指定使用时段）')]
-    campus = ''
+    lines = [target + (f' {start}–{end}' if start else ' · 当天余座')]
+    groups = {}
     for row in rows:
-        if row.get('campus') and campus != row['campus']:
-            campus = row['campus']
-            lines.append('**' + escape(campus, 60) + '**')
-        value = row.get('available_count')
-        label = f'剩余 {value} 座' if type(value) is int and value >= 0 else '余座未知'
-        lines.append(escape(row.get('location') or '未命名区域', 100) + ' · ' + label)
+        groups.setdefault(row.get('campus') or '校区待确认', []).append(row)
+    for campus in sorted(groups, key=lambda x: ({'金明校区': 0, '明伦校区': 1}.get(x, 2), x)):
+        lines.append('**' + escape(campus, 60) + '**')
+        for row in groups[campus]:
+            value = row.get('available_count')
+            label = f'剩余 {value} 座' if type(value) is int and value >= 0 else '余座未知'
+            name = str(row.get('location') or '未命名区域').translate(str.maketrans('()', '（）'))
+            lines.append(escape(name, 100) + ' · ' + label)
     if not rows:
-        lines.append('未取得区域数据，不能据此判断无座。')
-    await _reply(ctx, '查询结果', lines, '日期余量不保证任意完整时段可预约；可回复“今天14:00-16:00”核对使用时段。')
+        lines.append('图书馆没有返回区域列表，请稍后再试。')
+    await _reply(ctx, '', lines, '要查具体时段，回复“今天14:00-16:00”。当天余座不代表整个时段都可预约。' if not start else '以上为所选时段的余座；显示“未知”的区域暂时没查到。')
     return True

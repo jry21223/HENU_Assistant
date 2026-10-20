@@ -67,7 +67,7 @@ def test_schedule_card_uses_chinese_sections_and_shows_each_course_once():
 def test_status_does_not_treat_saved_credentials_as_verified_login():
     from henu_plugin.qq_cards import result_card
     page = result_card({'success': True, 'account': {'account': {'student_id': '2026001234', 'has_password': True}}}, 'system_status').pages()[0]
-    assert '不代表当前登录有效' in page
+    assert '查询时会检查登录' in page
     assert '2026001234' not in page
 
 

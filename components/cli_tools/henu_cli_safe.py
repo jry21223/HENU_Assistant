@@ -70,6 +70,8 @@ class HenuCliSafe(HenuCli):
                 {
                     "location": self._first_text(item, "location", "name", "areaName", "title"),
                     "area_id": self._first_text(item, "area_id", "areaId", "id"),
+                    **({key: item.get(key) for key in ('campus', 'floor', 'available_count')}
+                       if item.get('campus') else {}),
                 }
                 for item in locations
             ]
@@ -166,24 +168,17 @@ class HenuCliSafe(HenuCli):
         lines = [f"{header}，共 {total} 个（{source_text}）。"]
         display_locations = locations if len(locations) <= 12 else locations[:6] + locations[-6:]
         if len(locations) > len(display_locations):
-            ids = [self._first_text(item, "area_id", "areaId", "id") for item in locations]
-            ids = [value for value in ids if value]
-            if "43" in ids:
-                lines.append("后部区域包含 area_id=43，请从 location_options 读取对应名称。")
-            lines.append(f"完整的 {{location, area_id}} 在 location_options（共 {len(locations)} 个）。")
-            if ids:
-                lines.append("area_id 可选值：" + ", ".join(ids))
+            lines.append('下方展示部分区域。')
         for location in display_locations:
             name = self._first_text(location, "location", "name", "areaName", "title") or "未命名区域"
-            area_id = self._first_text(location, "area_id", "areaId", "id")
-            suffix = f"（area_id: {area_id}）" if area_id else ""
-            lines.append(f"- {name}{suffix}")
+            campus = self._first_text(location, 'campus') or '校区待确认'
+            count = location.get('available_count')
+            count_text = f'剩余{count}座' if type(count) is int and count >= 0 else '余座未知'
+            display_name = name.translate(str.maketrans('()', '（）'))
+            lines.append(f"- {campus} · {display_name} · {count_text}")
         if len(locations) > len(display_locations):
             lines.append(f"……中间还有 {len(locations) - len(display_locations)} 个区域未展开。")
-        lines.append(
-            "下一步请从上面选择准确的区域名或 area_id，调用 "
-            "library seats --location <区域> --date <日期> --time <开始时间>；不要凭记忆猜区域名。"
-        )
+        lines.append('要查具体座位，告诉我区域、日期和起止时间。')
         return "\n".join(lines)
 
     def _format_seats_reply(self, result: dict[str, Any]) -> str:

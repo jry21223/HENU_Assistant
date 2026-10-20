@@ -339,6 +339,12 @@ class BaseHenuTool(Tool):
             "rooms_info",
         ]
         max_payload_chars = 2200
+        # This is the model's structured tool result, not a QQ message. Retain
+        # verified region geography so the model cannot silently cross campuses.
+        options = result.get('location_options')
+        if isinstance(options, list) and 0 < len(options) <= 64 and any(
+                isinstance(row, dict) and row.get('campus') for row in options):
+            max_payload_chars = 8000
         payload = self._make_payload_json(result)
         if len(payload) <= max_payload_chars:
             return

@@ -365,3 +365,21 @@ def test_routine_cards_skip_workflow_labels():
     page = Card('今天课表', '已完成', ('今天有4门课。',), '发送“明天课表”查看明天。').pages()[0]
     assert '今天有4门课' in page
     assert '已完成' not in page and '下一步' not in page
+
+
+def test_status_copy_is_direct_but_does_not_claim_saved_login_is_valid():
+    from henu_plugin.qq_cards import result_card
+    page = result_card({'success': True, 'account': {'account': {
+        'student_id': '2026001234', 'has_password': True,
+        'last_login_attempt': {'status': 'unknown'}}}}, 'system_status').pages()[0]
+    assert '账号已保存' in page and '查询时会检查登录' in page
+    assert '上次登录结果不确定，请勿重复提交密码' in page
+    assert '不代表当前会话仍有效' not in page and '登录凭据' not in page
+    assert '2026001234' not in page
+
+
+def test_cancel_binding_copy_keeps_original_account_clear():
+    from henu_plugin.qq_cards import text_card
+    page = text_card('校园账号与校准', '已取消账号凭据录入。')[0]
+    assert '已取消填写，原来的账号保留' in page
+    assert '凭据录入' not in page and '与校准' not in page

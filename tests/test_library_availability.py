@@ -3,6 +3,79 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 
+def test_campus_uses_school_metadata_conflicts_are_not_guessed():
+    from henu_plugin.library_availability import region_counts
+    rows = region_counts([
+        {'id': '43', 'name': '401 第一自习室', 'premisesName': '明伦校区',
+         'nameMerge': '明伦校区-明伦四层-401 第一自习室', 'storeyName': '明伦四层', 'free_num': 5, 'total_num': 10},
+        {'id': 'bad', 'name': '不明区域', 'nameMerge': '图书馆-二楼-不明区域', 'free_num': 0, 'total_num': 10},
+        {'id': 'conflict', 'name': '冲突区域', 'premisesName': '金明校区',
+         'nameMerge': '明伦校区-明伦二层-冲突区域', 'free_num': 1, 'total_num': 10},
+    ])
+    assert rows[0]['campus'] == '明伦校区' and rows[0]['floor'] == '明伦四层'
+    assert rows[1]['campus'] == '校区待确认'
+    assert rows[2]['campus'] == '校区待确认'
+    conflict = region_counts([{'id': 'floor-conflict', 'name': '书库', 'premisesName': '明伦校区',
+                              'storeyName': '明伦五层', 'nameMerge': '明伦校区-明伦四层-书库'}])[0]
+    assert conflict['campus'] == '明伦校区' and conflict['floor'] == ''
+
+
+def test_verified_school_regions_keep_their_actual_campus():
+    import json
+    from pathlib import Path
+    from henu_plugin.library_availability import region_counts
+    payload = json.loads((Path(__file__).parents[1] / 'docs/evidence/library-regions-20261020.json').read_text())
+    rows = region_counts(payload['areas'])
+    assert len(rows) == 31
+    assert sum(r['campus'] == '金明校区' for r in rows) == 20
+    assert sum(r['campus'] == '明伦校区' for r in rows) == 11
+    for word in ('第一自习室', '第二自习室', '第三自习室', '东馆', '西馆'):
+        selected = [r for r in rows if word in r['location']]
+        assert selected and all(r['campus'] == '明伦校区' for r in selected)
+    assert all(r['available_count'] is None for r in rows)  # Metadata has no live counts.
+
+
+def test_interleaved_school_rows_are_grouped_once_per_campus(monkeypatch):
+    from henu_plugin import library_availability as lib
+    monkeypatch.setattr(lib, 'query_library', AsyncMock(return_value={'success': True, 'locations': [
+        {'location': '第一自习室', 'campus': '明伦校区', 'available_count': 5},
+        {'location': '七层南自习室', 'campus': '金明校区', 'available_count': 10},
+        {'location': '东馆书库', 'campus': '明伦校区', 'available_count': 0}]}))
+    ctx = context()
+    asyncio.run(lib.handle_library_availability(SimpleNamespace(), ctx, '图书馆座位'))
+    sent = str(ctx.reply.call_args)
+    assert sent.count('明伦校区') == 1 and sent.count('金明校区') == 1
+    assert sent.index('七层南自习室') < sent.index('第一自习室') < sent.index('东馆书库')
+
+
+def test_cli_library_card_also_shows_campus_not_just_area_names():
+    from henu_plugin.qq_cards import result_card
+    page = '\n'.join(result_card({'success': True, 'locations': [
+        {'location': '401 第一自习室', 'campus': '明伦校区', 'available_count': 5},
+        {'location': '701 七层南自习室', 'campus': '金明校区', 'available_count': 10},
+    ]}, 'library_query').pages())
+    assert '明伦校区' in page and '金明校区' in page
+    assert 'area_id' not in page and '剩余 5' in page
+
+
+def test_final_model_delivery_keeps_campus_floor_and_counts_for_all_regions():
+    import json
+    from pathlib import Path
+    from campus_core.locations import LocationMixin
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    raw = json.loads((Path(__file__).parents[1] / 'docs/evidence/library-regions-20261020.json').read_text())['areas']
+    locations = [LocationMixin._location_summary({**r, 'free_num': 2, 'total_num': 10}) for r in raw]
+    result = {'success': True, 'source': 'live', 'locations': locations, 'total': 31}
+    tool = HenuCliSafe.__new__(HenuCliSafe)
+    tool._prepare_delivery_result(result)
+    tool._normalize_for_qq_delivery(result)
+    options = result['location_options']
+    assert len(options) == 31
+    assert sum(r['campus'] == '明伦校区' for r in options) == 11
+    assert all(r['floor'] and r['available_count'] == 2 for r in options)
+    assert len(json.dumps(result, ensure_ascii=False)) <= 8000
+
+
 def context(text='图书馆座位', sender='alice', kind='person'):
     ctx = SimpleNamespace(event=SimpleNamespace(launcher_type=kind, launcher_id=sender, sender_id=sender),
         query_id=1, reply=AsyncMock(), get_bot_uuid=AsyncMock(return_value='bot'),
