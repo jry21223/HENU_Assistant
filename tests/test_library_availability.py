@@ -306,6 +306,23 @@ def test_unknown_seat_status_is_never_reported_as_zero(monkeypatch):
     assert [r['available_count'] for r in result['locations']] == [None] * 7 + [0, 0, 1]
 
 
+def test_documented_reserved_seat_is_not_an_unknown_or_available_seat(monkeypatch):
+    import json
+    from henu_plugin import library_availability as lib
+    def post(self,url,**kwargs):
+        if url.endswith('/space/pick'):
+            data={'area':[{'id':'30','name':'701 七层南自习室'}]}
+        elif url.endswith('/Space/map'):
+            data={'type':'1','date':{'reserveType':'3','list':[{'day':'2026-10-20','def_start_time':'08:00','def_end_time':'18:00'}]}}
+        else:data={'list':[{'status':'1','status_name':'空闲'},{'status':'2','status_name':'已预约'}]}
+        return SimpleNamespace(json=lambda:{'code':0,'data':data})
+    monkeypatch.setattr('requests.Session.post',post)
+    async def storage(key):
+        return json.dumps({'_v4_token':'synthetic'} if key.endswith(':library_cookie') else {}).encode()
+    result=asyncio.run(lib.query_library(SimpleNamespace(get_plugin_storage=storage),'alice','2026-10-20','14:00','16:00'))
+    assert result['locations'][0]['available_count']==1
+
+
 def test_repeated_overlapping_queries_share_one_worker_limit(monkeypatch):
     import json
     import threading

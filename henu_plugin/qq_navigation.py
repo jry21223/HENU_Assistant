@@ -45,6 +45,9 @@ GUIDES = {
 
 
 async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) -> bool:
+    from henu_plugin.qq_buttons import handle
+    if await handle(plugin, ctx):
+        return True
     from henu_plugin.qq_cards import reply_card
     from langbot_plugin.api.entities.builtin.platform.message import At, Plain, Source
 
@@ -56,6 +59,9 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.library_seat_map import handle_library_text
+    if await handle_library_text(plugin, ctx, text):
+        return True
     from henu_plugin.library_availability import handle_library_availability
     if await handle_library_availability(plugin, ctx, text):
         return True
@@ -151,6 +157,12 @@ async def handle_menu_query(plugin, ctx) -> bool:
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.qq_buttons import handle
+    if await handle(plugin, ctx):
+        return True
+    from henu_plugin.library_seat_map import handle_library_text
+    if await handle_library_text(plugin, ctx, text):
+        return True
     from henu_plugin.library_availability import handle_library_availability
     if await handle_library_availability(plugin, ctx, text):
         return True
