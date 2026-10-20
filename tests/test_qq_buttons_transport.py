@@ -36,7 +36,13 @@ def test_button_card_on_wire_binds_actual_reply_and_strips_control_metadata(
     )
 
     async def run():
-        wire = {"owner": "alice", "actions": [{"id": "a" * 24, "label": "确认操作"}]}
+        wire = {
+            "owner": "alice",
+            "actions": [
+                {"id": "a" * 24, "label": "确认操作"},
+                {"id": "b" * 24, "label": "取消"},
+            ],
+        }
         page = transport.PREFIX + "操作确认\n尚未提交"
         await transport.send_card(
             client, "c2c", "alice", envelope(page, wire), msg_id="inbound"
@@ -46,6 +52,12 @@ def test_button_card_on_wire_binds_actual_reply_and_strips_control_metadata(
         assert button["action"]["type"] == 1
         assert "group_id" not in button  # Live QQ rejects opaque group IDs (40011021).
         assert button["action"]["data"] == "henu:" + "a" * 24
+        assert (
+            button["render_data"]["style"] == 4
+        )  # Primary blue background / white text.
+        cancel = requests[0]["keyboard"]["content"]["rows"][0]["buttons"][1]
+        assert cancel["render_data"]["style"] == 0  # Secondary grey outline.
+        assert "modal" not in cancel["action"]
         assert client._henu_buttons["a" * 24]["message_id"] == "card-123"
 
     asyncio.run(run())

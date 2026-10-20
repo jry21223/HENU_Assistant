@@ -124,7 +124,7 @@ async def send_card(
                     "render_data": {
                         "label": row["label"],
                         "visited_label": "已选择",
-                        "style": 1,
+                        "style": 4 if row["label"].startswith("确认") else 0,
                     },
                     "action": action,
                 }

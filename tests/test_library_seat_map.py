@@ -80,7 +80,7 @@ def test_seat_map_to_reservation_preview_never_submits(monkeypatch):
 
         monkeypatch.setattr(BaseHenuTool, "call", read_plan)
         origin = context()
-        choices = await lib.region_actions(
+        choices = await lib.start_selection(
             plugin,
             origin,
             {
@@ -94,18 +94,23 @@ def test_seat_map_to_reservation_preview_never_submits(monkeypatch):
                 ]
             },
         )
-        campus = context("HENU_BUTTON " + choices["actions"][0]["id"], query=2)
-        await buttons.handle(plugin, campus)
-        _, area_wire = wire(campus)
-        area = context("HENU_BUTTON " + area_wire["actions"][0]["id"], query=3)
-        await buttons.handle(plugin, area)
+        assert (
+            choices is None
+        )  # Selection is text/image only; buttons are for confirmation.
+        campus = context("金明", query=2)
+        assert await lib.handle_library_text(plugin, campus, "金明")
+        assert "HENU_ACTIONS" not in str(campus.reply.call_args)
+        area = context("1", query=3)
+        assert await lib.handle_library_text(plugin, area, "1")
+        assert "HENU_ACTIONS" not in str(area.reply.call_args)
         window = context("2026-11-01 14:00-16:00", query=4)
         assert await lib.handle_library_text(plugin, window, "2026-11-01 14:00-16:00")
-        text, seats = wire(window)
+        text = window.reply.call_args.args[0].root[0].text
+        assert "HENU_ACTIONS" not in text
         assert "seat-free.jpg" in text and "底图颜色" in text
         assert "剩余 2 座" in text and "14:00" in text and "16:00" in text
-        seat = context("HENU_BUTTON " + seats["actions"][0]["id"], query=5)
-        await buttons.handle(plugin, seat)
+        seat = context("001", query=5)
+        assert await lib.handle_library_text(plugin, seat, "001")
         text, confirm = wire(seat)
         assert "001" in text and "金明校区" in text and "尚未提交" in text
         assert [a["label"] for a in confirm["actions"]] == ["确认预约", "取消"]
@@ -183,14 +188,13 @@ def test_school_query_uses_exact_window_keeps_reserved_seats_off_buttons(monkeyp
 
 
 async def select_area(plugin, result):
-    from henu_plugin import library_seat_map as lib, qq_buttons as buttons
+    from henu_plugin import library_seat_map as lib
 
-    choices = await lib.region_actions(plugin, context(query=1), result)
-    campus = context("HENU_BUTTON " + choices["actions"][0]["id"], query=2)
-    await buttons.handle(plugin, campus)
-    _, choices = wire(campus)
-    area = context("HENU_BUTTON " + choices["actions"][0]["id"], query=3)
-    await buttons.handle(plugin, area)
+    await lib.start_selection(plugin, context(query=1), result)
+    campus = context("金明", query=2)
+    assert await lib.handle_library_text(plugin, campus, "金明")
+    area = context("1", query=3)
+    assert await lib.handle_library_text(plugin, area, "1")
     return area
 
 
@@ -249,7 +253,7 @@ def test_old_async_map_response_is_discarded_after_new_library_selection(monkeyp
             lib.handle_library_text(plugin, previous, "2026-11-01 08:00-23:00")
         )
         await asyncio.wait_for(started.wait(), 1)
-        await lib.region_actions(
+        await lib.start_selection(
             plugin,
             context(query=5),
             {
@@ -269,9 +273,9 @@ def test_old_async_map_response_is_discarded_after_new_library_selection(monkeyp
     asyncio.run(run())
 
 
-def test_large_campus_uses_floor_buttons_then_legible_room_buttons():
+def test_large_campus_uses_floor_names_without_selection_buttons():
     from pathlib import Path
-    from henu_plugin import library_seat_map as lib, qq_buttons as buttons
+    from henu_plugin import library_seat_map as lib
     from henu_plugin.library_availability import region_counts
 
     async def run():
@@ -282,23 +286,24 @@ def test_large_campus_uses_floor_buttons_then_legible_room_buttons():
             ).read_text()
         )
         plugin = SimpleNamespace()
-        choices = await lib.region_actions(
+        await lib.start_selection(
             plugin, context(), {"locations": region_counts(raw["areas"])}
         )
-        campus_choice = next(a for a in choices["actions"] if a["label"] == "金明选座")
-        campus = context("HENU_BUTTON " + campus_choice["id"], query=2)
-        await buttons.handle(plugin, campus)
-        text, floors = wire(campus)
+        campus = context("金明", query=2)
+        assert await lib.handle_library_text(plugin, campus, "金明")
+        text = campus.reply.call_args.args[0].root[0].text
         assert campus.reply.await_count == 1 and "第 1/" not in text
-        assert len(floors["actions"]) <= 8
-        seventh = next(a for a in floors["actions"] if "七" in a["label"])
-        floor = context("HENU_BUTTON " + seventh["id"], query=3)
-        await buttons.handle(plugin, floor)
-        text, rooms = wire(floor)
+        assert "金明七楼" in text and "HENU_ACTIONS" not in text
+        floor = context("金明七楼", query=3)
+        assert await lib.handle_library_text(plugin, floor, "金明七楼")
+        text = floor.reply.call_args.args[0].root[0].text
         assert floor.reply.await_count == 1
-        assert [a["label"] for a in rooms["actions"]] == [
-            "701七层南自习室",
-            "702七层北自习室",
-        ]
+        assert "701 七层南自习室" in text and "702 七层北自习室" in text
+        assert "HENU_ACTIONS" not in text
+        other = context("1", query=4, user="bob")
+        assert not await lib.handle_library_text(plugin, other, "1")
+        assert not await lib.handle_library_text(
+            plugin, context("今天课表"), "今天课表"
+        )
 
     asyncio.run(run())

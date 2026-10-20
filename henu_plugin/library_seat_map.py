@@ -12,7 +12,7 @@ import time
 
 from henu_plugin.library_availability import campus_now, parse_window
 from henu_plugin.qq_cards import Card, card_chain, escape, scope
-from henu_plugin.qq_buttons import actions, envelope, confirmation_actions
+from henu_plugin.qq_buttons import envelope, confirmation_actions
 from henu_plugin.seat_map_image import seat_state, render_seat_map
 
 _QUERY_SLOTS = asyncio.Semaphore(4)
@@ -54,7 +54,7 @@ async def say(ctx, title, lines, wire=None):
         )
 
 
-async def region_actions(plugin, ctx, result):
+async def start_selection(plugin, ctx, result):
     key = await owner(ctx)
     rows = [
         r
@@ -82,20 +82,16 @@ async def region_actions(plugin, ctx, result):
     }
     while len(current) > 128:
         current.pop(next(iter(current)))
-    return await actions(
-        plugin,
-        ctx,
-        [
-            (
-                c.replace("校区", "") + "选座",
-                {"kind": "library_campus", "campus": c, "version": version},
-            )
-            for c in sorted(
-                set(r["campus"] for r in rows),
-                key=lambda c: ({"金明校区": 0, "明伦校区": 1}.get(c, 2), c),
-            )
-        ],
-    )
+    current[key]["choices"] = [
+        (
+            c,
+            {"kind": "library_campus", "campus": c, "version": version},
+        )
+        for c in sorted(
+            set(r["campus"] for r in rows),
+            key=lambda c: ({"金明校区": 0, "明伦校区": 1}.get(c, 2), c),
+        )
+    ]
 
 
 def _fetch_seats(cookies, area, target, start, end):
@@ -255,12 +251,11 @@ async def show_windows(plugin, ctx, state, result):
         escape(state["area"]["campus"] + " · " + state["area"]["location"]),
         "选择学校开放的完整时段，或发送日期和起止时间。",
     ]
-    for index, (day, start, end) in enumerate(result.get("windows") or []):
+    for day, start, end in result.get("windows") or []:
         label = day[5:] + " " + start + "-" + end
-        lines.append(str(index + 1) + ". " + escape(label))
         specs.append(
             (
-                str(index + 1) + " " + day[5:],
+                label,
                 {
                     "kind": "library_window",
                     "window": (day, start, end),
@@ -270,12 +265,10 @@ async def show_windows(plugin, ctx, state, result):
         )
     if not specs:
         lines.append("例如“今天14:00-16:00”；如果学校未开放这个时段，会提示重新选择。")
-    await say(
-        ctx, "选择使用时段", lines, await actions(plugin, ctx, specs) if specs else None
-    )
+    await show_choices(ctx, state, "选择使用时段", lines, specs)
 
 
-async def show_map(plugin, ctx, state, window, offset=0):
+async def show_map(plugin, ctx, state, window):
     key = await owner(ctx)
     area = dict(state["area"])
     generation = secrets.token_urlsafe(12)
@@ -303,6 +296,7 @@ async def show_map(plugin, ctx, state, window, offset=0):
         stage="seats",
         window=window,
         seats=result["seats"],
+        choices=[],
         expires=time.monotonic() + 300,
     )
     image_ok = False
@@ -346,29 +340,12 @@ async def show_map(plugin, ctx, state, window, offset=0):
             url,
         ):
             lines.append("![学校座位位置图](" + url + ")")
-    specs = [
-        (no + "号", {"kind": "library_seat", "seat": no, "version": state["version"]})
-        for no in result["seats"][offset : offset + 8]
-    ]
-    if offset + 8 < len(result["seats"]):
-        specs.append(
-            (
-                "换一批",
-                {
-                    "kind": "library_refresh",
-                    "offset": offset + 8,
-                    "version": state["version"],
-                },
-            )
+    if not image_ok:
+        lines.append(
+            "空闲座位：" + "、".join(escape(no) for no in result["seats"][:24])
         )
-    specs.append(
-        (
-            "刷新座位",
-            {"kind": "library_refresh", "offset": 0, "version": state["version"]},
-        )
-    )
-    lines.append("可直接回复“选座 号码”。选中后先核对预约卡片，再确认提交。")
-    await say(ctx, "选择座位", lines, await actions(plugin, ctx, specs))
+    lines.append("看图回复座位号，如“002”；回复“刷新座位”可重查。选中后再核对确认。")
+    await say(ctx, "选择座位", lines)
 
 
 async def preview(plugin, ctx, state, seat):
@@ -486,11 +463,13 @@ async def dispatch_library(plugin, ctx, payload):
             )
             for floor in floors
         ]
-        await say(
+        state["stage"] = "floor"
+        await show_choices(
             ctx,
+            state,
             "选择楼层",
-            [escape(payload["campus"]), "先选楼层，再选阅览室或自习室。"],
-            await actions(plugin, ctx, specs),
+            [escape(payload["campus"])],
+            specs,
         )
     elif kind == "library_floor":
         rows = [
@@ -522,10 +501,6 @@ async def dispatch_library(plugin, ctx, payload):
         await show_windows(plugin, ctx, state, result)
     elif kind == "library_window":
         await show_map(plugin, ctx, state, tuple(payload["window"]))
-    elif kind == "library_seat":
-        await preview(plugin, ctx, state, payload["seat"])
-    elif kind == "library_refresh":
-        await show_map(plugin, ctx, state, state["window"], payload.get("offset", 0))
 
 
 async def show_regions(plugin, ctx, state, rows, offset=0):
@@ -533,11 +508,12 @@ async def show_regions(plugin, ctx, state, rows, offset=0):
         region_rows=rows,
         version=secrets.token_urlsafe(12),
         expires=time.monotonic() + 300,
+        stage="region",
     )
     selected = rows[offset : offset + 8]
     specs = [
         (
-            str(r["location"]).replace(" ", "")[:10],
+            str(r["location"]),
             {"kind": "library_area", "area": r["area_id"], "version": state["version"]},
         )
         for r in selected
@@ -553,15 +529,29 @@ async def show_regions(plugin, ctx, state, rows, offset=0):
                 },
             )
         )
-    await say(
+    await show_choices(
         ctx,
+        state,
         "选择区域",
-        [escape(state["campus"])] + [escape(r["location"]) for r in selected],
-        await actions(plugin, ctx, specs),
+        [escape(state["campus"])],
+        specs,
     )
 
 
+async def show_choices(ctx, state, title, lines, choices):
+    state["choices"] = choices
+    lines += [str(i) + ". " + escape(label) for i, (label, _) in enumerate(choices, 1)]
+    if choices:
+        lines.append("回复序号或名称。")
+    await say(ctx, title, lines)
+
+
 async def handle_library_text(plugin, ctx, text):
+    from langbot_plugin.api.entities.builtin.platform.message import Plain, At, Source
+
+    chain = getattr(getattr(ctx.event, "message_chain", None), "root", [])
+    if not chain or any(not isinstance(part, (Plain, At, Source)) for part in chain):
+        return False
     if not getattr(plugin, "_library_maps", None):
         return False
     key = await owner(ctx)
@@ -569,19 +559,37 @@ async def handle_library_text(plugin, ctx, text):
     if not state:
         return False
     window = parse_window(text, campus_now()) if state["stage"] == "window" else None
+    text = text.strip()
     seat = (
-        re.fullmatch(r"选座\s+([A-Za-z0-9_-]{1,16})", text.strip())
+        re.fullmatch(r"选座\s*([A-Za-z0-9_-]{1,16})|([0-9]{1,16})", text)
         if state["stage"] == "seats"
         else None
     )
-    if not window and not seat:
+    refresh = text == "刷新座位" and state["stage"] == "seats"
+    choices = state.get("choices", []) if state["stage"] != "preview" else []
+    selected = None
+    if re.fullmatch(r"[0-9]{1,3}", text) and 1 <= int(text) <= len(choices):
+        selected = choices[int(text) - 1][1]
+    else:
+        for label, payload in choices:
+            if text == label or (
+                payload["kind"] == "library_campus"
+                and text == label.removesuffix("校区")
+            ):
+                selected = payload
+                break
+    if not window and not seat and not refresh and not selected:
         return False
     if getattr(ctx, "is_prevent_postorder", False):
         return True
     ctx.prevent_default()
     ctx.prevent_postorder()
-    if window:
+    if selected:
+        await dispatch_library(plugin, ctx, selected)
+    elif window:
         await show_map(plugin, ctx, state, window)
+    elif refresh:
+        await show_map(plugin, ctx, state, state["window"])
     else:
-        await preview(plugin, ctx, state, seat[1])
+        await preview(plugin, ctx, state, seat[1] or seat[2])
     return True

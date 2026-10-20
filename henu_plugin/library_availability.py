@@ -228,7 +228,7 @@ async def query_library(plugin, sender, target, start='', end='', *, session=Non
     return result
 
 
-async def _reply(ctx, status, lines, next_step='', buttons=None):
+async def _reply(ctx, status, lines, next_step=''):
     # Group several short rows as one paragraph to avoid eight-row pagination.
     blocks, block = [], ''
     for line in lines:
@@ -238,10 +238,9 @@ async def _reply(ctx, status, lines, next_step='', buttons=None):
         block += ('\n' if block else '') + line
     if block:
         blocks.append(block)
-    from henu_plugin.qq_buttons import envelope
     pages = Card('图书馆余座', status, tuple(blocks), next_step).pages()
-    for index, page in enumerate(pages):
-        await ctx.reply(card_chain(envelope(page, buttons if index == len(pages)-1 else None)))
+    for page in pages:
+        await ctx.reply(card_chain(page))
 
 
 async def handle_library_availability(plugin, ctx, text):
@@ -308,7 +307,7 @@ async def handle_library_availability(plugin, ctx, text):
             lines.append(escape(name, 100) + ' · ' + label)
     if not rows:
         lines.append('图书馆没有返回区域列表，请稍后再试。')
-    from henu_plugin.library_seat_map import region_actions
-    buttons = await region_actions(plugin, ctx, result)
-    await _reply(ctx, '', lines, '私聊可点击下方校区选座。要查具体时段，回复“今天14:00-16:00”。当天余座不代表整个时段都可预约。' if not start else '以上为所选时段的余座；显示“未知”的区域暂时没查到。', buttons=buttons)
+    from henu_plugin.library_seat_map import start_selection
+    await start_selection(plugin, ctx, result)
+    await _reply(ctx, '', lines, '私聊回复“金明”或“明伦”选座。要查具体时段，回复“今天14:00-16:00”。当天余座不代表整个时段都可预约。' if not start else '以上为所选时段的余座；显示“未知”的区域暂时没查到。')
     return True
