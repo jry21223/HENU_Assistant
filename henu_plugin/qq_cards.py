@@ -720,7 +720,11 @@ def agent_answer_pages(answer: str) -> list[str]:
             current = ""
         while len(line.encode()) > budget:
             end = min(len(line), budget)
-            while len(line[:end].encode()) > budget or line[:end].endswith("\\"):
+            while len(line[:end].encode()) > budget:
+                end -= 1
+            # An even run is a complete sequence of escaped backslashes.
+            trailing = len(line[:end]) - len(line[:end].rstrip("\\"))
+            if trailing % 2:
                 end -= 1
             # A pathological single paragraph may exceed a QQ message. Prefer
             # punctuation/whitespace; split characters only with no boundary.

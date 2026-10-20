@@ -1,6 +1,8 @@
 import asyncio
 import ast
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -173,6 +175,30 @@ def test_agent_template_keeps_safe_formatting_and_pages_its_own_answer(long_answ
     assert "最后一项：你几点去？" in full and "旧工具结果" not in full
     assert "![外部图]" not in full and "<@all>" not in full and "\n[HENU_ACTIONS_V1:" not in full
     assert all(len(page.encode()) <= MAX_BYTES for page in pages)
+
+
+def test_agent_reply_with_a_long_escape_run_finishes_without_blocking():
+    # A subprocess timeout protects the suite if the synchronous renderer loops.
+    code = '''
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+from components.event_listener.qq_cards import QQCardsListener
+from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", response_text=chr(92)*2000, reply=None)
+ctx = SimpleNamespace(event=event, get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value={"_henu_card":{"owner":["bot","person","alice","alice"],"page":"old","prefer_agent":True}}))
+listener = QQCardsListener.__new__(QQCardsListener)
+listener.plugin = SimpleNamespace()
+asyncio.run(listener.present(ctx))
+assert event.reply[0]["text"].startswith("# 河大助手 · ")
+page_event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", message_chain=MessageChain(root=[Plain(text="卡片第 2 页")]))
+paging = SimpleNamespace(event=page_event, get_bot_uuid=AsyncMock(return_value="bot"), prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
+asyncio.run(listener.paging(paging))
+pages = [event.reply[0]["text"], paging.reply.call_args.args[0].root[0].text]
+assert sum(p.count(chr(92)) for p in pages) == 4000
+assert all(len(p.encode()) <= 3600 for p in pages)
+'''
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=10, capture_output=True, text=True)
 
 
 def test_confirmation_buttons_survive_a_later_read_in_the_same_query(monkeypatch):
