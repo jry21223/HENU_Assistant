@@ -94,6 +94,22 @@ async def start_selection(plugin, ctx, result):
     ]
 
 
+def selection_context(plugin, key):
+    """Read-only menu context for natural followups, without booking authority."""
+    state = states(plugin).get(key) if key and key[1] == "person" else None
+    if not state:
+        return ""
+    area = state.get("area", {})
+    window = state.get("window") or ("", "", "")
+    return json.dumps({
+        "source": "recent_library_menu",
+        "campus": area.get("campus") or state.get("campus", ""),
+        "location": area.get("location", ""),
+        "date": window[0], "start": window[1], "end": window[2],
+        "choices": [str(label)[:100] for label, _ in state.get("choices", [])[:12]],
+    }, ensure_ascii=False)
+
+
 def _fetch_seats(cookies, area, target, start, end):
     import requests
     from urllib3.util import Timeout

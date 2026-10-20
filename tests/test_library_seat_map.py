@@ -198,6 +198,40 @@ async def select_area(plugin, result):
     return area
 
 
+def test_agent_can_continue_after_menu_selection_without_reasking_known_conditions(monkeypatch):
+    from henu_plugin import library_seat_map as lib
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    from langbot_plugin.api.entities import events
+
+    async def run():
+        monkeypatch.setattr(lib, "query_seats", AsyncMock(return_value={"success": True, "seats": ["002"], "total_count": 2}))
+        plugin = SimpleNamespace(service=SimpleNamespace())
+        await select_area(plugin, {"date": "2026-11-01", "start": "14:00", "end": "16:00", "locations": [{"area_id": "30", "location": "701 七层南自习室", "campus": "金明校区"}]})
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = plugin
+        await listener.initialize()
+        ctx = context("时间不变，换成明伦第一自习室，先只查。", query=10)
+        ctx.event = events.PromptPreProcessing.model_construct(default_prompt=[], prompt=[], session_name="person_alice")
+        ctx.get_query_vars = AsyncMock(return_value={
+            "user_message_text": "时间不变，换成明伦第一自习室，先只查。",
+            "henu_launcher_type": "person", "henu_launcher_id": "alice", "henu_sender_id": "alice",
+            "_henu_runtime_context": {"request_query_id": 10, "server_time": {"now_iso": "2026-10-20T17:40:00+08:00"}, "account": {"is_bound": True}},
+        })
+        await listener.registered_handlers[events.PromptPreProcessing][0](ctx)
+        text = "\n".join(str(m.content) for m in ctx.event.default_prompt)
+        assert "701 七层南自习室" in text and "2026-11-01" in text
+        assert "14:00" in text and "16:00" in text
+        assert "alice" not in text and "HENU_ACTIONS" not in text
+        # Another sender must not inherit the first sender's menu context.
+        other = context("时间不变", query=10, user="bob")
+        other.event = events.PromptPreProcessing.model_construct(default_prompt=[], prompt=[], session_name="person_bob")
+        other.get_query_vars = AsyncMock(return_value={**ctx.get_query_vars.return_value, "henu_launcher_id": "bob", "henu_sender_id": "bob"})
+        await listener.registered_handlers[events.PromptPreProcessing][0](other)
+        assert "701 七层南自习室" not in str(other.event.default_prompt)
+
+    asyncio.run(run())
+
+
 def test_explicit_time_window_survives_campus_and_area_selection(monkeypatch):
     from henu_plugin import library_seat_map as lib
 

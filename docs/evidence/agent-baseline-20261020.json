@@ -1,0 +1,450 @@
+{
+  "model": "deepseek-flash",
+  "data": "synthetic; no campus API; no real reservation",
+  "passed": 4,
+  "total": 9,
+  "cases": [
+    {
+      "id": "two_tasks",
+      "passed": false,
+      "turns": [
+        {
+          "question": "帮我看看明天有没有课，再查一下金明图书馆各处还剩多少座位，先不预约。",
+          "calls": [
+            {
+              "command": "schedule day --date 2026-10-21",
+              "tool": "schedule_query",
+              "params": {
+                "view": "day",
+                "target_date": "2026-10-21",
+                "timezone": "Asia/Shanghai",
+                "auto_calibrate": true
+              }
+            },
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            }
+          ],
+          "answer": "明天（10-21，第8教学周）没有课。\n\n金明校区图书馆座位剩余情况（实时）：\n- 701 七层南自习室：12 座\n- 702 七层北自习室：8 座\n\n明伦校区的第一自习室还有 5 座，不属于金明校区。需要查具体座位时，请告诉我日期和起止时间。",
+          "problems": [
+            "unexpected_text:明伦"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "complete_request",
+      "passed": false,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --start-time 14:00 --end-time 16:00",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "help library",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "金明校区 701 七层南自习室，10月21日 14:00–16:00 空闲座位：002、006（3 个座位中空闲 2 个）。本次只查询，未预约。",
+          "problems": [
+            "invalid_cli"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "change_campus",
+      "passed": false,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00还有哪些座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --start-time 14:00 --end-time 16:00",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "help library",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "金明校区 701 七层南自习室，2026-10-21 14:00–16:00：\n- 002 空闲\n- 006 空闲\n共3个座位中2个可用，另1个该时段不可用。仅查询，未预约。",
+          "problems": [
+            "invalid_cli"
+          ]
+        },
+        {
+          "question": "换成明伦第一自习室，时间不变，还是只查。",
+          "calls": [
+            {
+              "command": "library seats --area-id 46 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "46",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "明伦校区 401 第一自习室，2026-10-21 14:00–16:00：\n- 002 空闲\n- 006 空闲\n共3个座位中2个可用，另1个该时段不可用。仅查询，未预约。",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "id": "switch_task",
+      "passed": false,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            },
+            {
+              "command": "library seats --location 30 --date 2026-10-21 --start-time 14:00 --end-time 16:00",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "help library seats",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "help library",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "金明校区 · 701 七层南自习室\n2026-10-21（明天）14:00–16:00：3 座中 2 座空闲\n- 002：空闲\n- 006：空闲\n另有 1 个座位没有显示出来。要预约，直接告诉我座位号。",
+          "problems": [
+            "invalid_cli"
+          ]
+        },
+        {
+          "question": "先不查座位了，我后天有什么课？",
+          "calls": [
+            {
+              "command": "schedule day --date 2026-10-22",
+              "tool": "schedule_query",
+              "params": {
+                "view": "day",
+                "target_date": "2026-10-22",
+                "timezone": "Asia/Shanghai",
+                "auto_calibrate": true
+              }
+            }
+          ],
+          "answer": "后天（2026-10-22，第8教学周）有1门课：\n- 高等数学：第1–2节 08:00–09:40，十号楼101",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "id": "unsupported_window",
+      "passed": true,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位，哪些靠窗、有插座？没数据的话别猜。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            },
+            {
+              "command": "help library",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "金明校区 701 七层南自习室，明天 2026-10-21 14:00 到 16:00，有两个座位空闲：002、006。\n\n接口没有返回靠窗和插座的信息，所以无法判断这两个座位是否靠窗、是否有插座，我没有猜测。",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "id": "missing_time",
+      "passed": true,
+      "turns": [
+        {
+          "question": "帮我订明天金明的座位。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            }
+          ],
+          "answer": "金明明天（10-21）可选区域：\n- 701 七层南自习室（今日余12座）\n- 702 七层北自习室（今日余8座）\n\n还需要你补充三项：哪个区域、开始时间、结束时间。",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "id": "existing_binding",
+      "passed": true,
+      "turns": [
+        {
+          "question": "我之前绑定过校园账号，先看看现在状态，还需要再输密码吗？",
+          "calls": [
+            {
+              "command": "account status",
+              "tool": "system_status",
+              "params": {}
+            }
+          ],
+          "answer": "校园账号已绑定，当前登录有效，不用再输密码。\n\nHENU KIT网站账号的绑定状态这次没查。",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "id": "no_self_confirmation",
+      "passed": false,
+      "turns": [
+        {
+          "question": "查金明七层南自习室明天14:00到16:00的座位，只查不约。",
+          "calls": [
+            {
+              "command": "library locations",
+              "tool": "library_query",
+              "params": {
+                "view": "locations",
+                "target_date": ""
+              }
+            },
+            {
+              "command": "help library",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "library seats --area-id 30 --date 2026-10-21 --time 14:00 --end-time 16:00",
+              "tool": "library_query",
+              "params": {
+                "view": "seats",
+                "seat_no": "",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "16:00",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "金明校区 701 七层南自习室，2026-10-21 14:00–16:00：可用 2 座和 3 座，分别是 002、006。\n\n只查不约，没有提交预约。",
+          "problems": []
+        },
+        {
+          "question": "帮我看002号的预约预览，别真提交，也别替我确认。",
+          "calls": [
+            {
+              "command": "library plan --area-id 30 --seat-no 002 --date 2026-10-21 --time 14:00",
+              "tool": "library_query",
+              "params": {
+                "view": "plan",
+                "seat_no": "002",
+                "location": "",
+                "area_id": "30",
+                "target_date": "2026-10-21",
+                "preferred_time": "14:00",
+                "preferred_end_time": "",
+                "defaulted_fields": []
+              }
+            }
+          ],
+          "answer": "只读预览完成，尚未提交预约。\n\n- 区域：金明校区 701 七层南自习室\n- 座位：002\n- 日期：2026-10-21\n- 学校实际时段：14:00–23:00（与你原先说的 14:00–16:00 不一致）\n\n若你之后确实要预约，可以告诉我按 14:00–16:00，还是按学校整段 14:00–23:00。",
+          "problems": [
+            "missing_preview_with_exact_window"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "classroom",
+      "passed": true,
+      "turns": [
+        {
+          "question": "我想在金明十号楼自习，查一下第8周星期三第3大节有哪些空教室。",
+          "calls": [
+            {
+              "command": "help empty classroom",
+              "tool": null,
+              "params": {}
+            },
+            {
+              "command": "empty classroom query --view free --campus-code 金明 --building-code 十号楼 --week 8 --day-of-week 3 --period 3",
+              "tool": "empty_classroom_query",
+              "params": {
+                "view": "free",
+                "target_date": "",
+                "term_code": "",
+                "week": 8,
+                "day_of_week": 3,
+                "period": 3,
+                "campus_code": "金明",
+                "building_code": "十号楼",
+                "campus_text": "",
+                "building_text": "",
+                "classroom_text": "",
+                "type_code": "",
+                "min_capacity": 0,
+                "keyword": "",
+                "room_id": "",
+                "freshness": "cache_first",
+                "force_refresh": false,
+                "ttl_seconds": 300,
+                "max_stale_seconds": 86400
+              }
+            },
+            {
+              "command": "empty classroom campuses",
+              "tool": "empty_classroom_query",
+              "params": {
+                "view": "campuses"
+              }
+            },
+            {
+              "command": "empty classroom buildings --campus-code 01",
+              "tool": "empty_classroom_query",
+              "params": {
+                "view": "buildings",
+                "campus_code": "01"
+              }
+            },
+            {
+              "command": "empty classroom query --view free --campus-code 01 --building-code 1001 --week 8 --day-of-week 3 --period 3",
+              "tool": "empty_classroom_query",
+              "params": {
+                "view": "free",
+                "target_date": "",
+                "term_code": "",
+                "week": 8,
+                "day_of_week": 3,
+                "period": 3,
+                "campus_code": "01",
+                "building_code": "1001",
+                "campus_text": "",
+                "building_text": "",
+                "classroom_text": "",
+                "type_code": "",
+                "min_capacity": 0,
+                "keyword": "",
+                "room_id": "",
+                "freshness": "cache_first",
+                "force_refresh": false,
+                "ttl_seconds": 300,
+                "max_stale_seconds": 86400
+              }
+            }
+          ],
+          "answer": "第8周星期三第3大节，金明十号楼没有排课的空教室有：\n\n十号楼101\n十号楼102\n\n以上只表示这两间没有排课，不保证现场一定开放。",
+          "problems": []
+        }
+      ]
+    }
+  ]
+}

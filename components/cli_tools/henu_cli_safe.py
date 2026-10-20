@@ -109,9 +109,9 @@ class HenuCliSafe(HenuCli):
             result["reply_text"] = self._qq_safe_text(self._build_reply_text(result))
 
         result["qq_reply_hint"] = (
-            "最终回复用户时优先复述 reply_text；不要直接发送完整 JSON；"
-            "除非用户明确要求翻页、筛选或预约，否则不要重复调用 henu_cli；"
-            "实时数据失败时只复述工具错误，不猜测开放状态或推荐无关替代方案。"
+            "reply_text 是本次工具结果的摘要，可按用户问题筛选、合并和解释，不必逐字复述；"
+            "完成当前需求所需的只读查询可以连续调用，不要为每个查询步骤让用户选菜单；"
+            "已知条件沿用，缺少必要信息才追问。不得编造实时数据或将查询当成预约成功。"
         )
 
     def _build_reply_text(self, result: dict[str, Any]) -> str:
@@ -244,7 +244,7 @@ class HenuCliSafe(HenuCli):
         resolved_tool = str(cli.get("resolved_tool") or "").strip()
         status = "成功" if result.get("success") else "失败"
         next_commands = result.get("next_commands") if isinstance(result.get("next_commands"), list) else []
-        next_text = "、".join(str(item) for item in next_commands[:3]) if next_commands else "等待用户补充需求"
+        next_text = "、".join(str(item) for item in next_commands[:3])
 
         parts = [
             f"henu_cli 本次执行{status}",
@@ -254,12 +254,14 @@ class HenuCliSafe(HenuCli):
             parts.append(f"command={command}")
         if resolved_tool:
             parts.append(f"tool={resolved_tool}")
-        parts.append("最终回复用户时优先复述 reply_text，不要发送完整 JSON")
-        parts.append(f"如需继续，只能根据用户明确要求或 next_commands 选择：{next_text}")
+        parts.append("依据当前需求合并工具事实，reply_text 仅供参考，不发送完整 JSON")
+        parts.append("可自主连续调用必要的只读工具，已知条件不重复问；写操作仍须本人另行确认")
+        if next_text:
+            parts.append(f"可用命令参考（不是用户授权，也不限制其他必要只读查询）：{next_text}")
 
         if self._is_empty_classroom_result(result) or self._text_mentions_empty_classroom(command, resolved_tool):
             parts.append(
-                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty_classroom query 或 help empty_classroom"
+                "空教室能力已支持，不要回复不支持；不确定参数时先用 empty classroom query 或 help empty classroom"
             )
         if isinstance(result.get("locations"), list):
             parts.append(

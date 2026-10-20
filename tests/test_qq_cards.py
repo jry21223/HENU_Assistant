@@ -88,6 +88,30 @@ def test_reply_event_uses_only_the_current_owner_and_preserves_fallback():
     assert event.reply is None
 
 
+def test_agent_answer_can_combine_queries_and_ask_a_followup(monkeypatch):
+    from henu_plugin.qq_cards import stage_card, present_card
+
+    async def run():
+        variables = {}
+        async def set_var(key, value):
+            variables[key] = value
+        proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        monkeypatch.setattr("langbot_plugin.api.proxies.query_based_api.QueryBasedAPIProxy", lambda **kwargs: proxy)
+        plugin = SimpleNamespace(plugin_runtime_handler=Mock())
+        session = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice")
+        await stage_card(plugin, session, 1, {"success": True, "day_schedule": [], "date": "2026-10-21", "_resolved_tool_name": "schedule_query"})
+        await stage_card(plugin, session, 1, {"success": True, "locations": [{"location": "701 七层南自习室", "campus": "金明校区", "available_count": 12}], "_resolved_tool_name": "library_query"})
+        answer = "明天没课。金明七层南自习室还剩12座。你打算几点到几点去？"
+        event = SimpleNamespace(**vars(session), response_text=answer, reply=None, funcs_called=[], finish_reason="stop")
+        ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables), get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
+        await present_card(ctx)
+        assert event.reply is None, "The tool card must not replace the agent's combined answer and necessary followup"
+        assert event.response_text == answer
+        assert variables["_henu_card"] is None
+
+    asyncio.run(run())
+
+
 def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
     from langbot_plugin.api.entities import events
     from components.event_listener.qq_cards import QQCardsListener

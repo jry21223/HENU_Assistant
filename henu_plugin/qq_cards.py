@@ -664,7 +664,14 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
         cache(plugin).put(key, pages)
     else:
         pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
-    await proxy.set_query_var("_henu_card", {"owner": list(key), "page": pages[0]})
+    await proxy.set_query_var("_henu_card", {
+        "owner": list(key), "page": pages[0],
+        # Exact menu shortcuts read page directly. A successful read tool used
+        # by the agent must leave room for its synthesis and followup questions.
+        "prefer_agent": result.get("success") is True
+        and not result.get("confirmation_required")
+        and not result.get("external_committed"),
+    })
 
 
 async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
@@ -691,7 +698,9 @@ async def present_card(ctx):
         owner = scope(str(await ctx.get_bot_uuid() or ""), ctx.event)
         if owner is None or card.get("owner") != list(owner):
             return
-        set_card_reply(ctx.event, card["page"])
+        answer = str(getattr(ctx.event, "response_text", "") or "").strip()
+        if not (card.get("prefer_agent") and answer):
+            set_card_reply(ctx.event, card["page"])
         setter = getattr(ctx, "set_query_var", None)
         if callable(setter):
             await setter("_henu_card", None)
