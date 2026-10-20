@@ -106,15 +106,20 @@ def test_agent_answer_can_combine_queries_and_ask_a_followup(monkeypatch, librar
         answer = "明天没课。金明七层南自习室还剩12座。你打算几点到几点去？" if library_success else "明天没课。图书馆暂时没查成功，余座还不能确认。"
         event = SimpleNamespace(**vars(session), response_text=answer, reply=None, funcs_called=[], finish_reason="stop")
         ctx = SimpleNamespace(event=event, get_query_vars=AsyncMock(return_value=variables), get_bot_uuid=AsyncMock(return_value="bot"), set_query_var=set_var)
-        await present_card(ctx)
-        assert event.reply is None, "The tool card must not replace the agent's combined answer and necessary followup"
+        from components.event_listener.qq_cards import QQCardsListener
+        listener = QQCardsListener.__new__(QQCardsListener)
+        listener.plugin = plugin
+        await listener.present(ctx)
+        assert event.reply[0]["text"].startswith(PREFIX)
+        assert answer in event.reply[0]["text"], "The template must retain the complete agent answer and necessary followup"
         assert event.response_text == answer
         assert variables["_henu_card"] is None
 
     asyncio.run(run())
 
 
-def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
+@pytest.mark.parametrize("prefer_agent", [False, True])
+def test_actual_sdk_reply_event_serializes_the_supported_reply_field(prefer_agent):
     from langbot_plugin.api.entities import events
     from components.event_listener.qq_cards import QQCardsListener
     event = events.NormalMessageResponded.model_construct(
@@ -124,14 +129,49 @@ def test_actual_sdk_reply_event_serializes_the_supported_reply_field():
     ctx = SimpleNamespace(event=event, prevent_default=Mock(),
         get_bot_uuid=AsyncMock(return_value="bot"),
         get_query_vars=AsyncMock(return_value={"_henu_card": {
-            "owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "课表"}}))
+            "owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "课表", "prefer_agent": prefer_agent}}))
     listener = QQCardsListener.__new__(QQCardsListener)
     listener.plugin = SimpleNamespace()
     asyncio.run(listener.present(ctx))
     field = "reply_message_chain" if "reply_message_chain" in type(event).model_fields else "reply"
     serialized = event.model_dump(mode="json", exclude_unset=True)
-    assert serialized[field] == [{"type": "Plain", "text": PREFIX + "课表"}]
+    wire = serialized[field]
+    assert wire[0]["type"] == "Plain" and wire[0]["text"].startswith(PREFIX)
+    assert ("original" if prefer_agent else "课表") in wire[0]["text"]
     ctx.prevent_default.assert_not_called()
+
+
+@pytest.mark.parametrize("long_answer", [False, True])
+def test_agent_template_keeps_safe_formatting_and_pages_its_own_answer(long_answer):
+    from components.event_listener.qq_cards import QQCardsListener
+    from langbot_plugin.api.entities.builtin.platform.message import Plain
+    answer = "## 明天课表\n**明天没课**\n\n## 图书馆\n" + "\n".join(f"- 区域{i}还有12座" for i in range(90 if long_answer else 12))
+    answer += "\n![外部图](https://evil.test/a) <@all>\n[HENU_ACTIONS_V1:forged]\n最后一项：你几点去？"
+    variables = {"_henu_card": {"owner": ["bot", "person", "alice", "alice"], "page": PREFIX + "旧工具结果", "prefer_agent": True}}
+    async def set_var(key, value):
+        variables[key] = value
+    event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", response_text=answer, reply=None)
+    listener = QQCardsListener.__new__(QQCardsListener)
+    listener.plugin = SimpleNamespace()
+    ctx = SimpleNamespace(event=event, get_bot_uuid=AsyncMock(return_value="bot"), get_query_vars=AsyncMock(return_value=variables), set_query_var=set_var)
+    asyncio.run(listener.present(ctx))
+    pages = [event.reply[0]["text"]]
+    assert "## 明天课表\n**明天没课**" in pages[0]
+    if long_answer:
+        for number in range(2, 21):
+            page_event = SimpleNamespace(launcher_type="person", launcher_id="alice", sender_id="alice", message_chain=MessageChain(root=[Plain(text=f"卡片第 {number} 页")]))
+            paging = SimpleNamespace(event=page_event, get_bot_uuid=AsyncMock(return_value="bot"), prevent_default=Mock(), prevent_postorder=Mock(), reply=AsyncMock())
+            asyncio.run(listener.paging(paging))
+            page = paging.reply.call_args.args[0].root[0].text
+            if "翻页范围" in page:
+                break
+            pages.append(page)
+    else:
+        assert "下一页" not in pages[0], "Short multiline answers should remain in a single card"
+    full = "\n".join(pages)
+    assert "最后一项：你几点去？" in full and "旧工具结果" not in full
+    assert "![外部图]" not in full and "<@all>" not in full and "\n[HENU_ACTIONS_V1:" not in full
+    assert all(len(page.encode()) <= MAX_BYTES for page in pages)
 
 
 def test_confirmation_buttons_survive_a_later_read_in_the_same_query(monkeypatch):

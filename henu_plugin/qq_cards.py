@@ -699,7 +699,7 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
     return await ctx.reply(card_chain(pages[0]))
 
 
-async def present_card(ctx):
+async def present_card(ctx, *, plugin: Any = None):
     if getattr(ctx.event, "funcs_called", []) or getattr(ctx.event, "finish_reason", "") in {"tool_calls", "function_call"}:
         return
     try:
@@ -711,7 +711,19 @@ async def present_card(ctx):
         if owner is None or card.get("owner") != list(owner):
             return
         answer = str(getattr(ctx.event, "response_text", "") or "").strip()
-        if not (card.get("prefer_agent") and answer):
+        if card.get("prefer_agent") and answer:
+            # The agent owns the answer; the template only owns presentation.
+            # One body block avoids imposing the tool-card eight-row limit.
+            body = escape(answer, len(answer) * 2 + 100)
+            # Preserve only headings and emphasis; links, images, mentions and
+            # action envelopes stay escaped, just like external tool fields.
+            body = re.sub(r"(?m)^(?:\\#){1,3} ", "## ", body)
+            body = re.sub(r"\\\*\\\*([^\n]+?)\\\*\\\*", r"**\1**", body)
+            pages = Card("校园查询", "", (body,)).pages()
+            if plugin is not None:
+                cache(plugin).put(owner, pages)
+            set_card_reply(ctx.event, pages[0])
+        else:
             set_card_reply(ctx.event, card["page"])
         setter = getattr(ctx, "set_query_var", None)
         if callable(setter):

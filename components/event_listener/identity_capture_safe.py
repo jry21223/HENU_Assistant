@@ -95,7 +95,7 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         @self.handler(events.NormalMessageResponded)
         async def on_campus_reply(ctx: context.EventContext):
             # SDK 0.4.13 invokes only the first matching listener component.
-            await present_card(ctx)
+            await present_card(ctx, plugin=self.plugin)
 
         for event_type in (
             events.PersonMessageReceived, events.GroupMessageReceived,
