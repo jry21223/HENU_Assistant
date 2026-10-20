@@ -699,6 +699,44 @@ async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, p
     return await ctx.reply(card_chain(pages[0]))
 
 
+def agent_answer_pages(answer: str) -> list[str]:
+    """Wrap the synthesized answer without the tool-card row pagination."""
+    body = escape(answer, len(answer) * 2 + 100)
+    # Only headings and emphasis are allowed back through the escaping layer.
+    body = re.sub(r"(?m)^(?:\\#){1,3} ", "## ", body)
+    body = re.sub(r"\\\*\\\*([^\n]+?)\\\*\\\*", r"**\1**", body)
+    header = Card("校园查询", "", ()).pages()[0] + "\n"
+    if len((header + body).encode()) <= MAX_BYTES:
+        return [header + body]
+    footer = "\n\n第 20/20 页 · 回复“下一页”“上一页”或“卡片第 N 页”"
+    notice = "\n内容超过20页，请缩小查询范围。"
+    budget = MAX_BYTES - len((header + footer + notice).encode())
+    chunks: list[str] = []
+    current = ""
+    for line in body.splitlines(keepends=True):
+        # Ordinary lines (seat numbers, times, facts) always stay together.
+        if current and len((current + line).encode()) > budget:
+            chunks.append(current)
+            current = ""
+        while len(line.encode()) > budget:
+            end = min(len(line), budget)
+            while len(line[:end].encode()) > budget or line[:end].endswith("\\"):
+                end -= 1
+            # A pathological single paragraph may exceed a QQ message. Prefer
+            # punctuation/whitespace; split characters only with no boundary.
+            boundaries = list(re.finditer(r"[\s，。；！？,;!?]", line[:end]))
+            if boundaries:
+                end = boundaries[-1].end()
+            chunks.append(line[:end])
+            line = line[end:]
+        current += line
+    if current:
+        chunks.append(current)
+    omitted = len(chunks) > MAX_PAGES
+    chunks = chunks[:MAX_PAGES]
+    return [header + chunk + f"\n\n第 {i}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”" + (notice if omitted else "") for i, chunk in enumerate(chunks, 1)]
+
+
 async def present_card(ctx, *, plugin: Any = None):
     if getattr(ctx.event, "funcs_called", []) or getattr(ctx.event, "finish_reason", "") in {"tool_calls", "function_call"}:
         return
@@ -713,13 +751,7 @@ async def present_card(ctx, *, plugin: Any = None):
         answer = str(getattr(ctx.event, "response_text", "") or "").strip()
         if card.get("prefer_agent") and answer:
             # The agent owns the answer; the template only owns presentation.
-            # One body block avoids imposing the tool-card eight-row limit.
-            body = escape(answer, len(answer) * 2 + 100)
-            # Preserve only headings and emphasis; links, images, mentions and
-            # action envelopes stay escaped, just like external tool fields.
-            body = re.sub(r"(?m)^(?:\\#){1,3} ", "## ", body)
-            body = re.sub(r"\\\*\\\*([^\n]+?)\\\*\\\*", r"**\1**", body)
-            pages = Card("校园查询", "", (body,)).pages()
+            pages = agent_answer_pages(answer)
             if plugin is not None:
                 cache(plugin).put(owner, pages)
             set_card_reply(ctx.event, pages[0])
