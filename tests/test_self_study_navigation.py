@@ -41,6 +41,66 @@ def context(text, sender='alice'):
     return ctx
 
 
+def test_generic_building_asks_which_jinming_block_and_keeps_period(monkeypatch):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    from campus_core.resource_registry import registry
+    from campus_core.resource_registry.models import ResourceRecord
+    campus = ResourceRecord(resource_id='henu:campus:02', resource_type='campus',
+                            display_name='金明校区', canonical_name='金明', location={'campusCode': '02'})
+    def search(**kwargs):
+        if kwargs['resource_type'] == 'campus':
+            return [campus]
+        return [ResourceRecord(resource_id=f'henu:building:02:{i}', resource_type='building',
+                    display_name=f'金明综合楼{i}', canonical_name=f'金明综合楼{i}',
+                    location={'campusCode': '02', 'buildingCode': str(i), 'buildingName': f'金明综合楼{i}'})
+                for i in (1, 2)] + [ResourceRecord(resource_id='henu:building:01:0003', resource_type='building',
+                    display_name='明伦综合教学楼', canonical_name='综合教学楼',
+                    location={'campusCode': '01', 'buildingCode': '0003'})]
+    monkeypatch.setattr(registry, 'search_resources', search)
+    import campus_core.resource_registry as resources
+    preload = []
+    monkeypatch.setattr(resources, 'preload_seed_if_needed', lambda: preload.append(True))
+    call = AsyncMock(return_value={'success': True, 'rooms': [], 'total': 0})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(PRODUCTION_CLOCK).encode()))
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        ctx = context('金明综合教学楼第2大节')
+        await handle_navigation(plugin, ctx)
+        assert '金明综合楼1' in str(ctx.reply.call_args)
+        assert '金明综合楼2' in str(ctx.reply.call_args)
+        assert '明伦综合教学楼' not in str(ctx.reply.call_args)
+        assert preload
+        call.assert_not_awaited()
+        for invalid in ('²', '9' * 5000, '99'):
+            invalid_ctx = context(invalid)
+            assert not await handle_navigation(plugin, invalid_ctx)
+            assert not invalid_ctx.is_prevent_postorder
+        await handle_navigation(plugin, context('1'))
+        command = call.call_args.args[0]['command']
+        assert '--campus-code 02' in command and '--building-code 1' in command
+        assert '--period 2' in command
+    asyncio.run(run())
+
+
+def test_automatic_period_is_held_while_choosing_building(monkeypatch):
+    import henu_plugin.self_study as study
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    monkeypatch.setattr(study, '_campus_building_choices', lambda _: [
+        {'name': '金明综合楼1', 'campus_code': '02', 'building_code': '0006'},
+        {'name': '金明综合楼2', 'campus_code': '02', 'building_code': '17'}])
+    call = AsyncMock(return_value={'success': True, 'rooms': [], 'total': 0})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(PRODUCTION_CLOCK).encode()))
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        await handle_navigation(plugin, context('金明综合教学楼'))
+        monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 16, 45, tzinfo=ZoneInfo('Asia/Shanghai')))
+        await handle_navigation(plugin, context('1'))
+        assert '--period 3' in call.call_args.args[0]['command']
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('entry', ['找自习室', '空教室查询'])
 def test_missing_campus_only_asks_campus(monkeypatch, entry):
     from components.cli_tools.henu_cli_safe import HenuCliSafe
@@ -264,7 +324,7 @@ def test_compacted_tool_summary_uses_only_current_conversation_full_card(monkeyp
     plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
     async def run():
         await handle_navigation(plugin, context('找自习室'))
-        ctx = context('金明校区金明综合楼第2大节')
+        ctx = context('金明校区金明综合楼1第2大节')
         owner = ['bot', 'person', 'alice', 'alice'] if owner_matches else ['bot', 'person', 'bob', 'bob']
         ctx.get_query_vars.return_value = {'_henu_card': {
             'owner': owner, 'page': '# 河大助手 · 空教室查询\n金明综合楼1201\n金明综合楼1303'}}

@@ -115,9 +115,12 @@ class Card:
         chunks = chunks[:MAX_PAGES]
         pages = []
         for number, chunk in enumerate(chunks, 1):
-            lines = [PREFIX + escape(self.title, 60), "", "**" + escape(self.status, 70) + "**", "", *chunk]
+            lines = [PREFIX + escape(self.title, 60), ""]
+            if self.status and self.status not in {'已完成', '服务回执', '需要查询地点', '确认校区'}:
+                lines += ["**" + escape(self.status, 70) + "**", ""]
+            lines += chunk
             if self.next_step:
-                lines += ["", "**下一步**", escape(self.next_step, 160)]
+                lines += ["", escape(self.next_step, 160)]
             if len(chunks) > 1:
                 lines += ["", f"第 {number}/{len(chunks)} 页 · 回复“下一页”“上一页”或“卡片第 N 页”"]
             if omitted:
@@ -273,7 +276,7 @@ def _classroom_query_card(result: dict) -> Card:
         if freshness.get('liveChecked') is False:
             lines.append('本次未请求上游重新核验。')
     elif not rooms:
-        lines.append('没有可核验的教室结果，不能据此确认没有空教室。')
+        lines.append('这次没有查到空教室。')
     else:
         block = ''
         for room in rooms:
@@ -288,9 +291,10 @@ def _classroom_query_card(result: dict) -> Card:
             block += ('\n' if block else '') + row
         if block:
             lines.append(block)
-    lines.append('仅反映课程占用，不保证现场无人或楼门开放。')
-    status = '缓存已过期 · 待核验' if stale else ('按课程占用筛选 · ' + str(result.get('total', len(rooms))) + '间' if rooms else '暂无可核验结果')
-    return Card('空教室查询', status, tuple(lines), '可补充教学楼或大节继续查询。')
+    if rooms:
+        lines.append('按教务课表筛选，临时占用以现场为准。')
+    status = '数据已过期' if stale else (str(len(rooms)) + '间空教室' if rooms else '')
+    return Card('空教室', status, tuple(lines))
 
 
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:

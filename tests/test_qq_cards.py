@@ -357,4 +357,11 @@ def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
     assert '第8周' in pages[0] and '星期二' in pages[0] and '第二大节' in pages[0]
     assert '2026,0' not in pages[0] and 'xk_room_schedule' not in pages[0]
     assert '缓存年龄' not in pages[0] and '来源获取时间' not in pages[0]
-    assert '不保证现场' in pages[0]
+    assert '现场为准' in pages[0]
+
+
+def test_routine_cards_skip_workflow_labels():
+    from henu_plugin.qq_cards import Card
+    page = Card('今天课表', '已完成', ('今天有4门课。',), '发送“明天课表”查看明天。').pages()[0]
+    assert '今天有4门课' in page
+    assert '已完成' not in page and '下一步' not in page

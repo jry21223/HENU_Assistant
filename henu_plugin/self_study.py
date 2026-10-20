@@ -69,13 +69,32 @@ async def _reply(ctx, status, lines, next_step=''):
         await ctx.reply(card_chain(page))
 
 
+def _campus_building_choices(campus, word='综合'):
+    """Use actual registry names; never reuse a similarly named other campus."""
+    from campus_core.resource_registry.registry import search_resources
+    from campus_core.resource_registry import preload_seed_if_needed
+    preload_seed_if_needed()
+    campuses = [r for r in search_resources(query=campus, resource_type='campus', limit=20)
+                if campus in r.display_name and r.location.get('campusCode')]
+    codes = {r.location['campusCode'] for r in campuses}
+    if len(codes) != 1:
+        return []
+    code = codes.pop()
+    return [{'name': r.location.get('buildingName') or r.display_name,
+             'campus_code': code, 'building_code': r.location['buildingCode']}
+            for r in search_resources(query=word, resource_type='building', campus_code=code, limit=30)
+            if r.resource_type == 'building' and r.location.get('campusCode') == code
+            and r.location.get('buildingCode')]
+
+
 async def handle_self_study(plugin, ctx, text):
     from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
     from components.cli_tools.henu_cli_safe import HenuCliSafe
 
     initial = text in {'找自习室', '空教室查询'}
-    location = re.fullmatch(r'(?:(金明|明伦|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}楼)?(?:第([1-5])大节)?', text)
-    if not initial and (not location or not any(location.groups())):
+    number_choice = re.fullmatch(r'[1-9][0-9]?', text)
+    location = re.fullmatch(r'(?:(金明|明伦|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}楼(?:[1-9]\d?)?)?(?:第([1-5])大节)?', text)
+    if not initial and not number_choice and (not location or not any(location.groups())):
         return False
     if getattr(ctx, 'is_prevent_postorder', False):
         return True
@@ -94,16 +113,31 @@ async def handle_self_study(plugin, ctx, text):
     previous = pending.get(key)
     if not initial and not previous:
         return False
+    if not initial and number_choice and not 1 <= int(text) <= len(previous.get('building_choices', [])):
+        return False
     ctx.prevent_default()
     ctx.prevent_postorder()
     state = {} if initial else dict(previous)
     if initial and previous:
         state['campus'] = previous.get('campus', '')
-    if not initial:
+    if not initial and number_choice:
+        choices = state.get('building_choices', [])
+        selected = choices[int(text) - 1]
+        state.update(building=selected['name'], campus_code=selected['campus_code'],
+                     building_code=selected['building_code'])
+        state.pop('building_choices', None)
+    elif not initial:
         for field, value in zip(('campus', 'building', 'period'), location.groups()):
             if value:
                 if field == 'campus' and state.get('campus') != value:
                     state.pop('building', None)
+                    state.pop('building_choices', None)
+                    state.pop('campus_code', None)
+                    state.pop('building_code', None)
+                if field == 'building':
+                    state.pop('campus_code', None)
+                    state.pop('building_code', None)
+                    state.pop('building_choices', None)
                 state[field] = value
     state['expires'] = time.monotonic() + 300
     if len(pending) >= 256 and key not in pending:
@@ -136,20 +170,33 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
         return True
     campus, building = state.get('campus', ''), state.get('building', '')
+    if building in {'综合楼', '综合教学楼', '金明综合楼', '明伦综合楼'}:
+        choices = _campus_building_choices(campus)
+        if len(choices) != 1:
+            state['building_choices'] = choices
+            state['period'] = period
+            lines = [f'{campus}有这几栋综合楼，你想查哪一栋？'] if choices else [f'没找到{campus}的“{building}”。请换一个具体楼名。']
+            lines.extend(f'{i}. {escape(row["name"])}' for i, row in enumerate(choices, 1))
+            await _reply(ctx, '', lines, '回复序号或楼名即可。' if choices else '')
+            return True
+        selected = choices[0]
+        state.update(building=selected['name'], campus_code=selected['campus_code'], building_code=selected['building_code'])
+        building = state['building']
     if not building and not _may_have_current_cache(campus, period, now):
         await _reply(ctx, '需要查询地点', [
-            '暂时没有可直接使用的该时段教室数据，不能据此判断没有空教室。',
-            '查哪栋教学楼？'], '请回复教学楼名称，我会继续查询该楼栋。')
+            '查哪栋教学楼？'], '比如“十号楼”或“综合楼”。')
         return True
     command = f"empty classroom query --view free --period {period}"
     if campus:
         command += f' --campus-text {campus}'
-    if building:
+    if state.get('campus_code') and state.get('building_code'):
+        command += f" --campus-code {state['campus_code']} --building-code {state['building_code']}"
+    elif building:
         command += f' --building-text {building}'
     else:
         command += ' --freshness cache_only'
     await _reply(ctx, '正在查询', [
-        '正在读取所选楼栋的该大节课程占用。' if building else '正在读取该大节已有缓存，不启动全校逐栋刷新。'])
+        f'正在查{building}第{period}大节的空教室。' if building else f'正在查第{period}大节的空教室。'])
     staged_page = None
     try:
         result = await tool.call({'command': command}, session, ctx.query_id)
