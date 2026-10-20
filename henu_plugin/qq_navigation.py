@@ -9,11 +9,18 @@ TASKS = (
     ('账号与帮助', (('绑定账号', '校园账号与网站绑定'), ('绑定Kit', '关联 HENU KIT 网站'), ('使用帮助', '查看常用说法与流程'), ('课表推送', '查看课表提醒支持情况'))),
 )
 
+MENU_LABELS = {'我的校园': '🎓我的校园', '找自习室': '📍找自习室', '账号与帮助': '⚙️账号帮助'}
+TASK_ICONS = {
+    '我的状态': '👤', '今天课表': '📅', '明天课表': '🗓️', '下一节课': '⏰',
+    '同步课表': '🔄', '找自习室': '📍', '空教室查询': '🏫', '图书馆座位': '📚',
+    '绑定账号': '🔐', '绑定Kit': '🔗', '使用帮助': '❓', '课表推送': '🔔',
+}
+
 
 def navigation_config() -> dict:
     menu = {'items': [
-        {'name': name, 'type': 'menu', 'sub_menu_items': [
-            {'name': label, 'type': 'send_message', 'send_message': label}
+        {'name': MENU_LABELS[name], 'type': 'menu', 'sub_menu_items': [
+            {'name': TASK_ICONS[label] + label, 'type': 'send_message', 'send_message': label}
             for label, _ in tasks
         ]} for name, tasks in TASKS
     ]}
@@ -24,7 +31,8 @@ def navigation_config() -> dict:
             tasks = [task for task in tasks if task[0] in {'找自习室', '空教室查询', '图书馆座位', '使用帮助', '绑定账号'}]
         panels[scope] = {'scope': scope, 'target_type': 'all', 'panel': {
             'remark': 'henu-navigation-v1-' + scope,
-            'items': [{'type': 'command', 'name': label, 'desc': desc, 'only_admin': False} for label, desc in tasks],
+            # Command names become input text; put panel icons in descriptions.
+            'items': [{'type': 'command', 'name': label, 'desc': TASK_ICONS[label] + desc, 'only_admin': False} for label, desc in tasks],
         }}
     return {'menu': menu, 'panels': panels}
 

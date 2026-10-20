@@ -4,7 +4,7 @@ from henu_plugin.qq_navigation import navigation_config
 def test_menu_and_panels_offer_user_tasks_without_executable_writes():
     config = navigation_config()
     items = config['menu']['items']
-    assert [item['name'] for item in items] == ['我的校园', '找自习室', '账号与帮助']
+    assert [item['name'] for item in items] == ['🎓我的校园', '📍找自习室', '⚙️账号帮助']
     assert any(sub.get('send_message') == '今天课表' for sub in items[0]['sub_menu_items'])
     assert any(sub.get('send_message') == '绑定账号' for sub in items[2]['sub_menu_items'])
     for scope in ('c2c', 'group'):
@@ -13,6 +13,22 @@ def test_menu_and_panels_offer_user_tasks_without_executable_writes():
         assert len(panel['panel']['items']) <= 20
         assert all(len(i['name'].encode('utf-16-le')) // 2 <= 14 for i in panel['panel']['items'])
     assert '确认' not in str(config)
+
+
+def test_shortcut_icons_keep_commands_and_provider_name_limits():
+    config = navigation_config()
+    for item in config['menu']['items']:
+        assert len(item['name'].encode('utf-16-le')) // 2 <= 10
+        for sub in item['sub_menu_items']:
+            assert len(sub['name'].encode('utf-16-le')) // 2 <= 14
+            assert sub['name'].endswith(sub['send_message'])
+            assert sub['name'] != sub['send_message']
+    for panel in config['panels'].values():
+        for command in panel['panel']['items']:
+            assert command['name'] in {'我的状态', '今天课表', '明天课表', '下一节课', '同步课表',
+                                       '找自习室', '空教室查询', '图书馆座位', '绑定账号',
+                                       '绑定Kit', '使用帮助', '课表推送'}
+            assert len(command['desc'].encode('utf-16-le')) // 2 <= 30
 
 
 def test_primary_sdk_listener_handles_help_guide_before_model(tmp_path, monkeypatch):
