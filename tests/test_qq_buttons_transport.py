@@ -52,9 +52,7 @@ def test_button_card_on_wire_binds_actual_reply_and_strips_control_metadata(
         assert button["action"]["type"] == 1
         assert "group_id" not in button  # Live QQ rejects opaque group IDs (40011021).
         assert button["action"]["data"] == "henu:" + "a" * 24
-        assert (
-            button["render_data"]["style"] == 4
-        )  # Primary blue background / white text.
+        assert button["render_data"]["style"] == 1  # Blue accent supported by Mac QQ.
         cancel = requests[0]["keyboard"]["content"]["rows"][0]["buttons"][1]
         assert cancel["render_data"]["style"] == 0  # Secondary grey outline.
         assert "modal" not in cancel["action"]

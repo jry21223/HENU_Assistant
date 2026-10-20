@@ -124,7 +124,8 @@ async def send_card(
                     "render_data": {
                         "label": row["label"],
                         "visited_label": "已选择",
-                        "style": 4 if row["label"].startswith("确认") else 0,
+                        # Mac QQ renders style 4 as grey; use its supported blue accent.
+                        "style": 1 if row["label"].startswith("确认") else 0,
                     },
                     "action": action,
                 }
