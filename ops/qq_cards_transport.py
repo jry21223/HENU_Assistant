@@ -109,7 +109,10 @@ async def send_card(
         for row in wire["actions"]:
             action = {
                 "type": 1,
-                "permission": {"type": 0, "specify_user_ids": [target_id]},
+                # This keyboard is private and owner-checked above. Do not use
+                # client-side OpenID matching as authorization: the actual
+                # callback actor is owner-checked below and again by the plugin.
+                "permission": {"type": 2},
                 "data": "henu:" + row["id"],
             }
             if row["label"].startswith("确认"):
@@ -235,28 +238,40 @@ async def handle_click(adapter, event, event_id):
     if not item:
         # Old cards can outlive the five-minute cache or a host restart.
         # Unknown/expired is not evidence that this QQ account lacks permission.
+        print("[henu.qq-button] rejected=unknown_card", flush=True)
         await bot.ack_interaction(event.get("id") or "", code=1)
         return True
     actor = str(event.get("user_openid") or "")
-    authorized = (
-        event.get("chat_type") == 2
-        and actor == item["owner"] == item["target"]
+    checks = (
+        ("scene", event.get("chat_type") == 2),
+        ("owner", actor == item["owner"] == item["target"]),
         # Official C2C callbacks may omit message_id. The unpredictable handle
         # is minted per card and stored only after its send receipt. If QQ
         # supplies message/button IDs, they must still match that exact card.
-        and (
-            not resolved.get("message_id")
-            or str(resolved["message_id"]) == item["message_id"]
-        )
-        and (not resolved.get("button_id") or str(resolved["button_id"]) == handle)
+        (
+            "message",
+            (
+                not resolved.get("message_id")
+                or str(resolved["message_id"]) == item["message_id"]
+            ),
+        ),
+        (
+            "button",
+            not resolved.get("button_id") or str(resolved["button_id"]) == handle,
+        ),
     )
-    if not authorized:
+    rejected = next((name for name, valid in checks if not valid), None)
+    if rejected:
+        # Names are constants; never log payloads, identifiers or handles.
+        print("[henu.qq-button] rejected=" + rejected, flush=True)
         await bot.ack_interaction(event.get("id") or "", code=4)
         return True
     if item["expires"] <= time.monotonic() or not event_id:
+        print("[henu.qq-button] rejected=expired_or_unanchored", flush=True)
         await bot.ack_interaction(event.get("id") or "", code=1)
         return True
     if item.get("used"):
+        print("[henu.qq-button] rejected=used", flush=True)
         await bot.ack_interaction(event.get("id") or "", code=3)
         return True
     for key, sibling in list(state.items()):
@@ -264,6 +279,7 @@ async def handle_click(adapter, event, event_id):
             # Keep the bounded, expiring owner binding to classify replays.
             # Mark every sibling before awaiting so concurrent taps cannot run twice.
             sibling["used"] = True
+    print("[henu.qq-button] accepted", flush=True)
     await bot.ack_interaction(event.get("id") or "", code=0)
     from langbot_plugin.api.entities.builtin.platform import events, entities, message
     from langbot_plugin.api.entities.builtin.provider.session import LauncherTypes

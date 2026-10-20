@@ -50,6 +50,7 @@ def test_button_card_on_wire_binds_actual_reply_and_strips_control_metadata(
         assert requests[0]["markdown"]["content"] == page
         button = requests[0]["keyboard"]["content"]["rows"][0]["buttons"][0]
         assert button["action"]["type"] == 1
+        assert button["action"]["permission"] == {"type": 2}
         assert "group_id" not in button  # Live QQ rejects opaque group IDs (40011021).
         assert button["action"]["data"] == "henu:" + "a" * 24
         assert button["render_data"]["style"] == 1  # Blue accent supported by Mac QQ.
@@ -145,7 +146,7 @@ def test_rejection_diagnostics_never_log_provider_echoed_identity(monkeypatch, c
     assert "40011021" in logged
 
 
-def test_callback_rejects_other_user_and_old_message_without_dispatch():
+def test_callback_rejects_other_user_and_old_message_without_dispatch(capsys):
     host = load("qq_buttons_host", Path("ops/qq_cards_transport.py"))
 
     async def run():
@@ -183,6 +184,35 @@ def test_callback_rejects_other_user_and_old_message_without_dispatch():
             assert await host.handle_click(adapter, data, "event")
         adapter.ap.query_pool.add_query.assert_not_awaited()
         assert "a" * 24 in bot._henu_buttons
+
+    asyncio.run(run())
+    logged = capsys.readouterr().out
+    assert "rejected=owner" in logged and "rejected=message" in logged
+    assert not any(value in logged for value in ["alice", "bob", "card-123", "a" * 24])
+
+
+def test_private_keyboard_cannot_be_sent_to_another_user_or_group(monkeypatch):
+    import pytest
+    from henu_plugin.qq_buttons import envelope
+
+    transport = load("qq_private_only", Path("ops/qq_cards_transport.py"))
+    post = AsyncMock()
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    async def run():
+        page = envelope(
+            transport.PREFIX + "操作确认",
+            {
+                "owner": "alice",
+                "actions": [{"id": "a" * 24, "label": "取消"}],
+            },
+        )
+        for scene, target in [("group", "alice"), ("c2c", "bob")]:
+            with pytest.raises(ValueError, match="private owner"):
+                await transport.send_card(
+                    SimpleNamespace(), scene, target, page, msg_id="inbound"
+                )
+        post.assert_not_awaited()
 
     asyncio.run(run())
 
