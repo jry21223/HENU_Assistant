@@ -7,22 +7,18 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
 
 from .models import (
-    ALL_RESOURCE_TYPES,
     ResourceRecord,
     build_resource_id,
     matches_campus,
 )
 from .storage import (
-    add_alias_entry,
-    add_source_mapping,
+    ResourceBundle,
     get_resource_record,
     load_resources,
     lookup_by_alias,
-    safe_save_resources,
-    upsert_resource_record,
+    upsert_resource_bundles,
 )
 
 
@@ -32,30 +28,26 @@ def _now_iso() -> str:
 
 def upsert_resource(record: ResourceRecord) -> ResourceRecord:
     """插入或更新一条资源记录。同时更新别名索引。"""
-    d = record.to_dict()
-    if not d.get("updatedAt"):
-        d["updatedAt"] = _now_iso()
-
-    # 保存到 resources.json
-    upsert_resource_record(d)
-
-    # 更新别名索引
-    all_aliases = list(record.aliases)
-    if record.canonical_name:
-        all_aliases.append(record.canonical_name)
-    if record.display_name:
-        all_aliases.append(record.display_name)
-
-    for alias in set(all_aliases):
-        if alias.strip():
-            add_alias_entry(alias.strip(), record.resource_id)
-
-    # 更新 source mapping
-    source = record.source
-    if source.get("system") and source.get("source_id"):
-        add_source_mapping(source["system"], source["source_id"], record.resource_id)
-
+    upsert_resources([record])
     return record
+
+
+def upsert_resources(records: list[ResourceRecord]) -> list[ResourceRecord]:
+    """批量更新资源和派生索引，整批只提交一次快照。"""
+    bundles = []
+    for record in records:
+        data = record.to_dict()
+        if not data.get('updatedAt'):
+            data['updatedAt'] = _now_iso()
+        aliases = set(record.aliases)
+        aliases.update([record.canonical_name, record.display_name])
+        bundles.append(ResourceBundle(
+            record=data, aliases={a.strip() for a in aliases if a.strip()},
+            source_system=str(record.source.get('system') or ''),
+            source_id=str(record.source.get('source_id') or ''),
+        ))
+    upsert_resource_bundles(bundles)
+    return records
 
 
 def get_resource(resource_id: str) -> ResourceRecord | None:

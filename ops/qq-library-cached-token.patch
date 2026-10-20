@@ -1,0 +1,11 @@
+--- a/henu_mcp/tools/server_impl.py
++++ b/henu_mcp/tools/server_impl.py
+@@ -1557,7 +1557,7 @@
+     data = load_json(LIBRARY_COOKIE_FILE)
+     if not _artifact_matches_bound_student(data):
+         return {}
+-    return {key: value for key, value in data.items() if not str(key).startswith("_")}
++    return {key: value for key, value in data.items() if key == "_v4_token" or not str(key).startswith("_")}
+ 
+ 
+ def _save_library_cookies(cookies: dict[str, Any]) -> None:

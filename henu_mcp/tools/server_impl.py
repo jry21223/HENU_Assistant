@@ -3412,14 +3412,14 @@ def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "
     try:
         from campus_core.resource_registry import (
             build_resource_id,
-            upsert_resource,
+            upsert_resources,
             ResourceRecord,
         )
         from datetime import datetime
 
         library_id = "henu_library"
         now = datetime.now().isoformat()
-
+        records = []
         for seat in seats:
             seat_no = str(seat.get("seatNo", seat.get("seat_no", seat.get("name", ""))))
             area_id = str(seat.get("areaId", seat.get("area_id", fallback_area_id)))
@@ -3454,7 +3454,8 @@ def _enrich_library_seats(seats: list[dict[str, Any]], fallback_area_id: str = "
                 },
                 updated_at=now,
             )
-            upsert_resource(record)
+            records.append(record)
+        upsert_resources(records)
     except Exception:
         pass
 
