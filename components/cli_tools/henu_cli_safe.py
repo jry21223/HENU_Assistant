@@ -77,6 +77,26 @@ class HenuCliSafe(HenuCli):
                 }
                 for item in locations
             ]
+            campuses, seen = {}, set()
+            for row in result["location_options"]:
+                campus = row.get("campus") or "校区待确认"
+                identity = (campus, row["area_id"] or row["location"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                totals = campuses.setdefault(campus, {"regions": 0, "available_seats": 0, "unknown_regions": 0})
+                totals["regions"] += 1
+                count = row.get("available_count")
+                if type(count) is int and count >= 0:
+                    if totals["available_seats"] is not None:
+                        totals["available_seats"] += count
+                else:
+                    totals["unknown_regions"] += 1
+                    totals["available_seats"] = None
+            summary = result.get("result_summary")
+            if not isinstance(summary, dict):
+                summary = {}
+            result["result_summary"] = {**summary, "library_campuses": campuses}
             result["total"] = int(result.get("total") or len(locations))
             result["returned_count"] = len(locations)
             result["truncated"] = False
@@ -267,6 +287,7 @@ class HenuCliSafe(HenuCli):
             parts.append(
                 "locations 中的 location/area_id 是图书馆后续查询的唯一有效参数来源；不要猜测或编造区域名"
             )
+            parts.append("校区区域数和合计仅引用 result_summary.library_campuses；有未知区域余座时不报完整合计")
         if isinstance(result.get("seats"), list):
             parts.append(
                 "seats 中的座位号才可用于预约；预约前必须让用户确认日期、时间和区域"
