@@ -55,10 +55,13 @@ class ScheduleReminders:
         self.plugin = plugin
         self.lock = asyncio.Lock()
         self.task = None
+        self.refresh_task = None
 
     def start(self):
         if self.task is None or self.task.done():
             self.task = asyncio.create_task(self.run())
+        if self.refresh_task is None or self.refresh_task.done():
+            self.refresh_task = asyncio.create_task(self.run_refresh())
 
     async def read(self):
         try:
@@ -81,26 +84,39 @@ class ScheduleReminders:
         await self.plugin.set_plugin_storage(KEY, json.dumps(data, ensure_ascii=False).encode())
 
     async def query(self, sender):
-        from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
+        from henu_plugin.reminder_schedule import read_saved_schedule
         from henu_plugin.storage_adapter import PluginStorageAdapter
-        from henu_plugin.service import set_current_user_paths
-        adapter = PluginStorageAdapter(self.plugin, sender)
+        adapter = PluginStorageAdapter(self.plugin, sender, read_only=True)
         try:
             paths = await adapter.load_all()
             saved_clock = json.loads((paths.shared_data_dir / "period_time_config.json").read_text())
             if not valid_period_clock(saved_clock):
                 return {"success": False, "error_code": "period_clock_unavailable"}
-            set_current_user_paths(paths)
-            session = Session(launcher_type=LauncherTypes.PERSON, launcher_id=sender, sender_id=sender)
-            result = await asyncio.to_thread(self.plugin.service.run_tool, 'schedule_query',
-                                          {'view': 'current', 'auto_calibrate': False}, session, 0)
+            result = read_saved_schedule(paths, datetime.now(ZONE))
             actual = result.get('period_times') or {}
             if not actual or any(saved_clock.get(key) != value for key, value in actual.items()):
                 return {'success': False, 'error_code': 'period_clock_mismatch'}
             return result
         finally:
-            set_current_user_paths(None)
             await adapter.abort()
+
+    async def refresh_tick(self, now=None):
+        from henu_plugin.reminder_schedule import refresh_if_due
+        from henu_plugin.storage_adapter import PluginStorageAdapter
+        from henu_plugin.service import set_current_user_paths
+        for sender, item in (await self.read()).items():
+            if not item.get('enabled'):
+                continue
+            adapter = PluginStorageAdapter(self.plugin, sender)
+            try:
+                paths = await adapter.load_all()
+                set_current_user_paths(paths)
+                await refresh_if_due(self.plugin, sender, adapter, paths, now or datetime.now(ZONE))
+            except Exception:
+                logger.warning('Class reminder refresh skipped; saved schedule retained')
+            finally:
+                set_current_user_paths(None)
+                await adapter.abort()
 
     async def handle(self, ctx, text):
         if text not in {'课表推送', '课前提醒', '开启课前提醒', '关闭课前提醒', '测试课前提醒'}:
@@ -140,7 +156,7 @@ class ScheduleReminders:
                     await self.write(data)
                 state = '已开启 · 课前15分钟' if item.get('enabled') else '未开启'
                 message = ('测试已安排，约45–75秒后发送一条明确标注的测试提醒。' if text == '测试课前提醒' else
-                           '每次上课前15分钟提醒，连堂课只提醒一次。\n发“关闭课前提醒”可关闭，发“测试课前提醒”试一下能否收到。')
+                           '每次上课前15分钟提醒，连堂课只提醒一次。\n课表每天最多自动更新一次；更新失败后暂停自动更新，请手动同步课表恢复。\n发“关闭课前提醒”可关闭，发“测试课前提醒”试一下能否收到。')
                 last = item.get('last_delivery')
                 if last:
                     message += '\n最近发送：' + {'sent': '接口已受理', 'unknown': '结果未确认，不自动重发'}.get(last, last)
@@ -203,3 +219,11 @@ class ScheduleReminders:
             except Exception:
                 logger.warning('Class reminder registry unavailable; scan skipped')
             await asyncio.sleep(30)
+
+    async def run_refresh(self):
+        while True:
+            try:
+                await self.refresh_tick()
+            except Exception:
+                logger.warning('Class reminder refresh registry unavailable; sync skipped')
+            await asyncio.sleep(60 * 60)
