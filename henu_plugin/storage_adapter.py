@@ -91,7 +91,7 @@ class PluginStorageAdapter:
     _user_locks: dict[tuple[int, str], asyncio.Lock] = {}
     _shared_locks: dict[int, asyncio.Lock] = {}
 
-    def __init__(self, plugin: BasePlugin, storage_key: str):
+    def __init__(self, plugin: BasePlugin, storage_key: str, *, read_only: bool = False):
         normalized = re.sub(
             r"[^0-9A-Za-z._-]+", "_", str(storage_key or "")
         ).strip("._-")
@@ -99,6 +99,7 @@ class PluginStorageAdapter:
             raise ValueError("有效的用户 storage_key 不能为空")
         self._plugin = plugin
         self._storage_key = normalized
+        self._read_only = read_only
         self._paths: UserStoragePaths | None = None
         self._files: list[_StorageFile] = []
         self._original_bytes: dict[str, bytes] = {}
@@ -194,9 +195,10 @@ class PluginStorageAdapter:
         if self._paths is not None:
             raise RuntimeError("同一个 StorageAdapter 不能重复 load_all")
 
-        lock = self._lock_for_user(self._storage_key)
-        await lock.acquire()
-        self._transaction_lock = lock
+        if not self._read_only:
+            lock = self._lock_for_user(self._storage_key)
+            await lock.acquire()
+            self._transaction_lock = lock
         try:
             self._paths = self._build_paths()
             self._files = self._file_specs(self._paths)
@@ -218,6 +220,8 @@ class PluginStorageAdapter:
             raise
 
     async def save_all(self) -> None:
+        if self._read_only:
+            raise StorageAdapterError("只读 Storage 不允许保存")
         if self._paths is None:
             return
         try:
@@ -308,6 +312,8 @@ class PluginStorageAdapter:
         )
 
     async def _write_storage(self, storage_key: str, payload: bytes) -> None:
+        if self._read_only:
+            raise StorageAdapterError("只读 Storage 不允许写入")
         try:
             await self._plugin.set_plugin_storage(storage_key, payload)
         except Exception as exc:

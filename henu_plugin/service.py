@@ -615,6 +615,9 @@ class HenuPluginService:
                     latest = max(schedule_files, key=lambda p: p.stat().st_mtime)
                     try:
                         schedule_data = json.loads(latest.read_text(encoding="utf-8"))
+                        schedule_data["_subject_student_id"] = str(
+                            server_impl._effective_profile().get("student_id") or ""
+                        ).strip()
                         paths.schedule_file.write_text(
                             json.dumps(schedule_data, ensure_ascii=False, indent=2),
                             encoding="utf-8"
