@@ -390,6 +390,29 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
 
 
+def test_all_day_card_keeps_location_and_separates_expired_missing_and_verified_slots():
+    result = {'success': True, 'data': {
+        'date': '2026-10-24', 'week': 8, 'dayOfWeek': 6,
+        'campusName': '金明校区', 'buildingName': '金明综合楼3',
+        'periods': [
+            {'period': 1, 'periodName': '第一大节', 'total': 1,
+             'freshness': {'liveChecked': True, 'stale': False},
+             'rooms': [{'roomName': '金明综合楼3-101'}]},
+            {'period': 2, 'periodName': '第二大节', 'total': 1,
+             'freshness': {'liveChecked': False, 'stale': True, 'fetchedAt': '2026-10-20T08:00:00+08:00'},
+             'rooms': [{'roomName': 'expired-room-should-not-be-listed'}]},
+            {'period': 3, 'periodName': '第三大节', 'total': 0,
+             'freshness': {'liveChecked': False, 'cacheHit': False}, 'rooms': []},
+        ],
+    }}
+    page = '\n'.join(result_card(result, 'empty_classroom_query').pages())
+    for expected in ('2026-10-24', '金明校区', '金明综合楼3', '第一大节', '第二大节', '第三大节', '金明综合楼3-101'):
+        assert expected in page
+    assert 'expired-room-should-not-be-listed' not in page
+    assert '待核验' in page and '暂无缓存' in page
+    assert '空闲 0 间' not in page
+
+
 def test_food_detail_keeps_existing_public_description_and_dishes():
     detail = {"post": {"shop": {"name": "面馆"}, "campus": "jinming", "tier": "hang", "review_text": "面筋道汤清爽", "price_reference": "12元", "hours_reference": "10:00–21:00", "dishes": [{"name": "刀削面", "price": "12元", "reason": "汤清爽"}], "author": "hidden-author", "images": ["https://private-image.test"]}}
     page = "\n".join(result_card({"success": True, "reply_text": "详情：" + json.dumps(detail, ensure_ascii=False)}, "food").pages())

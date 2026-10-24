@@ -4263,7 +4263,7 @@ def yunfz_collection_query(
 # ── 空教室查询 ──────────────────────────────────────────────
 
 
-def _get_empty_classroom_client() -> Any:
+def _get_empty_classroom_client(*, saved_session_only: bool = False) -> Any:
     """获取已认证的 EmptyClassroomClient（复用教务登录态）。"""
     if EmptyClassroomClient is None:
         return None
@@ -4272,7 +4272,18 @@ def _get_empty_classroom_client() -> Any:
     if not sid:
         return None
 
-    xk_client = HenuXkClient(sid, pwd, saved_cookies=_load_xk_cookies() or None)
+    cookies = _load_xk_cookies()
+    if saved_session_only:
+        if not cookies:
+            return None
+        xk_client = HenuXkClient(sid, "", saved_cookies=cookies)
+        try:
+            if not xk_client.fetch_user_context().get("authenticated"):
+                return None
+        except requests.RequestException:
+            return None
+        return EmptyClassroomClient(xk_client)
+    xk_client = HenuXkClient(sid, pwd, saved_cookies=cookies or None)
     if not xk_client.login():
         return None
 
@@ -4388,6 +4399,8 @@ def empty_classroom_query(
     force_refresh: bool = False,
     ttl_seconds: int = 300,
     max_stale_seconds: int = 86400,
+    target_date: str = "",
+    saved_session_only: bool = False,
 ) -> dict[str, Any]:
     """
     查询空教室 / 教室信息 / 校区楼房列表
@@ -4457,8 +4470,11 @@ def empty_classroom_query(
             "code": "metadata_cache_unavailable",
             "msg": "该元数据查询不支持只读缓存，请明确选择实时查询",
         }
-    client = None if cache_only else _get_empty_classroom_client()
+    client = None if cache_only else _get_empty_classroom_client(saved_session_only=True) if saved_session_only else _get_empty_classroom_client()
     if client is None and not cache_only:
+        if saved_session_only:
+            return {"success": False, "error_code": "session_unavailable",
+                    "msg": "教务登录态已失效或暂时无法核验；本次未重新登录，请在私聊确认校园账号状态后重试。"}
         return {
             "success": False,
             "msg": "无法登录教务系统，请先调用 setup_account 配置学号和密码",
@@ -4497,6 +4513,26 @@ def empty_classroom_query(
     if view in ("terms", "campuses", "buildings", "classrooms", "types"):
         return _empty_classroom_meta_query(client, view, campus_code, building_code, type_code, keyword)
 
+    if view in {"free", "day_matrix", "occupancy"} and (not term_code or week <= 0 or day_of_week <= 0):
+        from henu_mcp.core.teaching_calendar import teaching_week, matches_term_name
+        try:
+            target_day, _ = _resolve_schedule_target_date(target_date)
+        except ValueError as exc:
+            return {"success": False, "msg": str(exc)}
+        calendar = teaching_week(target_day)
+        if not calendar.get("available"):
+            return {"success": False, "msg": calendar["reason"]}
+        if not term_code:
+            if cache_only:
+                return {"success": False, "error_code": "calendar_term_unavailable", "msg": "只读缓存缺少可核实的学期代码；未访问学校系统，请稍后恢复教务登录态后再查。"}
+            terms = client.fetch_terms()
+            matches = [t for t in terms if matches_term_name(t.term_name, calendar)]
+            if len(matches) != 1:
+                return {"success": False, "msg": "无法将校历与学校学期唯一匹配，请稍后重试。"}
+            term_code = matches[0].term_code
+        week = week or calendar["week"]
+        day_of_week = day_of_week or target_day.isoweekday()
+
     # ── 需要登录态的 view ──
     if view == "free":
         if not term_code or week <= 0 or day_of_week <= 0 or period <= 0:
@@ -4533,6 +4569,32 @@ def empty_classroom_query(
                 "msg": "view=day_matrix 需要提供 term_code, week, day_of_week",
             }
 
+        date_text = ""
+        term_name = ""
+        from henu_mcp.core.teaching_calendar import teaching_date
+        if not cache_only:
+            try:
+                terms = [t for t in client.fetch_terms() if t.term_code == term_code]
+                if len(terms) == 1:
+                    term_name = terms[0].term_name
+            except Exception:
+                pass
+        if term_name:
+            date_text = teaching_date(term_name, week, day_of_week)
+        if target_date:
+            try:
+                _, requested_date = _resolve_schedule_target_date(target_date)
+            except ValueError as exc:
+                return {"success": False, "msg": str(exc)}
+            if not date_text or requested_date != date_text:
+                return {"success": False, "error_code": "calendar_term_unavailable",
+                        "msg": "日期与学校学期、教学周或星期无法一致核验；未返回可能属于其他日期的教室。"}
+        from campus_core.resource_registry import preload_seed_if_needed
+        from campus_core.resource_registry.models import build_resource_id
+        from campus_core.resource_registry.registry import get_resource
+        preload_seed_if_needed()
+        campus = get_resource(build_resource_id("campus", campus_code=campus_code)) if campus_code else None
+        building = get_resource(build_resource_id("building", campus_code=campus_code, building_code=building_code)) if building_code else None
         periods_result: list[dict[str, Any]] = []
         for p in (1, 2, 3, 4, 5):
             result = query_free_classrooms(
@@ -4557,14 +4619,10 @@ def empty_classroom_query(
                     "period": p,
                     "periodName": period_name_map.get(p, ""),
                     "total": result.total,
-                    "rooms": [
-                        {
-                            "roomId": r.get("roomId", ""),
-                            "roomName": r.get("roomName", ""),
-                            "capacity": r.get("capacity", 0),
-                        }
-                        for r in result.rooms
-                    ],
+                    "query": result.query,
+                    "freshness": result.freshness,
+                    "resolved": result.resolved,
+                    "rooms": result.rooms,
                 }
             )
 
@@ -4573,8 +4631,14 @@ def empty_classroom_query(
             "msg": f"已查询 {len(periods_result)} 个大节",
             "data": {
                 "termCode": term_code,
+                "termName": term_name,
                 "week": week,
                 "dayOfWeek": day_of_week,
+                "date": date_text,
+                "campusCode": campus_code,
+                "buildingCode": building_code,
+                "campusName": campus.display_name if campus else "",
+                "buildingName": (building.location.get("buildingName") or building.display_name) if building else "",
                 "periods": periods_result,
             },
         }

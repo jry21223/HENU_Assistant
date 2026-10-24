@@ -243,6 +243,21 @@ def test_short_classroom_guide_keeps_missing_filters_for_service_to_resolve():
     assert spec.params['campus_text'] == '金明' and spec.params['building_text'] == '十号楼'
 
 
+def test_explicit_all_day_command_keeps_date_location_and_never_reauthenticates():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+    for word in ('全天', '一整天'):
+        spec = inspect_cli_command(menu_command(f'查金明校区金明综合楼3{word}的空教室',
+                                               datetime(2026, 10, 24, tzinfo=ZoneInfo('Asia/Shanghai'))))
+        assert spec.resolved_tool == 'empty_classroom_query'
+        assert spec.params['view'] == 'day_matrix'
+        assert spec.params['target_date'] == '2026-10-24'
+        assert spec.params['saved_session_only'] is True
+        assert spec.params['building_text'] == '金明综合楼3'
+
+
 def test_three_campus_classroom_guides_keep_campus_and_building():
     from henu_plugin.qq_navigation import menu_command
     from henu_plugin.cli import inspect_cli_command

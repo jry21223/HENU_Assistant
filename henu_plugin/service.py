@@ -909,6 +909,8 @@ class HenuPluginService:
 
     def _empty_classroom_query(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.empty_classroom_query(
+            target_date=_text(params.get("target_date")),
+            saved_session_only=_bool(params.get("saved_session_only"), False),
             view=_text(params.get("view")) or "free",
             term_code=_text(params.get("term_code")),
             week=_int(params.get("week"), 0),

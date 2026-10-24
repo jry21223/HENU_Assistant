@@ -69,6 +69,27 @@ async def _reply(ctx, status, lines, next_step=''):
         await ctx.reply(card_chain(page))
 
 
+async def with_all_day_clock(plugin, result):
+    """Use the saved, verified Kaifeng clock; other campuses keep unconverted slots."""
+    data = result.get('data')
+    if (result.get('success') and isinstance(data, dict) and isinstance(data.get('periods'), list)
+            and data.get('campusCode') in {'01', '02'} and await _saved_clock_matches(plugin)):
+        slots = []
+        for slot in data['periods']:
+            slot = dict(slot)
+            period = slot.get('period')
+            if type(period) is int and 1 <= period <= 5:
+                slot['clockStart'], slot['clockEnd'] = KAIFENG_UNITS[period - 1]
+            slots.append(slot)
+        result = {**result, 'data': {**data, 'periods': slots, 'clockVerified': True}}
+    return result
+
+
+async def all_day_pages(plugin, result):
+    from henu_plugin.qq_cards import result_card
+    return result_card(await with_all_day_clock(plugin, result), tool='empty_classroom_query').pages()
+
+
 def _campus_building_choices(campus, word='综合'):
     """Use actual registry names; never reuse a similarly named other campus."""
     from campus_core.resource_registry.registry import search_resources
@@ -92,9 +113,10 @@ async def handle_self_study(plugin, ctx, text):
     from components.cli_tools.henu_cli_safe import HenuCliSafe
 
     initial = text in {'找自习室', '空教室查询'}
+    all_day_choice = text in {'全天', '一整天'}
     number_choice = re.fullmatch(r'[1-9][0-9]?', text)
     location = re.fullmatch(r'(?:(金明|明伦|郑州龙子湖|郑州|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))?(?:第([1-5])大节)?', text)
-    if not initial and not number_choice and (not location or not any(location.groups())):
+    if not initial and not all_day_choice and not number_choice and (not location or not any(location.groups())):
         return False
     if getattr(ctx, 'is_prevent_postorder', False):
         return True
@@ -120,7 +142,10 @@ async def handle_self_study(plugin, ctx, text):
     state = {} if initial else dict(previous)
     if initial and previous:
         state['campus'] = previous.get('campus', '')
-    if not initial and number_choice:
+    if all_day_choice:
+        state['view'] = 'day_matrix'
+        state.pop('period', None)
+    elif not initial and number_choice:
         choices = state.get('building_choices', [])
         selected = choices[int(text) - 1]
         state.update(building=selected['name'], campus_code=selected['campus_code'],
@@ -142,6 +167,8 @@ async def handle_self_study(plugin, ctx, text):
                     state.pop('building_code', None)
                     state.pop('building_choices', None)
                 state[field] = value
+                if field == 'period':
+                    state['view'] = 'free'
     state['expires'] = time.monotonic() + 300
     if len(pending) >= 256 and key not in pending:
         pending.pop(next(iter(pending)))
@@ -155,18 +182,19 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“郑州”；郑州校区也可回复“龙子湖”。')
         return True
     period = state.get('period')
-    automatic = not period
+    all_day = state.get('view') == 'day_matrix'
+    automatic = not period and not all_day
     if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
         current = now.strftime('%H:%M')
         period = next((str(n) for n, (start, end) in enumerate(KAIFENG_UNITS, 1) if start <= current < end), None)
         if not period:
             await _reply(ctx, '当前不在教学时段', [now.strftime('%m月%d日 %H:%M'),
                 '当前不在该校区教学时段内，不能据此认定所有教室空闲或开放。'],
-                '如需查询课程占用，可回复指定大节，例如“第2大节”。')
+                '可回复“全天”查看全部时段，或回复指定大节，例如“第2大节”。')
             return True
-    if not period:
+    if not period and not all_day:
         await _reply(ctx, '需确认当前大节', [
-            '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
+            '可回复“全天”查看全部5个大节，也可选择第几大节（1–5）。',
             '可直接回复“第2大节”；如需限定地点，可一并回复“明伦校区十号楼第2大节”。'])
         return True
     if state.get('building') and not state.get('campus'):
@@ -185,11 +213,13 @@ async def handle_self_study(plugin, ctx, text):
         selected = choices[0]
         state.update(building=selected['name'], campus_code=selected['campus_code'], building_code=selected['building_code'])
         building = state['building']
-    if not building and not _may_have_current_cache(campus, period, now):
+    if not building and (all_day or not _may_have_current_cache(campus, period, now)):
         await _reply(ctx, '需要查询地点', [
             '查哪栋教学楼？'], '比如“十号楼”或“综合楼”。')
         return True
-    command = f"empty classroom query --view free --period {period}"
+    command = 'empty classroom query --view day_matrix' if all_day else f"empty classroom query --view free --period {period}"
+    if all_day:
+        command += f' --saved-session-only true --target-date {now.date().isoformat()}'
     if campus:
         command += f' --campus-text {campus}'
     if state.get('campus_code') and state.get('building_code'):
@@ -199,7 +229,7 @@ async def handle_self_study(plugin, ctx, text):
     else:
         command += ' --freshness cache_only'
     await _reply(ctx, '正在查询', [
-        f'正在查{building}第{period}大节的空教室。' if building else f'正在查第{period}大节的空教室。'])
+        f'正在查{building}全天各大节的课程占用。' if all_day else f'正在查{building}第{period}大节的空教室。' if building else f'正在查第{period}大节的空教室。'])
     staged_page = None
     try:
         result = await tool.call({'command': command}, session, ctx.query_id)
@@ -226,6 +256,10 @@ async def handle_self_study(plugin, ctx, text):
             word in message for word in ('登录', '账号', '密码', 'setup_account'))
         await _reply(ctx, '查询未完成', [escape(message, 600)],
             ('请在私聊发送“绑定账号”，按提示绑定校园账号。' if result.get('error_code') == 'account_not_bound' else '请在私聊检查“我的状态”，恢复校园登录后重试。') if auth else '请核对查询条件；校历或学期无法核验时请联系维护者，稍后重试。')
+        return True
+    if all_day:
+        for page in await all_day_pages(plugin, result):
+            await ctx.reply(card_chain(page))
         return True
     if 'rooms' not in result and type(result.get('total')) is int and result['total'] > 0:
         await _reply(ctx, '清单暂未读取完整', [

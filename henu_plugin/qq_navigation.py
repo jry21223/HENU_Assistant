@@ -112,7 +112,7 @@ def account_binding_card() -> list[str]:
 def classroom_command(text: str) -> str:
     """Translate the bounded classroom guide grammar into an existing read-only query."""
     import re
-    match = re.fullmatch(r'查(金明|明伦|郑州龙子湖|郑州|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节)?的空教室', text)
+    match = re.fullmatch(r'查(金明|明伦|郑州龙子湖|郑州|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节|全天|一整天)?的空教室', text)
     if not match:
         return ''
     campus, building, week, day, period = match.groups()
@@ -129,7 +129,7 @@ def classroom_command(text: str) -> str:
     if period:
         command += f' --period {period}'
     else:
-        command += ' --view day_matrix'
+        command += ' --view day_matrix --saved-session-only true'
     return command
 
 
@@ -141,7 +141,10 @@ def menu_command(text: str, now=None) -> str:
         day = now.date() + timedelta(days=int(text == '明天课表'))
         return 'schedule day --date ' + day.isoformat()
     if classroom_command(text):
-        return classroom_command(text)
+        command = classroom_command(text)
+        if '--view day_matrix' in command and '--week ' not in command and '--day-of-week ' not in command:
+            command += ' --target-date ' + now.date().isoformat()
+        return command
     return {'我的状态': 'account status', '下一节课': 'schedule now', '本周课表': 'schedule week',
             '同步课表': 'schedule sync', '图书馆座位': 'library locations'}.get(text, '')
 
@@ -203,6 +206,9 @@ async def handle_menu_query(plugin, ctx) -> bool:
         variables = await ctx.get_query_vars()
         staged = variables.get('_henu_card') if isinstance(variables, dict) else None
         page = staged.get('page') if isinstance(staged, dict) else None
+        if result.get('success') and isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list):
+            from henu_plugin.self_study import all_day_pages
+            page = (await all_day_pages(plugin, result))[0]
         page = page or result_card(result).pages()[0]
         await ctx.set_query_var('_henu_card', None)
     except Exception:

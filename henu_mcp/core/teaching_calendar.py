@@ -79,3 +79,20 @@ def matches_term_name(name: str, calendar: dict) -> bool:
     return any(
         label in normalized for label in labels.get(calendar.get("semester"), ())
     )
+
+
+def teaching_date(term_name: str, week: int, day_of_week: int) -> str:
+    """Resolve a school-provided term label and teaching slot using reviewed calendars."""
+    if not 1 <= week <= 60 or not 1 <= day_of_week <= 7:
+        return ""
+    try:
+        semesters = tomllib.loads(CALENDAR_FILE.read_text(encoding="utf-8"))["semesters"]
+        dates = set()
+        for semester in semesters:
+            target = date.fromisoformat(semester["start"]) + timedelta(weeks=week - 1, days=day_of_week - 1)
+            calendar = teaching_week(target)
+            if calendar.get("available") and calendar["week"] == week and matches_term_name(term_name, calendar):
+                dates.add(target.isoformat())
+        return dates.pop() if len(dates) == 1 else ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""

@@ -140,6 +140,107 @@ def test_every_quoted_campus_prompt_reply_continues_the_conversation(monkeypatch
     asyncio.run(run())
 
 
+@pytest.mark.parametrize('kind', ['person', 'group'])
+def test_all_day_reply_uses_selected_campus_building_and_all_five_periods(monkeypatch, kind):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+
+    call = AsyncMock(return_value={
+        'success': True, 'data': {
+            'date': '2026-10-20', 'campusName': '金明校区', 'buildingName': '金明综合楼3',
+            'periods': [{'period': p, 'periodName': name, 'total': 1,
+                         'freshness': {'liveChecked': True, 'stale': False},
+                         'rooms': [{'roomName': f'金明综合楼3-{p}01'}]}
+                        for p, name in enumerate(['第一大节', '第二大节', '第三大节', '第四大节', '第五大节'], 1)],
+        },
+    })
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+
+    async def run():
+        for text in ('找自习室', '金明校区金明综合楼3'):
+            ctx = context(text)
+            ctx.event.launcher_type = kind
+            assert await handle_navigation(plugin, ctx)
+        ctx = context('全天')
+        ctx.event.launcher_type = kind
+        assert await handle_navigation(plugin, ctx)
+        command = call.call_args.args[0]['command']
+        assert '--view day_matrix' in command
+        assert '--campus-text 金明' in command and '--building-text 金明综合楼3' in command
+        assert '--period ' not in command
+        replies = str(ctx.reply.call_args_list)
+        assert '第一大节' in replies and '第五大节' in replies
+
+    asyncio.run(run())
+
+
+def test_all_day_converts_verified_kaifeng_clock_to_vertical_24_hour_ranges(monkeypatch):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    call = AsyncMock(return_value={'success': True, 'data': {
+        'campusCode': '02', 'campusName': '金明校区', 'buildingName': '金明综合楼3',
+        'periods': [{'period': p, 'periodName': f'第{p}大节', 'total': 0,
+                     'freshness': {'liveChecked': True}} for p in range(1, 6)]}})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(PRODUCTION_CLOCK).encode()))
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        await handle_navigation(plugin, context('金明校区金明综合楼3'))
+        ctx = context('一整天')
+        await handle_navigation(plugin, ctx)
+        reply = str(ctx.reply.call_args)
+        assert '08:00–09:40' in reply and '19:10–21:40' in reply
+        assert '第1大节' not in reply and '第5大节' not in reply
+    asyncio.run(run())
+
+
+def test_large_all_day_reply_survives_real_tool_compaction(monkeypatch):
+    import copy
+    from components.cli_tools import base
+    import langbot_plugin.api.proxies.query_based_api as proxy_module
+    from unittest.mock import Mock
+    variables, storage = {}, {'shared:period_time': json.dumps(PRODUCTION_CLOCK).encode()}
+
+    async def get_storage(key):
+        return storage.get(key)
+
+    async def put_storage(key, value):
+        storage[key] = value
+
+    async def set_var(key, value):
+        variables[key] = value
+
+    proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value='bot'),
+                            get_query_vars=AsyncMock(side_effect=lambda: variables),
+                            set_query_var=set_var)
+    monkeypatch.setattr(proxy_module, 'QueryBasedAPIProxy', lambda **kwargs: proxy)
+    monkeypatch.setattr(base, 'QueryBasedAPIProxy', lambda **kwargs: proxy)
+    result = {'success': True, '_resolved_tool_name': 'empty_classroom_query',
+              'cli': {'resolved_tool': 'empty_classroom_query', 'command': 'empty classroom query --view day_matrix'},
+              'data': {'date': '2026-10-20', 'campusCode': '02', 'campusName': '金明校区',
+                       'buildingName': '金明综合楼3', 'periods': [
+                  {'period': p, 'periodName': f'第{p}大节', 'total': 30,
+                   'query': {'termCode': '2026,0', 'week': 8, 'dayOfWeek': 2, 'campusCode': '02', 'buildingCode': '18'},
+                   'freshness': {'liveChecked': True},
+                   'rooms': [{'roomName': f'金明综合楼3-{p}{r:02}', 'campusCode': '02', 'buildingCode': '18'}
+                             for r in range(30)]} for p in range(1, 6)]}}
+    plugin = SimpleNamespace(plugin_runtime_handler=Mock(), get_plugin_storage=get_storage,
+                             set_plugin_storage=put_storage, service=SimpleNamespace(
+                                 run_tool=lambda *args: copy.deepcopy(result), get_runtime_context=lambda *args: None))
+
+    async def run():
+        for text in ('找自习室', '金明校区金明综合楼3'):
+            await handle_navigation(plugin, context(text))
+        ctx = context('全天')
+        ctx.get_query_vars = proxy.get_query_vars
+        ctx.set_query_var = set_var
+        await handle_navigation(plugin, ctx)
+        reply = str(ctx.reply.call_args)
+        assert '08:00–09:40' in reply and '19:10–21:40' in reply
+        assert '金明综合楼3-101' in reply and '金明综合楼3-501' in reply
+        assert '时刻待核验' not in reply
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('campus', ['郑州', '龙子湖', '郑州龙子湖'])
 @pytest.mark.parametrize('kind', ['person', 'group'])
 def test_zhengzhou_building_reply_keeps_its_campus_and_block(monkeypatch, campus, kind):

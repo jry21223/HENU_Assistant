@@ -1528,6 +1528,8 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if sub in ("查询", "query", "free"):
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
             params={"view": options.get("view", "free"),
+                "target_date": options.get("target_date", ""),
+                "saved_session_only": _bool_opt(options, "saved_session_only"),
                 "term_code": options.get("term_code", options.get("学期", "")),
                 "week": _int_opt(options, "week", "周", 0),
                 "day_of_week": _int_opt(options, "day_of_week", "星期", 0),

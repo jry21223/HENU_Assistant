@@ -306,6 +306,72 @@ def _classroom_query_card(result: dict) -> Card:
     return Card('空教室', status, tuple(lines))
 
 
+def _classroom_day_card(result: dict) -> Card:
+    data = result['data']
+    query = result.get('query') if isinstance(result.get('query'), dict) else {}
+    lines = []
+    if _first(data, 'roomName'):
+        lines.append('查询教室：' + escape(data['roomName'], 100))
+    if not _first(data, 'date'):
+        lines.append('日期待核验；以下仅按所列学期、教学周和星期查询。')
+    for label, keys in (('日期', ('date', 'target_date')), ('校区', ('campusName',)), ('楼宇', ('buildingName',))):
+        value = _first(data, *keys)
+        if label != '日期':
+            value = value or _first(query, *keys)
+        if value:
+            lines.append(f'**{label}**：{escape(value, 100)}')
+    for key, label in (('termName', '学期'), ('week', '教学周'), ('dayOfWeek', '星期')):
+        if _first(data, key):
+            lines.append(f'**{label}**：{escape(_first(data, key), 60)}')
+    lines.append('按第一至第五大节分别查看课程占用；同一教室的状态可随时段变化。')
+    if data.get('clockVerified'):
+        lines.append('时间按机器人已保存并核对的开封校区作息换算。')
+    pending = False
+    for slot in data['periods']:
+        if not isinstance(slot, dict):
+            continue
+        name = escape(slot.get('periodName') or f"第{slot.get('period')}大节", 30)
+        if data.get('clockVerified') and slot.get('clockStart') and slot.get('clockEnd'):
+            name = escape(slot['clockStart'] + '–' + slot['clockEnd'], 30)
+        else:
+            name += '（时刻待核验）'
+        proof = slot.get('freshness') if isinstance(slot.get('freshness'), dict) else {}
+        age, ttl = proof.get('ageSeconds'), proof.get('ttlSeconds')
+        expired = proof.get('stale') is True or (
+            type(age) in (int, float) and type(ttl) in (int, float) and age > ttl)
+        missing = proof.get('cacheHit') is False
+        verified = proof.get('liveChecked') is True or (
+            bool(proof.get('fetchedAt')) and type(age) in (int, float)
+            and type(ttl) in (int, float) and 0 <= age <= ttl)
+        rooms = [r for r in slot.get('rooms', []) if isinstance(r, dict)]
+        if missing or expired or proof.get('partial') is True:
+            reason = '暂无缓存' if missing else '缓存已过期' if expired else '数据不完整'
+            lines.append(f'**{name}** · 待核验（{reason}）')
+            pending = True
+        elif not verified:
+            lines.append(f'**{name}** · 来源时效待核验')
+            if rooms:
+                references = '、'.join(escape(_first(r, 'roomName', 'room_name') or '未标名教室', 70) for r in rooms[:2])
+                lines.append('历史记录参考：' + references + '；未列为当前可用。')
+            pending = True
+        else:
+            count = slot.get('total')
+            if type(count) is not int or count < 0:
+                count = len(rooms)
+            lines.append(f'**{name}** · 课程未占用 {count} 间')
+            if rooms:
+                lines.append('教室示例：' + '、'.join(escape(_first(r, 'roomName', 'room_name') or '未标名教室', 70) for r in rooms[:2]))
+        if proof.get('fetchedAt'):
+            lines.append('来源获取时间：' + escape(proof['fetchedAt'], 40))
+        if proof.get('refreshFailed') is True:
+            lines.append('本次上游查询未完成。')
+        elif proof.get('liveChecked') is False:
+            lines.append('本次读取缓存，未请求上游核验。')
+    lines.append('仅反映学校课表已登记的占用，不保证现场无人或楼门开放。')
+    return Card('全天空教室', '部分时段待核验' if pending else '全天课程占用概览', tuple(lines),
+                '可指定大节查询详细教室。')
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -327,6 +393,9 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return availability_card(result)
     if tool == 'empty_classroom_query' and result.get('success') and isinstance(result.get('rooms'), list):
         return _classroom_query_card(result)
+    if (tool == 'empty_classroom_query' and result.get('success')
+            and isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list)):
+        return _classroom_day_card(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
     if tool == "food":
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)

@@ -60,6 +60,8 @@ class HenuCliSafe(HenuCli):
         if not isinstance(result, dict):
             return False
         try:
+            from henu_plugin.self_study import with_all_day_clock
+            result.update(await with_all_day_clock(self.plugin, result))
             await stage_card(self.plugin, session, query_id, result)
             return True
         except Exception:
@@ -328,6 +330,9 @@ class HenuCliSafe(HenuCli):
         return any(marker in text for marker in ("empty_classroom", "空教室", "空闲教室"))
 
     def _format_empty_classroom_reply(self, result: dict[str, Any]) -> str:
+        if isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list):
+            from henu_plugin.qq_cards import result_card
+            return '\n\n'.join(result_card(result, 'empty_classroom_query').pages())
         rooms = [item for item in (result.get("rooms") or []) if isinstance(item, dict)]
         data = [item for item in (result.get("data") or []) if isinstance(item, dict)]
         total = result.get("total")
