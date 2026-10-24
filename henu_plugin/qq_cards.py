@@ -57,6 +57,10 @@ TOOL_TITLES = {
     "yuketang_start_time": "雨课堂进班时间", "yuketang_set_token": "雨课堂令牌绑定",
     "yuketang_account_set": "雨课堂账号绑定", "yuketang_login": "雨课堂登录",
     "yuketang_logout": "雨课堂退出登录",
+    "yuketang_quiz_show": "雨课堂测验状态", "yuketang_quiz_question": "雨课堂测验题目",
+    "yuketang_quiz_preview": "雨课堂测验预览", "yuketang_quiz_start": "雨课堂开始测验",
+    "yuketang_quiz_save": "雨课堂保存草稿", "yuketang_quiz_submit": "雨课堂交卷",
+    "yuketang_quiz_result": "雨课堂测验成绩",
 }
 
 
@@ -509,7 +513,7 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
                 lines.extend(_schedule_row_lines(row) if tool == "schedule_query" else _row_lines(row))
     if result.get("week_filter_applied") is False and "未按教学周过滤" not in msg:
         lines.append("课表未按教学周过滤，请核对实际教学周。")
-    if tool.startswith("yuketang") and tool != "yuketang_exam_list":
+    if tool.startswith("yuketang") and tool != "yuketang_exam_list" and not tool.startswith("yuketang_quiz_"):
         lines.append("监听/桥端接收状态不代表答题完成或已交卷。")
     next_commands = result.get("next_commands") or []
     next_step = "；".join(redact_cli_command(item) for item in next_commands[:2]) if isinstance(next_commands, list) else ""

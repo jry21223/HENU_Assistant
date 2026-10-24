@@ -42,6 +42,7 @@ from henu_plugin.storage_adapter import (
 from henu_plugin import yuketang_config
 from henu_plugin import bridge_client
 from henu_plugin.yuketang_catalog import CatalogError, RainCatalog, resolve_classroom
+from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QuizError, RainQuiz
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
@@ -183,6 +184,13 @@ class HenuPluginService:
             "yuketang_status": self._yuketang_status,
             "yuketang_courses": self._yuketang_courses,
             "yuketang_exam_list": self._yuketang_exam_list,
+            "yuketang_quiz_show": self._yuketang_quiz,
+            "yuketang_quiz_question": self._yuketang_quiz,
+            "yuketang_quiz_start": self._yuketang_quiz,
+            "yuketang_quiz_save": self._yuketang_quiz,
+            "yuketang_quiz_submit": self._yuketang_quiz,
+            "yuketang_quiz_preview": self._yuketang_quiz,
+            "yuketang_quiz_result": self._yuketang_quiz,
             "yuketang_config_show": self._yuketang_config_show,
             "yuketang_set_enabled": self._yuketang_set_enabled,
             "yuketang_domain_set": self._yuketang_domain_set,
@@ -1165,11 +1173,66 @@ class HenuPluginService:
             exams = catalog.exams(classroom)
         except CatalogError as exc:
             return self._yuketang_catalog_failure(exc)
-        lines = [f"{classroom['course_name']} / {classroom['classroom_label']}：本次查询返回 {len(exams)} 个考试。"]
-        lines.extend(f"{exam['title']}：{exam['status_label']}；截止 {exam.get('deadline_china', '未提供')}" for exam in exams)
+        lines = [f"{classroom['course_name']} / {classroom['classroom_label']}：本次查询返回 {len(exams)} 项测验／考试。"]
+        for exam in exams:
+            line = f"{'测验' if exam['assessment_type'] == 'quiz' else '考试'} · {exam['title']}：{exam['status_label']}；截止 {exam.get('deadline_china', '未提供')}"
+            if exam.get("cover_association_verified") is False:
+                line += "；封面关联未核实，时间来自活动列表"
+            lines.append(line)
         lines.append("以上为只读查询；未开始考试、获取试卷或提交答案。")
         return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams),
                 "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}
+
+    def _yuketang_quiz(self, params: dict[str, Any]) -> dict[str, Any]:
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        if identity is None or identity.launcher_type != "person":
+            return {"success": False, "error_code": "private_reply_required", "msg": "个人测验只能在私聊中操作。"}
+        client = None
+        try:
+            catalog = self._yuketang_catalog()
+            classroom = resolve_classroom(catalog.courses(), _text(params.get("course")))
+            activities = catalog.exams(classroom, quizzes_only=True)
+            matches = [activity for activity in activities if activity.get("quiz_id") == _text(params.get("quiz_id"))]
+            if len(matches) != 1:
+                raise QuizError("quiz_target_invalid", "没有找到该班级中唯一匹配的测验；不能使用考试编号代替。")
+            client = RainQuiz(catalog.domain, catalog._headers["Cookie"], classroom, matches[0])
+            operation = params["operation"]
+            if params.get("preview"):
+                return client.prepare(operation, _text(params.get("revision")), _text(params.get("answers_json")))
+            if operation in {"start", "save", "submit"}:
+                revision = _text(params.get("revision"))
+                if QUIZ_WRITE_AUTH.get() != (identity.storage_key, operation, params["quiz_id"], revision):
+                    raise QuizError("confirmation_required", "测验写入需要本人下一条私聊确认。")
+                live = bridge_client.fetch_status(identity.storage_key, timeout=8)
+                daemon = live.get("daemon")
+                registrations = daemon.get("openids") if isinstance(daemon, dict) else None
+                age = daemon.get("age_s") if isinstance(daemon, dict) else None
+                local_config = self._yuketang_read()
+                config_hash = bridge_client.canonical_hash(yuketang_config.sanitize_config(local_config))
+                if (live.get("ok") is not True or live.get("daemon_wired") is not True
+                        or not isinstance(registrations, list) or any(not isinstance(item, str) for item in registrations)
+                        or identity.storage_key in registrations or type(age) not in {int, float} or not 0 <= age <= 75
+                        or local_config["enabled"] is not False or live.get("config_present") is not True
+                        or live.get("config_hash") != config_hash):
+                    raise QuizError("quiz_executor_conflict", "请先关闭当前身份的雨课堂监听并核对停止，再直接操作测验。")
+                if operation == "start":
+                    return client.start(revision)
+                if operation == "save":
+                    return client.save(revision, _text(params.get("answers_json")))
+                return client.submit(revision)
+            if params["operation"] == "question":
+                return client.question(int(params["index"]))
+            if operation == "result":
+                return client.result(int(params["index"]) if params.get("index") else None)
+            return client.show()
+        except CatalogError as exc:
+            return {**self._yuketang_catalog_failure(exc),
+                    "external_attempted": bool(client and client.attempted),
+                    "external_committed": bool(client and client.committed), "retry_safe": not bool(client and client.attempted)}
+        except Exception:
+            return {"success": False, "error_code": "quiz_operation_failed", "msg": "测验操作结果无法核对，请先查询状态。",
+                    "external_attempted": bool(client and client.attempted),
+                    "external_committed": bool(client and client.committed), "retry_safe": not bool(client and client.attempted)}
 
     def _yuketang_start_time(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._yuketang_apply(

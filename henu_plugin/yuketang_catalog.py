@@ -60,7 +60,8 @@ class RainCatalog:
             courses.append({"course_name": name[:256], "classroom_label": label, "classroom_id": identifier})
         return courses
 
-    def exams(self, classroom: dict[str, str]) -> list[dict[str, Any]]:
+    def exams(self, classroom: dict[str, str], *, quizzes_only: bool = False) -> list[dict[str, Any]]:
+        """List assessments; quiz operations never need another exam's cover."""
         identifier = classroom["classroom_id"]
         if not re.fullmatch(r"[0-9]+", identifier):
             raise CatalogError("rain_response_invalid", "班级标识无效。")
@@ -69,30 +70,57 @@ class RainCatalog:
         activities = data.get("activities") if isinstance(data, dict) else None
         if payload.get("errcode") != 0 or not isinstance(activities, list):
             raise CatalogError("rain_query_failed", "考试列表查询失败，不能判断是否有考试。")
+        for envelope in (payload, data):
+            if (isinstance(envelope, dict) and "classroom_id" in envelope
+                    and str(envelope["classroom_id"]) != identifier):
+                raise CatalogError("rain_response_invalid", "测评列表所属班级无效，未继续读取。")
         records = []
+        identities: set[tuple[int, str]] = set()
         for activity in activities:
             if not isinstance(activity, dict):
                 raise CatalogError("rain_response_invalid", "考试列表结构无效。")
+            activity_type = activity.get("type")
+            if (type(activity_type) is not int or activity_type not in (4, 5)
+                    or ("classroom_id" in activity and str(activity["classroom_id"]) != identifier)):
+                raise CatalogError("rain_response_invalid", "测评活动类型或所属班级无效，未继续读取。")
+            if quizzes_only and activity_type != 4:
+                continue
             exam_id = str(activity.get("courseware_id") or "")
             status = activity.get("status")
             title = activity.get("title", "")
             if not re.fullmatch(r"[0-9]+", exam_id) or type(status) is not int or not isinstance(title, str):
                 raise CatalogError("rain_response_invalid", "考试标识、状态或标题格式无效。")
-            record: dict[str, Any] = {"exam_id": exam_id, "title": title[:256],
+            identity = (activity_type, exam_id)
+            if identity in identities:
+                raise CatalogError("rain_response_invalid", "同一测评活动重复，无法确认唯一目标。")
+            identities.add(identity)
+            is_quiz = activity_type == 4
+            record: dict[str, Any] = {"assessment_type": "quiz" if is_quiz else "exam",
+                                      "assessment_id": exam_id, "classroom_id": identifier,
+                                      "quiz_id" if is_quiz else "exam_id": exam_id, "title": title[:256],
                                       "status": status, "status_label": {0: "尚未开始作答", 1: "正在作答"}.get(status, f"状态 {status}")}
-            if status in (0, 1):
+            timing = activity
+            if status in (0, 1) and not is_quiz:
                 cover = self._read(f"/v/exam/cover?exam_id={exam_id}&classroom_id={identifier}")
                 cover_data = cover.get("data")
                 if cover.get("status") != 200 or not isinstance(cover_data, dict) or not cover_data:
                     raise CatalogError("rain_query_failed", "考试封面查询失败，不能确认考试状态。")
-                for key in ("start_time", "deadline"):
-                    value = cover_data.get(key)
-                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-                        try:
-                            ts = value / 1000 if value > 1e12 else value
-                            record[key + "_china"] = datetime.fromtimestamp(ts, ZoneInfo("Asia/Shanghai")).isoformat()
-                        except (ValueError, OverflowError, OSError):
-                            raise CatalogError("rain_response_invalid", "考试时间格式无效。") from None
+                if (str(cover_data.get("classroom_id")) != identifier
+                        or ("classroom_id" in cover and str(cover["classroom_id"]) != identifier)
+                        or cover_data.get("title") != title
+                        or ("exam_id" in cover_data and str(cover_data["exam_id"]) != exam_id)):
+                    raise CatalogError("rain_assessment_mismatch", "试卷与当前班级或活动不一致，未继续读取或作答。")
+                record["cover_association_verified"] = "exam_id" in cover_data
+                if record["cover_association_verified"]:
+                    timing = cover_data
+            for key in ("start_time", "deadline"):
+                value = timing.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+                    try:
+                        ts = value / 1000 if value > 1e12 else value
+                        record[key + "_china"] = datetime.fromtimestamp(ts, ZoneInfo("Asia/Shanghai")).isoformat()
+                    except (ValueError, OverflowError, OSError):
+                        raise CatalogError("rain_response_invalid", "测评时间格式无效。") from None
             records.append(record)
         return records
 

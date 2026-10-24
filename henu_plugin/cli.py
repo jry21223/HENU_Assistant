@@ -36,6 +36,8 @@ _SENSITIVE_OPTION_NAMES = frozenset(
         "--api_key",
         "--x-access-token",
         "--x_access_token",
+        "--answers-json",
+        "--answers_json",
     }
 )
 
@@ -46,6 +48,9 @@ def redact_cli_command(command: Any) -> str:
     try:
         argv = shlex.split(raw)
     except ValueError:
+        # Broken quoting has no reliable token boundary. Hide the entire tail
+        # rather than exposing any part of a student's answer in diagnostics.
+        raw = re.sub(r"(?is)(--answers[-_]json(?:=|\s+)).*", r"\1<redacted>", raw)
         return _SENSITIVE_OPTION_PATTERN.sub(r"\1<redacted>", raw)
 
     masked: list[str] = []
@@ -172,6 +177,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "yuketang status",
                 "yuketang courses   # 查询真实课程名、班级标签及班级 ID",
                 "yuketang exam list --course <课程名或班级标签>   # 只读查询考试元数据",
+                "help yuketang quiz   # 测验取题、保存草稿、独立确认交卷与成绩",
                 "yuketang lesson set --auto-answer on --llm on",
                 "status",
                 "help <topic>",
@@ -459,6 +465,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "yuketang status",
                 "yuketang courses",
                 "yuketang exam list --course <课程名或班级标签>",
+                "help yuketang quiz   # 测验直接取题与保存；交卷单独确认",
                 "yuketang login [--force]   # cookie 仍有效时提示跳过；--force 强制重登",
                 "yuketang logout   # 退出登录：清守护进程侧 cookie 并停用监听（保留绑定）",
                 "yuketang account set --account <手机号> --password '<密码>'   # 敏感，仅私聊",
@@ -520,6 +527,31 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             ],
         }
 
+    if normalized == "yuketang quiz":
+        return {
+            "topic": normalized,
+            "summary": "测验默认只保存草稿，交卷必须另行发起并由本人下一条私聊确认。",
+            "commands": [
+                "yuketang exam list --course <课程名或班级标签>",
+                "yuketang quiz show --course <课程或班级> --quiz-id <测验编号>",
+                "yuketang quiz start --course <课程或班级> --quiz-id <测验编号>",
+                "yuketang quiz question --course <课程或班级> --quiz-id <测验编号> --index <题号>",
+                "yuketang quiz save --course <课程或班级> --quiz-id <测验编号> --revision <取题返回的paper_revision> --answers-json '<答案对象>'",
+                "yuketang quiz submit --course <课程或班级> --quiz-id <测验编号>",
+                "yuketang quiz result --course <课程或班级> --quiz-id <测验编号> [--index <题号>]",
+            ],
+            "examples": ["yuketang quiz show --course 合成课程 --quiz-id 9001"],
+            "tips": [
+                "仅私聊使用。先关闭并核对当前身份的远端监听，避免与直接测验操作同时写入。",
+                "start 和 save 沿用写操作确认；submit 必须创建新的交卷确认，保存确认不能复用。",
+                '答案对象以问题编号为键，例如 {"601":["A"],"603":{"1":"文本答案"}}；填空题需该题全部空位。',
+                "调用方 Agent 负责实际读取题面图片并求解；代码不内置模型或标准答案。无法看图时不能猜测。",
+                "保存后官方缓存回读匹配且仍为正在作答，才报告已保存、未交卷。已有不同答案不会被覆盖。",
+                "题面、登录主体或已保存答案变化会使旧确认失效；结果不确定时只读核对，不自动重试写入。",
+                "成绩只读当前登录主体的已公布结果；result --index 查看单题判分。",
+            ],
+        }
+
     if normalized == "yuketang exam":
         return {
             "topic": normalized,
@@ -539,7 +571,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "tips": [
                 "白名单为空等于考试功能整体关闭。",
                 "后台白名单匹配班级标签；新增可输入课程名，由插件实时解析。多个班级、重复标签或查询失败不会保存。含空格标签需引号，移除使用配置中已保存的班级标签。",
-                "exam list 只读查询考试元数据；不生成令牌、不开始考试、不读题目、不提交答案，空列表与接口错误分开报告。",
+                "exam list 区分测验与考试，只读查询元数据；目标关联不明时停止，不生成令牌、不开始考试、不读题目、不提交答案。",
                 "考试需本人从官方页面开始；后台接管登录时可能提示其他设备登录，作答期间避免反复重登。后台保存答案后，本人重新进入检查并正式交卷；插件没有自动交卷命令。",
                 "同一雨课堂账号只启用一个聊天身份监听。配置已同步、身份已注册、心跳有效均不代表题目已答完；以官方已答数量和交卷结果为准。",
                 "未知、重复、缺值或多余参数会整条拒绝，不会只保存其中一部分。",
@@ -657,6 +689,16 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
         return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list", "yunfz activity list"]
     if resolved_tool == "yuketang_status":
         return ["yuketang config show", "yuketang lesson set --auto-answer on", "help yuketang"]
+    if str(resolved_tool).startswith("yuketang_quiz_"):
+        target = "--course " + shlex.quote(str(spec.params.get("course", ""))) + " --quiz-id " + str(spec.params.get("quiz_id", ""))
+        if resolved_tool == "yuketang_quiz_question":
+            return [f"yuketang quiz show {target}", "help yuketang quiz"]
+        status = (result.get("quiz") or {}).get("status")
+        if status == 2:
+            return [f"yuketang quiz result {target}"]
+        if status == 0:
+            return [f"yuketang quiz start {target}"]
+        return [f"yuketang quiz show {target}", "help yuketang quiz"]
     if resolved_tool == "yuketang_config_show":
         return ["yuketang status", "yuketang courses", "yuketang exam whitelist add <课程名或班级标签>"]
     if resolved_tool == "yuketang_set_enabled":
@@ -1739,6 +1781,8 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _parse_yuketang_lesson(raw, argv)
     if sub in {"exam", "考试"}:
         return _parse_yuketang_exam(raw, argv)
+    if sub == "quiz":
+        return _parse_yuketang_quiz(raw, argv)
     if sub in {"codes", "code", "邀请码"}:
         return _parse_yuketang_listop(raw, argv, scope="codes", help_topic="yuketang")
 
@@ -1813,6 +1857,44 @@ def _parse_yuketang_lesson(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         )
 
     return _error_spec(raw, f"未知命令 `yuketang lesson {argv[2]}`。", help_topic="yuketang lesson")
+
+
+def _parse_yuketang_quiz(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) == 2 or len(argv) == 3 and argv[2] in {"help", "-h", "--help"}:
+        return _help_spec(raw, argv, "yuketang quiz")
+    if len(argv) < 3 or argv[2] not in {"show", "question", "start", "save", "submit", "result", "preview"}:
+        return _error_spec(raw, "请用 help yuketang quiz 查看测验查询、保存与独立确认交卷用法。", help_topic="yuketang quiz")
+    verb = argv[2]
+    allowed = {"course", "quiz_id"} | ({"index"} if verb in {"question", "result"} else set())
+    if verb in {"start", "save", "submit", "preview"}:
+        allowed.add("revision")
+    if verb == "preview":
+        allowed.add("operation")
+        preliminary, _, _ = _parse_options(argv[3:], reject_duplicates=True)
+        if preliminary.get("operation") == "save":
+            allowed.add("answers_json")
+    if verb == "save":
+        allowed.add("answers_json")
+    options, _, error = _parse_yuketang_options(argv[3:], allowed)
+    if len(str(options.get("answers_json", ""))) > 100000:
+        return _error_spec(raw, "答案对象过大，未进行查询或保存。", help_topic="yuketang quiz")
+    required = allowed - {"revision"}
+    if verb == "result":
+        required.discard("index")
+    if verb == "save" or verb == "preview" and options.get("operation") == "save":
+        required.add("revision")
+    if error or not required <= set(options) or not re.fullmatch(r"[1-9][0-9]{0,17}", _string_option(options, "quiz_id")):
+        return _error_spec(raw, error or "请提供准确课程、数字 quiz 编号及所需题号。", help_topic="yuketang")
+    if "revision" in options and not re.fullmatch(r"[0-9a-f]{64}", _string_option(options, "revision")):
+        return _error_spec(raw, "测验版本标识无效，请重新查询。", help_topic="yuketang")
+    if verb == "preview" and options["operation"] not in {"start", "save", "submit"}:
+        return _error_spec(raw, "测验预览操作无效。", help_topic="yuketang")
+    if "index" in options and not re.fullmatch(r"[1-9][0-9]{0,2}", _string_option(options, "index")):
+        return _error_spec(raw, "--index 必须为有效题号。", help_topic="yuketang")
+    return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_quiz_" + verb,
+                          params={**options, "operation": options["operation"] if verb == "preview" else verb,
+                                  "preview": verb == "preview"}, action="yuketang quiz " + verb,
+                          should_preload_runtime_context=False)
 
 
 def _parse_yuketang_exam(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:

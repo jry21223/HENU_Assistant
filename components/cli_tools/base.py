@@ -281,6 +281,11 @@ class BaseHenuTool(Tool):
         if not isinstance(result, dict):
             return
 
+        # Quiz results are bounded machine input; QQ receives reply_text.
+        # Dropping these fields would make the Agent answer an incomplete paper.
+        if isinstance(result.get("quiz"), dict):
+            return
+
         # Normalize msg to plain text first, ensure non-empty fallback.
         msg = result.get("msg")
         if not isinstance(msg, str) or not msg.strip():
