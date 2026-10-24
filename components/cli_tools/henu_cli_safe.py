@@ -10,6 +10,7 @@ from components.cli_tools.henu_cli import HenuCli
 from henu_plugin.cli import inspect_cli_command, redact_cli_command
 from henu_plugin.qq_cards import PRIVATE_NOTICE, public_spec, stage_card
 from henu_plugin.qq_buttons import confirmation_context
+from henu_plugin.study_place import remember_context
 
 
 class HenuCliSafe(HenuCli):
@@ -25,6 +26,7 @@ class HenuCliSafe(HenuCli):
     _MAX_LIST_ITEMS = 8
 
     @confirmation_context
+    @remember_context
     async def call(
         self,
         params: dict[str, Any],
@@ -60,6 +62,12 @@ class HenuCliSafe(HenuCli):
         if not isinstance(result, dict):
             return False
         try:
+            from henu_plugin.study_place import remember_query_place
+            from henu_plugin.qq_cards import scope
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=self.plugin.plugin_runtime_handler)
+            owner = scope(str(await proxy.get_bot_uuid() or ''), session)
+            await remember_query_place(self.plugin, owner, result)
             from henu_plugin.self_study import with_all_day_clock
             result.update(await with_all_day_clock(self.plugin, result))
             await stage_card(self.plugin, session, query_id, result)

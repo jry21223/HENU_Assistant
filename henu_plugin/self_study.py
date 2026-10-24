@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from henu_plugin.qq_cards import Card, card_chain, escape
@@ -112,10 +112,11 @@ async def handle_self_study(plugin, ctx, text):
     from langbot_plugin.api.entities.builtin.provider.session import Session, LauncherTypes
     from components.cli_tools.henu_cli_safe import HenuCliSafe
 
-    initial = text in {'找自习室', '空教室查询'}
+    full_default = re.fullmatch(r'查((?:金明|明伦|郑州龙子湖|郑州|龙子湖)校区[\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))的空教室', text)
+    initial = text in {'找自习室', '空教室查询', '现在呢'} or bool(full_default)
     all_day_choice = text in {'全天', '一整天'}
     number_choice = re.fullmatch(r'[1-9][0-9]?', text)
-    location = re.fullmatch(r'(?:(金明|明伦|郑州龙子湖|郑州|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))?(?:第([1-5])大节)?', text)
+    location = re.fullmatch(r'(?:(金明|明伦|郑州龙子湖|郑州|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))?(?:第([1-5])大节)?', full_default[1] if full_default else text)
     if not initial and not all_day_choice and not number_choice and (not location or not any(location.groups())):
         return False
     if getattr(ctx, 'is_prevent_postorder', False):
@@ -133,15 +134,23 @@ async def handle_self_study(plugin, ctx, text):
     pending = {k: v for k, v in pending.items() if v['expires'] > time.monotonic()}
     plugin._self_study_pending = pending
     previous = pending.get(key)
+    from henu_plugin.study_place import known_place
+    remembered = await known_place(plugin, key) if initial else {}
+    if text == '现在呢' and not previous and not remembered:
+        return False
     if not initial and not previous:
         return False
     if not initial and number_choice and not 1 <= int(text) <= len(previous.get('building_choices', [])):
         return False
     ctx.prevent_default()
     ctx.prevent_postorder()
-    state = {} if initial else dict(previous)
+    state = remembered if initial else dict(previous)
     if initial and previous:
-        state['campus'] = previous.get('campus', '')
+        if previous.get('awaiting_place'):
+            state = {field: previous[field] for field in ('campus', 'building', 'campus_code', 'building_code') if field in previous}
+            state['awaiting_place'] = True
+        elif not state:
+            state['campus'] = previous.get('campus', '')
     if all_day_choice:
         state['view'] = 'day_matrix'
         state.pop('period', None)
@@ -151,7 +160,7 @@ async def handle_self_study(plugin, ctx, text):
         state.update(building=selected['name'], campus_code=selected['campus_code'],
                      building_code=selected['building_code'])
         state.pop('building_choices', None)
-    elif not initial:
+    elif not initial or full_default:
         for field, value in zip(('campus', 'building', 'period'), location.groups()):
             if value:
                 if field == 'campus':
@@ -167,6 +176,8 @@ async def handle_self_study(plugin, ctx, text):
                     state.pop('building_code', None)
                     state.pop('building_choices', None)
                 state[field] = value
+                if field in {'campus', 'building'}:
+                    state['awaiting_place'] = True
                 if field == 'period':
                     state['view'] = 'free'
     state['expires'] = time.monotonic() + 300
@@ -184,14 +195,17 @@ async def handle_self_study(plugin, ctx, text):
     period = state.get('period')
     all_day = state.get('view') == 'day_matrix'
     automatic = not period and not all_day
+    target_date = now.date()
+    recommendation = ''
     if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
         current = now.strftime('%H:%M')
-        period = next((str(n) for n, (start, end) in enumerate(KAIFENG_UNITS, 1) if start <= current < end), None)
+        period = next((str(n) for n, (start, end) in enumerate(KAIFENG_UNITS, 1) if current < end), None)
         if not period:
-            await _reply(ctx, '当前不在教学时段', [now.strftime('%m月%d日 %H:%M'),
-                '当前不在该校区教学时段内，不能据此认定所有教室空闲或开放。'],
-                '可回复“全天”查看全部时段，或回复指定大节，例如“第2大节”。')
-            return True
+            target_date += timedelta(days=1)
+            period = '1'
+        start, end = KAIFENG_UNITS[int(period) - 1]
+        label = '当前时段' if target_date == now.date() and start <= current < end else '下一教学时段'
+        recommendation = f'{label}推荐：{target_date:%m月%d日} {start}–{end}（第{period}大节）。仅反映课程占用，现场开放以实际为准。'
     if not period and not all_day:
         await _reply(ctx, '需确认当前大节', [
             '可回复“全天”查看全部5个大节，也可选择第几大节（1–5）。',
@@ -205,7 +219,8 @@ async def handle_self_study(plugin, ctx, text):
         choices = _campus_building_choices(campus)
         if len(choices) != 1:
             state['building_choices'] = choices
-            state['period'] = period
+            if not automatic:
+                state['period'] = period
             lines = [f'{campus}有这几栋综合楼，你想查哪一栋？'] if choices else [f'没找到{campus}的“{building}”。请换一个具体楼名。']
             lines.extend(f'{i}. {escape(row["name"])}' for i, row in enumerate(choices, 1))
             await _reply(ctx, '', lines, '回复序号或楼名即可。' if choices else '')
@@ -217,9 +232,10 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '需要查询地点', [
             '查哪栋教学楼？'], '比如“十号楼”或“综合楼”。')
         return True
+    state['awaiting_place'] = False
     command = 'empty classroom query --view day_matrix' if all_day else f"empty classroom query --view free --period {period}"
-    if all_day:
-        command += f' --saved-session-only true --target-date {now.date().isoformat()}'
+    if all_day or automatic:
+        command += f' --saved-session-only true --target-date {target_date.isoformat()}'
     if campus:
         command += f' --campus-text {campus}'
     if state.get('campus_code') and state.get('building_code'):
@@ -248,6 +264,8 @@ async def handle_self_study(plugin, ctx, text):
     finally:
         await ctx.set_query_var('_henu_card', None)
     if staged_page:
+        if recommendation:
+            staged_page += '\n\n' + recommendation
         await ctx.reply(card_chain(staged_page))
         return True
     if not result.get('success'):
@@ -268,7 +286,7 @@ async def handle_self_study(plugin, ctx, text):
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}
-    lines = [now.strftime('%m月%d日') + (f' · 当前第{period}大节' if automatic else f' · 本人指定第{period}大节'),
+    lines = [recommendation if automatic else now.strftime('%m月%d日') + f' · 本人指定第{period}大节',
              '仅反映课程占用，不保证现场无人或楼门开放。']
     cached = not building or not freshness.get('liveChecked')
     stale = freshness.get('stale') is True

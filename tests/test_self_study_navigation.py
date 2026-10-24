@@ -84,7 +84,7 @@ def test_generic_building_asks_which_jinming_block_and_keeps_period(monkeypatch)
     asyncio.run(run())
 
 
-def test_automatic_period_is_held_while_choosing_building(monkeypatch):
+def test_automatic_period_is_recalculated_while_choosing_building(monkeypatch):
     import henu_plugin.self_study as study
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     monkeypatch.setattr(study, '_campus_building_choices', lambda _: [
@@ -98,7 +98,7 @@ def test_automatic_period_is_held_while_choosing_building(monkeypatch):
         await handle_navigation(plugin, context('金明综合教学楼'))
         monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 16, 45, tzinfo=ZoneInfo('Asia/Shanghai')))
         await handle_navigation(plugin, context('1'))
-        assert '--period 3' in call.call_args.args[0]['command']
+        assert '--period 4' in call.call_args.args[0]['command']
     asyncio.run(run())
 
 
@@ -332,9 +332,9 @@ def test_midnight_uses_complete_saved_clock_without_claiming_all_rooms_free(monk
         await handle_navigation(plugin, ctx)
         return ctx
     ctx = asyncio.run(run())
-    call.assert_not_awaited()
-    assert '当前不在教学时段' in str(ctx.reply.call_args)
-    assert '不能据此认定所有教室空闲' in str(ctx.reply.call_args)
+    assert '--period 1' in call.call_args.args[0]['command']
+    assert '下一教学时段' in str(ctx.reply.call_args)
+    assert '不保证现场无人或楼门开放' in str(ctx.reply.call_args)
 
 
 def test_unknown_clock_never_asserts_nonteaching_and_attachments_do_not_continue(monkeypatch):
@@ -399,7 +399,7 @@ def test_verified_kaifeng_campus_automatically_queries_current_period(monkeypatc
         command = call.call_args.args[0]['command']
         assert f'--period {period}' in command and f'--campus-text {campus}' in command
         assert '--freshness cache_only' in command and 'day_matrix' not in command
-        assert f'当前第{period}大节' in str(ctx.reply.call_args)
+        assert '当前时段推荐' in str(ctx.reply.call_args) and f'第{period}大节' in str(ctx.reply.call_args)
         assert '十号楼101' in str(ctx.reply.call_args)
     asyncio.run(run())
 
