@@ -80,6 +80,12 @@ async def handle_saved_login(plugin, ctx, listener) -> bool:
     if kind != 'person' or sender in {'', '0', 'unknown', 'None'}:
         await ctx.reply(card_chain(text_card('校园账号验证', '请本人私聊发送“验证登录”；群内未执行登录。')[0]))
         return True
+    if listener is None:
+        # The first production listener owns navigation but has no account executor.
+        # Reuse the same request-scoped Storage transaction without registering handlers.
+        from components.event_listener.identity_capture import IdentityCaptureListener
+        listener = IdentityCaptureListener()
+        listener.plugin = plugin
     if not callable(getattr(listener, '_run_with_user_storage', None)):
         await ctx.reply(card_chain(text_card('校园账号验证', '验证服务暂不可用，本次未执行登录。')[0]))
         return True

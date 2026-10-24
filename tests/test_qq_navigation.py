@@ -1,3 +1,5 @@
+import pytest
+
 from henu_plugin.qq_navigation import navigation_config
 
 
@@ -71,7 +73,8 @@ def test_status_does_not_treat_saved_credentials_as_verified_login():
     assert '2026001234' not in page
 
 
-def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_only(account_files, monkeypatch):
+@pytest.mark.parametrize('provide_listener', [True, False])
+def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_only(account_files, monkeypatch, provide_listener):
     import asyncio
     from pathlib import Path
     from types import SimpleNamespace
@@ -103,11 +106,11 @@ def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_onl
         return ctx
     async def run():
         group = context('group')
-        assert await handle_navigation(plugin, group, listener=listener)
+        assert await handle_navigation(plugin, group, listener=listener if provide_listener else None)
         assert '群内未执行' in str(group.reply.call_args)
         assert not calls
         private = context('person')
-        assert await handle_navigation(plugin, private, listener=listener)
+        assert await handle_navigation(plugin, private, listener=listener if provide_listener else None)
         assert '校园账号验证成功' in str(private.reply.call_args)
         assert 'offline-old-password' not in str(private.reply.call_args_list)
         assert sum(method == 'POST' for method, _ in calls) == 1
