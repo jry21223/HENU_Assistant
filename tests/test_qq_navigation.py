@@ -91,7 +91,9 @@ def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_onl
             self.records = {'user:alice:profile': account_files['profile_file'].read_bytes()}
             self.service = HenuPluginService(Path.cwd())
         async def get_plugin_storage(self, key):
-            return self.records.get(key, b'')
+            return self.records[key]
+        async def get_plugin_storage_keys(self):
+            return list(self.records)
         async def set_plugin_storage(self, key, value):
             self.records[key] = value
     plugin = Plugin()

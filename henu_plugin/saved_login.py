@@ -95,7 +95,10 @@ async def handle_saved_login(plugin, ctx, listener) -> bool:
         lock = _locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
         async with lock:
             key = f'user:{sender}:saved_login_inflight'
-            previous = json.loads(await plugin.get_plugin_storage(key) or b'{}')
+            keys = await plugin.get_plugin_storage_keys()
+            if not isinstance(keys, list) or any(not isinstance(item, str) for item in keys):
+                raise ValueError('Invalid Storage key inventory')
+            previous = json.loads(await plugin.get_plugin_storage(key) or b'{}') if key in keys else {}
             if previous.get('status') in {'pending', 'unknown'}:
                 message = '上次认证结果尚未确认，本次未提交密码，请先人工核对学校登录状态。'
             else:
