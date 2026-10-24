@@ -1,0 +1,20 @@
+--- a/henu_mcp/tools/server_impl.py
++++ b/henu_mcp/tools/server_impl.py
+@@ -573,7 +573,7 @@
+     raw = profile.get("login_verification")
+     if not isinstance(raw, dict):
+         raw = {}
+-    status = str(raw.get("status") or "unknown").strip().lower()
++    status = str(raw.get("status") or ("unknown" if raw else "unverified")).strip().lower()
+     if status not in {"verified", "unverified", "failed", "stale", "unknown"}:
+         status = "unknown"
+     subject_student_id = str(raw.get("subject_student_id") or "").strip()
+@@ -640,7 +640,7 @@
+     raw = profile.get("last_login_attempt")
+     if not isinstance(raw, dict):
+         raw = {}
+-    status = str(raw.get("status") or "unknown").strip().lower()
++    status = str(raw.get("status") or ("unknown" if raw else "unverified")).strip().lower()
+     if status not in {"verified", "unverified", "failed", "unknown"}:
+         status = "unknown"
+     return {

@@ -148,6 +148,7 @@ class HenuPluginService:
         self._tool_dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "henu_cli": self._henu_cli,
             "setup_account": self._setup_account,
+            "verify_saved_login": self._verify_saved_login,
             "preferences": self._preferences,
             "sync_schedule": self._sync_schedule,
             "smart_course_selection": self._smart_course_selection,
@@ -558,6 +559,15 @@ class HenuPluginService:
             calibrate_period_time=_bool(params.get("calibrate_period_time"), True),
         )
 
+    def _verify_saved_login(self, params: dict[str, Any]) -> dict[str, Any]:
+        from henu_plugin.saved_login import verify_saved_login
+        identity = getattr(_CURRENT_IDENTITY, 'value', None)
+        if identity is None or identity.launcher_type != 'person' or not identity.sender_id:
+            return {'success': False, 'error_code': 'private_only', 'msg': '校园账号验证请本人私聊操作。'}
+        result = verify_saved_login()
+        result['_resolved_tool_name'] = 'setup_account'
+        return result
+
 
     def _preferences(self, params: dict[str, Any]) -> dict[str, Any]:
         action = params.get("action")
@@ -909,6 +919,8 @@ class HenuPluginService:
 
     def _empty_classroom_query(self, params: dict[str, Any]) -> dict[str, Any]:
         return mcp_server.empty_classroom_query(
+            target_date=_text(params.get("target_date")),
+            saved_session_only=_bool(params.get("saved_session_only"), False),
             view=_text(params.get("view")) or "free",
             term_code=_text(params.get("term_code")),
             week=_int(params.get("week"), 0),

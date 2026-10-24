@@ -59,6 +59,12 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.classroom_map import handle_classroom_details
+    if await handle_classroom_details(plugin, ctx, text):
+        return True
+    if text == '验证登录':
+        from henu_plugin.saved_login import handle_saved_login
+        return await handle_saved_login(plugin, ctx, listener)
     from henu_plugin.library_seat_map import handle_library_text
     if await handle_library_text(plugin, ctx, text):
         return True
@@ -112,10 +118,12 @@ def account_binding_card() -> list[str]:
 def classroom_command(text: str) -> str:
     """Translate the bounded classroom guide grammar into an existing read-only query."""
     import re
-    match = re.fullmatch(r'查(金明|明伦|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}楼)(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节)?的空教室', text)
+    match = re.fullmatch(r'查(金明|明伦|郑州龙子湖|郑州|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节|全天|一整天)?的空教室', text)
     if not match:
         return ''
     campus, building, week, day, period = match.groups()
+    from campus_core.resource_registry.alias import normalize_campus_name
+    campus = normalize_campus_name(campus).removesuffix('校区')
     if week and int(week) > 60:
         return ''
     command = f'empty classroom query --campus-text {campus} --building-text {building}'
@@ -127,7 +135,7 @@ def classroom_command(text: str) -> str:
     if period:
         command += f' --period {period}'
     else:
-        command += ' --view day_matrix'
+        command += ' --view day_matrix --saved-session-only true'
     return command
 
 
@@ -139,7 +147,10 @@ def menu_command(text: str, now=None) -> str:
         day = now.date() + timedelta(days=int(text == '明天课表'))
         return 'schedule day --date ' + day.isoformat()
     if classroom_command(text):
-        return classroom_command(text)
+        command = classroom_command(text)
+        if '--view day_matrix' in command and '--week ' not in command and '--day-of-week ' not in command:
+            command += ' --target-date ' + now.date().isoformat()
+        return command
     return {'我的状态': 'account status', '下一节课': 'schedule now', '本周课表': 'schedule week',
             '同步课表': 'schedule sync', '图书馆座位': 'library locations'}.get(text, '')
 
@@ -200,7 +211,16 @@ async def handle_menu_query(plugin, ctx) -> bool:
         result = await tool.call({'command': command}, session, ctx.query_id)
         variables = await ctx.get_query_vars()
         staged = variables.get('_henu_card') if isinstance(variables, dict) else None
+        from henu_plugin.classroom_map import reply_classroom_map
+        from henu_plugin.qq_cards import scope
+        owner = scope(str(await ctx.get_bot_uuid() or ''), session) if isinstance(staged, dict) and staged.get('classroom_ref') else None
+        if owner and await reply_classroom_map(plugin, ctx, staged, owner):
+            await ctx.set_query_var('_henu_card', None)
+            return True
         page = staged.get('page') if isinstance(staged, dict) else None
+        if result.get('success') and isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list):
+            from henu_plugin.self_study import all_day_pages
+            page = (await all_day_pages(plugin, result))[0]
         page = page or result_card(result).pages()[0]
         await ctx.set_query_var('_henu_card', None)
     except Exception:

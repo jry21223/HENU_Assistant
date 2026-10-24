@@ -6,6 +6,38 @@ from campus_core.empty_classroom.models import Building
 from henu_mcp.tools import server_impl as api
 
 
+@pytest.mark.parametrize('campus_text,expected_code', [
+    ('金明', '02'), ('金明校区', '02'), ('明伦', '01'), ('明伦校区', '01'),
+    ('郑州', '03'), ('龙子湖', '03'), ('龙子湖校区', '03'),
+    ('郑州龙子湖', '03'), ('郑州龙子湖校区', '03'),
+])
+def test_campus_names_resolve_without_school_login(monkeypatch, tmp_path, campus_text, expected_code):
+    from campus_core import storage_paths
+
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    monkeypatch.setattr(api, '_get_empty_classroom_client', lambda: pytest.fail('school login'))
+    result = api.empty_classroom_query(
+        view='free', term_code='2026,0', week=8, day_of_week=6, period=3,
+        campus_text=campus_text, freshness='cache_only',
+    )
+    assert result['success'] is True
+    assert result['query']['campusCode'] == expected_code
+
+
+def test_jinming_query_cannot_select_zhengzhou_building(monkeypatch, tmp_path):
+    from campus_core import storage_paths
+
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    monkeypatch.setattr(api, '_get_empty_classroom_client', lambda: pytest.fail('school login'))
+    result = api.empty_classroom_query(
+        view='free', term_code='2026,0', week=8, day_of_week=6, period=3,
+        campus_text='金明', building_text='友兰学堂南楼C座', freshness='cache_only',
+    )
+    assert result['success'] is False
+    assert '金明' in result['msg']
+    assert 'rooms' not in result
+
+
 class SchoolMetadata:
     def __init__(self):
         self.requests = []
