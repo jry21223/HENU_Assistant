@@ -92,7 +92,7 @@ def render_classroom_map(result):
         available = {1: rooms if verified(result) else set()}
     font_file = Path(__file__).with_name('assets') / 'NotoSansSC-Classroom.otf'
     font = lambda size: ImageFont.truetype(str(font_file), size)
-    image = Image.new('RGB', (1280, 1550), '#f6f8fa')
+    image = Image.new('RGB', (1280, 1720 if all_day else 1550), '#f6f8fa')
     draw = ImageDraw.Draw(image)
     title = '金明校区 · 综合楼' + layout['number']
     draw.text((64, 36), title, font=font(46), fill=INK)
@@ -104,7 +104,6 @@ def render_classroom_map(result):
     for x, color, label in ((64, FREE, '课程未占用'), (490, UNKNOWN, '未核验')):
         draw.rounded_rectangle((x, 180, x + 40, 220), radius=8, fill=color)
         draw.text((x + 58, 178), label, font=font(30), fill=INK)
-    draw.text((64, 244), '按原图相对位置 · 非比例图', font=font(25), fill='#59697b')
     for index, floor in enumerate((5, 4, 3, 2, 1)):
         top = 300 + index * 210
         draw.rounded_rectangle((48, top, 1232, top + 198), radius=18, fill='white')
@@ -127,15 +126,15 @@ def render_classroom_map(result):
                         cx = x + 17 + (p - 1) * 21
                         draw.ellipse((cx - 7, y + 43, cx + 7, y + 57),
                                      fill=FREE if number in available[p] else UNKNOWN)
-    if all_day and data.get('clockVerified'):
-        clocks = [str(slot['period']) + ' ' + slot.get('clockStart', '') + '–' + slot.get('clockEnd', '')
-                  for slot in sorted(data['periods'], key=lambda slot: slot['period'])]
-        draw.text((64, 1374), '   '.join(clocks[:3]), font=font(23), fill=INK)
-        draw.text((64, 1408), '   '.join(clocks[3:]), font=font(23), fill=INK)
-    else:
-        draw.text((64, 1390), '绿色仅表示该时段教务结果明确返回课程未占用。', font=font(25), fill=INK)
-    draw.text((64, 1450), '灰色不代表已占用；现场是否开放以实际为准。', font=font(25), fill=INK)
-    draw.text((64, 1490), '位置依据已核对的现场平面图，状态依据本次查询。', font=font(23), fill='#59697b')
+    if all_day:
+        for index, slot in enumerate(sorted(data['periods'], key=lambda row: row['period'])):
+            y = 1370 + index * 52
+            draw.rounded_rectangle((64, y, 104, y + 40), radius=12, fill=INK)
+            draw.text((84, y + 20), str(slot['period']), anchor='mm', font=font(27), fill='white')
+            label = (slot.get('clockStart', '') + '–' + slot.get('clockEnd', '')
+                     if data.get('clockVerified') else '第' + str(slot['period']) + '大节 · 时刻待核验')
+            draw.text((132, y + 20), label, anchor='lm', font=font(32), fill=INK)
+    draw.text((64, 1660 if all_day else 1450), '课程未占用不等于现场开放。', font=font(28), fill='#59697b')
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
