@@ -225,7 +225,9 @@ def test_large_all_day_reply_survives_real_tool_compaction(monkeypatch):
                              for r in range(30)]} for p in range(1, 6)]}}
     plugin = SimpleNamespace(plugin_runtime_handler=Mock(), get_plugin_storage=get_storage,
                              set_plugin_storage=put_storage, service=SimpleNamespace(
-                                 run_tool=lambda *args: copy.deepcopy(result), get_runtime_context=lambda *args: None))
+                                 run_tool=lambda *args: copy.deepcopy(result),
+                                 run_tool_async=AsyncMock(side_effect=lambda *args, **kwargs: copy.deepcopy(result)),
+                                 get_runtime_context=lambda *args: None))
 
     async def run():
         for text in ('找自习室', '金明校区金明综合楼3'):
