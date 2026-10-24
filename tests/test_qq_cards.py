@@ -505,7 +505,7 @@ def test_library_regions_are_compact_and_next_step_is_a_query_not_a_reservation(
     assert all(len(page.encode()) <= MAX_BYTES for page in pages)
 
 
-def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
+def test_classrooms_default_to_three_examples_with_opt_in_complete_list():
     source = {'success': True, 'total': 5,
               'query': {'termCode': '2026,0', 'week': 8, 'dayOfWeek': 2,
                         'period': 2, 'periodName': '第二大节', 'campusName': '金明校区', 'buildingName': '金明综合楼'},
@@ -515,10 +515,12 @@ def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
               'rooms': [{'roomName': f'金明综合楼610{i}', 'capacity': 120} for i in range(1, 6)]}
     pages = result_card(source, 'empty_classroom_query').pages()
     assert len(pages) == 1
-    assert all(f'金明综合楼610{i}' in pages[0] for i in range(1, 6))
+    assert all(f'金明综合楼610{i}' in pages[0] for i in range(1, 4))
+    assert all(f'金明综合楼610{i}' not in pages[0] for i in (4, 5))
+    assert '教室清单' in pages[0]
     assert '第8周' in pages[0] and '星期二' in pages[0] and '第二大节' in pages[0]
     assert '2026,0' not in pages[0] and 'xk_room_schedule' not in pages[0]
-    assert '缓存年龄' not in pages[0] and '来源获取时间' not in pages[0]
+    assert '缓存年龄' not in pages[0] and '来源获取时间：2026-10-19' in pages[0]
     assert '现场为准' in pages[0]
 
 

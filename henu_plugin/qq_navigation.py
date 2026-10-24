@@ -59,6 +59,9 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.classroom_map import handle_classroom_details
+    if await handle_classroom_details(plugin, ctx, text):
+        return True
     if text == '验证登录':
         from henu_plugin.saved_login import handle_saved_login
         return await handle_saved_login(plugin, ctx, listener)
@@ -208,6 +211,12 @@ async def handle_menu_query(plugin, ctx) -> bool:
         result = await tool.call({'command': command}, session, ctx.query_id)
         variables = await ctx.get_query_vars()
         staged = variables.get('_henu_card') if isinstance(variables, dict) else None
+        from henu_plugin.classroom_map import reply_classroom_map
+        from henu_plugin.qq_cards import scope
+        owner = scope(str(await ctx.get_bot_uuid() or ''), session) if isinstance(staged, dict) and staged.get('classroom_ref') else None
+        if owner and await reply_classroom_map(plugin, ctx, staged, owner):
+            await ctx.set_query_var('_henu_card', None)
+            return True
         page = staged.get('page') if isinstance(staged, dict) else None
         if result.get('success') and isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list):
             from henu_plugin.self_study import all_day_pages

@@ -82,6 +82,12 @@ async def with_all_day_clock(plugin, result):
                 slot['clockStart'], slot['clockEnd'] = KAIFENG_UNITS[period - 1]
             slots.append(slot)
         result = {**result, 'data': {**data, 'periods': slots, 'clockVerified': True}}
+    query = result.get('query')
+    if (result.get('success') and isinstance(query, dict) and query.get('campusCode') in {'01', '02'}
+            and type(query.get('period')) is int and 1 <= query['period'] <= 5
+            and await _saved_clock_matches(plugin)):
+        start, end = KAIFENG_UNITS[query['period'] - 1]
+        result = {**result, 'query': {**query, 'clockStart': start, 'clockEnd': end, 'clockVerified': True}}
     return result
 
 
@@ -263,6 +269,9 @@ async def handle_self_study(plugin, ctx, text):
         return True
     finally:
         await ctx.set_query_var('_henu_card', None)
+    from henu_plugin.classroom_map import reply_classroom_map
+    if await reply_classroom_map(plugin, ctx, staged if staged_page else None, key, recommendation):
+        return True
     if staged_page:
         if recommendation:
             staged_page += '\n\n' + recommendation

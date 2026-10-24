@@ -238,7 +238,19 @@ def test_large_all_day_reply_survives_real_tool_compaction(monkeypatch):
         await handle_navigation(plugin, ctx)
         reply = str(ctx.reply.call_args)
         assert '08:00–09:40' in reply and '19:10–21:40' in reply
-        assert '金明综合楼3-101' in reply and '金明综合楼3-501' in reply
+        assert '金明综合楼3-101' in reply and '金明综合楼3-501' not in reply
+        assert reply.count('课程未占用 30 间') == 5 and '教室清单' in reply
+        from components.event_listener.qq_cards import QQCardsListener
+        detail = context('教室清单')
+        await handle_navigation(plugin, detail)
+        all_pages = str(detail.reply.call_args)
+        listener = QQCardsListener.__new__(QQCardsListener)
+        listener.plugin = plugin
+        for _ in range(4):
+            page = context('下一页')
+            await listener.paging(page)
+            all_pages += str(page.reply.call_args)
+        assert '金明综合楼3-501' in all_pages
         assert '时刻待核验' not in reply
     asyncio.run(run())
 

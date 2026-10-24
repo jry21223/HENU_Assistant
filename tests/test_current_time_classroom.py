@@ -19,10 +19,10 @@ def campus_chat(monkeypatch):
     from henu_plugin.cli import inspect_cli_command
     import langbot_plugin.api.proxies.query_based_api as proxies
     storage = {'shared:period_time': json.dumps(study.KAIFENG_CLOCK).encode()}
-    requests, variables = [], {}
+    requests, variables, messages = [], {}, []
     now = [datetime(2026, 10, 24, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai'))]
     monkeypatch.setattr(study, 'campus_now', lambda: now[0])
-    active, response = [None], [None]
+    active, response, media_error = [None], [None], [False]
 
     async def get_storage(key):
         if key not in storage:
@@ -69,12 +69,18 @@ def campus_chat(monkeypatch):
             set_query_var=set_var)
         ctx.prevent_default = lambda: None
         ctx.prevent_postorder = lambda: setattr(ctx, 'is_prevent_postorder', True)
+        async def deliver(chain):
+            from langbot_plugin.api.entities.builtin.platform.message import Image
+            if media_error[0] and any(isinstance(item, Image) for item in chain.root):
+                raise TimeoutError('QQ image delivery outcome unknown')
+        ctx.reply.side_effect = deliver
         active[0] = ctx
         variables[ctx.query_id] = {}
         handled = await handle_navigation(instance, ctx)
+        messages.extend(call.args[0] for call in ctx.reply.call_args_list)
         return handled, '\n'.join(str(call.args[0]) for call in ctx.reply.call_args_list)
 
-    return SimpleNamespace(plugin=plugin, send=send, now=now, requests=requests, storage=storage, response=response)
+    return SimpleNamespace(plugin=plugin, send=send, now=now, requests=requests, storage=storage, response=response, messages=messages, media_error=media_error)
 
 
 def test_known_place_survives_reload_and_recalculates_current_period(campus_chat):

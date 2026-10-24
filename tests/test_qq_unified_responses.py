@@ -185,7 +185,7 @@ def test_capacity_business_card_does_not_paginate_by_row_count(harness):
 @pytest.mark.parametrize('menu_text,payload,expected', [
     ('我的状态', {'success': True, 'account': {'student_id': '2026001234', 'has_password': True}, 'cli': {'resolved_tool': 'system_status'}}, ['我的状态', r'20\*\*\*\*34', '账号已保存']),
     ('今天课表', {'success': True, 'date': '2026-10-20', 'week_filter_applied': True, 'day_schedule': [{'course': '数据结构', 'period': '第9-10节', 'location': '金明综合楼2402'}], 'cli': {'resolved_tool': 'schedule_query'}}, ['我的课表', '第9–10节', '金明综合楼2402']),
-    ('查金明校区综合楼第8周星期二第4大节的空教室', {'success': True, 'query': {'week': 8, 'dayOfWeek': 2, 'period': 4, 'campusName': '金明校区', 'buildingName': '综合楼1'}, 'rooms': [{'roomName': '金明综合楼1201', 'capacity': 242}], 'cli': {'resolved_tool': 'empty_classroom_query'}}, ['空教室', '第8周', '金明综合楼1201', '242座']),
+    ('查金明校区综合楼第8周星期二第4大节的空教室', {'success': True, 'query': {'week': 8, 'dayOfWeek': 2, 'period': 4, 'campusName': '金明校区', 'buildingName': '综合楼1'}, 'rooms': [{'roomName': '金明综合楼1201', 'capacity': 242}], 'freshness': {'liveChecked': True}, 'cli': {'resolved_tool': 'empty_classroom_query'}}, ['空教室', '第8周', '金明综合楼1201', '242座']),
 ])
 def test_other_menu_entries_share_the_exact_business_layout(harness, menu_text, payload, expected):
     from henu_plugin.qq_navigation import handle_menu_query, menu_command
