@@ -72,6 +72,17 @@ class HenuCli(BaseHenuTool):
             }
 
         stopping_yuketang = spec.resolved_tool == 'yuketang_set_enabled' and spec.params.get('enabled') == 'off'
+        if str(spec.resolved_tool or "").startswith("yuketang_quiz_"):
+            from henu_plugin.yuketang_quiz_flow import QuizFlow
+            if str(getattr(session.launcher_type, "value", session.launcher_type)) != "person":
+                return QuizFlow.failure("private_reply_required", "个人测验只能在私聊中操作。")
+            flow = QuizFlow(self, storage_key, session, query_id)
+            if spec.resolved_tool in WRITE_TOOL_NAMES:
+                if inline_token:
+                    return await self._execute_pending(token=inline_token, storage_key=storage_key,
+                        canonical_command=clean_command, session=session, query_id=query_id)
+                return await flow.prepare(spec)
+            return await flow.read(clean_command)
         if spec.resolved_tool in WRITE_TOOL_NAMES and not stopping_yuketang:
             parameter_error = self._write_parameter_error(spec)
             if parameter_error:
@@ -163,6 +174,7 @@ class HenuCli(BaseHenuTool):
         parameter_summary: str,
         query_id: int,
         conversation: dict[str, str],
+        extra_pending: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         pending = create_pending_operation(
             storage_key=storage_key,
@@ -171,6 +183,8 @@ class HenuCli(BaseHenuTool):
         )
         key = pending_storage_key(storage_key)
         pending['conversation'] = conversation
+        if extra_pending:
+            pending.update(extra_pending)
         try:
             await self.plugin.set_plugin_storage(
                 key,
@@ -262,6 +276,12 @@ class HenuCli(BaseHenuTool):
                 "msg": "待确认内容不是允许的外部写操作，已拒绝执行。",
             }
 
+        if str(spec.resolved_tool).startswith("yuketang_quiz_"):
+            from henu_plugin.yuketang_quiz_flow import QuizFlow
+            if str(getattr(session.launcher_type, "value", session.launcher_type)) != "person":
+                return QuizFlow.failure("private_reply_required", "测验只能回原私聊确认。")
+            return await QuizFlow(self, storage_key, session, query_id).confirmed(spec, pending)
+
         parameter_error = self._write_parameter_error(spec)
         if parameter_error:
             return {
@@ -285,6 +305,14 @@ class HenuCli(BaseHenuTool):
                 # local persistence. Do not mask a completed campus operation.
                 result.setdefault("confirmation_cleanup_failed", True)
         return result
+
+    async def _quiz_execute_command(self, command: str, session: Any, query_id: int, *, internal: bool = False) -> dict[str, Any]:
+        from henu_plugin.yuketang_quiz import QUIZ_INTERNAL_PREVIEW
+        token = QUIZ_INTERNAL_PREVIEW.set(internal)
+        try:
+            return self._mark_storage_commit_state(await super().call({"command": command}, session, query_id))
+        finally:
+            QUIZ_INTERNAL_PREVIEW.reset(token)
 
     async def _load_pending(self, storage_key: str) -> dict[str, Any]:
         try:

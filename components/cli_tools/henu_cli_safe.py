@@ -57,6 +57,9 @@ class HenuCliSafe(HenuCli):
         return result
 
     async def _publish_delivery_result(self, result: Any, session: Any, query_id: int) -> bool:
+        from henu_plugin.yuketang_quiz import QUIZ_INTERNAL_PREVIEW
+        if QUIZ_INTERNAL_PREVIEW.get():
+            return False
         if not isinstance(result, dict):
             return False
         try:

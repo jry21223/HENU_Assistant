@@ -24,6 +24,9 @@ WRITE_TOOL_NAMES = frozenset(
         "yuketang_exam_set",
         "yuketang_list_update",
         "yuketang_start_time",
+        "yuketang_quiz_start",
+        "yuketang_quiz_save",
+        "yuketang_quiz_submit",
     }
 )
 
