@@ -60,7 +60,8 @@ class RainCatalog:
             courses.append({"course_name": name[:256], "classroom_label": label, "classroom_id": identifier})
         return courses
 
-    def exams(self, classroom: dict[str, str]) -> list[dict[str, Any]]:
+    def exams(self, classroom: dict[str, str], *, quizzes_only: bool = False) -> list[dict[str, Any]]:
+        """List assessments; quiz operations never need another exam's cover."""
         identifier = classroom["classroom_id"]
         if not re.fullmatch(r"[0-9]+", identifier):
             raise CatalogError("rain_response_invalid", "班级标识无效。")
@@ -82,6 +83,8 @@ class RainCatalog:
             if (type(activity_type) is not int or activity_type not in (4, 5)
                     or ("classroom_id" in activity and str(activity["classroom_id"]) != identifier)):
                 raise CatalogError("rain_response_invalid", "测评活动类型或所属班级无效，未继续读取。")
+            if quizzes_only and activity_type != 4:
+                continue
             exam_id = str(activity.get("courseware_id") or "")
             status = activity.get("status")
             title = activity.get("title", "")

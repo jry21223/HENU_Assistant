@@ -48,6 +48,9 @@ def redact_cli_command(command: Any) -> str:
     try:
         argv = shlex.split(raw)
     except ValueError:
+        # Broken quoting has no reliable token boundary. Hide the entire tail
+        # rather than exposing any part of a student's answer in diagnostics.
+        raw = re.sub(r"(?is)(--answers[-_]json(?:=|\s+)).*", r"\1<redacted>", raw)
         return _SENSITIVE_OPTION_PATTERN.sub(r"\1<redacted>", raw)
 
     masked: list[str] = []

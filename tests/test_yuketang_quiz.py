@@ -12,7 +12,7 @@ import pytest
 from langbot_plugin.api.entities.builtin.provider.session import LauncherTypes, Session
 
 from components.cli_tools.henu_cli_safe import HenuCliSafe
-from henu_plugin import bridge_client
+from henu_plugin import bridge_client, yuketang_config
 from henu_plugin.hardened_service import HardenedHenuPluginService
 
 
@@ -31,6 +31,10 @@ class QuizServer:
         self.user_id = 41
         self.visible = True
         self.grade_overrides = {}
+        self.other_activities = []
+        self.bridge_status = {"ok": True, "cookie": {"cookie": "csrftoken=synthetic; sessionid=private-cookie"},
+            "daemon_wired": True, "daemon": {"openids": [], "age_s": 1}, "config_present": True,
+            "config_hash": bridge_client.canonical_hash(yuketang_config.default_config())}
         self.title = "合成测验"
         self.slides = [
             {"Shapes": [{"Text": "合成选择题", "URL": "https://rain-public-qn.yuketang.cn/public/synthetic/one.png"}],
@@ -57,7 +61,7 @@ class QuizServer:
             data = {"list": [{"name": "合成班", "classroom_id": 123, "course": {"name": "合成课程"}}]}
         elif "/logs/learn/" in path:
             data = {"activities": [{"type": 4, "courseware_id": 9001, "status": self.status,
-                                     "title": self.title, "deadline": 4102444800}]}
+                                     "title": self.title, "deadline": 4102444800}, *self.other_activities]}
         elif path.endswith("/quiz/quiz_info"):
             data = {"id": 9001, "title": self.title, "problem_count": 3, "limit": 0,
                     "deadline": 4102444800, "total_score": 20, "university_id": 7}
@@ -111,9 +115,7 @@ def workflow(monkeypatch):
     server = QuizServer()
     monkeypatch.setattr(requests, "get", server.get)
     monkeypatch.setattr(requests, "post", server.post)
-    monkeypatch.setattr(bridge_client, "fetch_status", lambda *args, **kwargs: {
-        "ok": True, "cookie": {"cookie": "csrftoken=synthetic; sessionid=private-cookie"},
-        "daemon": {"openids": []}})
+    monkeypatch.setattr(bridge_client, "fetch_status", lambda *args, **kwargs: deepcopy(server.bridge_status))
     storage = Storage()
     tool = HenuCliSafe()
     tool.plugin = storage
@@ -369,8 +371,7 @@ def test_failed_bridge_stop_verification_prevents_writing(workflow, monkeypatch)
         def status(*args, **kwargs):
             nonlocal calls
             calls += 1
-            return {"ok": calls < 3, "cookie": {"cookie": "csrftoken=synthetic; sessionid=private-cookie"},
-                    "daemon": {"openids": []}}
+            return {**deepcopy(server.bridge_status), "ok": calls < 3}
         monkeypatch.setattr(bridge_client, "fetch_status", status)
         result = await confirm(storage, tool, session, 2)
         assert not result["success"] and not server.posts
@@ -474,3 +475,64 @@ def test_simultaneous_confirmations_consume_the_token_once(workflow, monkeypatch
         assert sum(result["success"] for result in results) == 1
         assert len(server.posts) == 1
     asyncio.run(run())
+
+
+def test_quiz_flow_never_reads_another_exams_cover(workflow):
+    async def run():
+        server, storage, tool, session = workflow
+        server.other_activities = [{"type": 5, "courseware_id": 9002, "status": 0, "title": "另一场考试"}]
+        shown = await tool.call({"command": f"yuketang quiz show {TARGET}"}, session, 1)
+        assert shown["success"], shown
+        server.cache = deepcopy(ANSWERS)
+        preview = await tool.call({"command": f"yuketang quiz submit {TARGET}"}, session, 2)
+        assert preview.get("confirmation_required"), preview
+        submitted = await confirm(storage, tool, session, 3)
+        assert submitted["success"] and server.status == 2, submitted
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("visibility", ["0", "false", 1.0, None, {}])
+def test_ambiguous_grade_visibility_never_exposes_answers(workflow, visibility):
+    async def run():
+        server, _, tool, session = workflow
+        server.status = 2
+        server.visible = visibility
+        result = await tool.call({"command": f"yuketang quiz result {TARGET} --index 1"}, session, 1)
+        assert "review" not in result and "hidden-standard-answer" not in str(result)
+        assert not result.get("grade", {}).get("visible")
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("problem", ["unwired", "old", "missing_age", "bool_age", "invalid_ids", "config_changed"])
+def test_direct_write_requires_a_fresh_verified_listener_stop(workflow, problem):
+    async def run():
+        server, storage, tool, session = workflow
+        server.status = 0
+        await tool.call({"command": f"yuketang quiz start {TARGET}"}, session, 1)
+        if problem == "unwired":
+            server.bridge_status["daemon_wired"] = False
+        elif problem == "old":
+            server.bridge_status["daemon"]["age_s"] = 3600
+        elif problem == "missing_age":
+            server.bridge_status["daemon"].pop("age_s")
+        elif problem == "bool_age":
+            server.bridge_status["daemon"]["age_s"] = True
+        elif problem == "invalid_ids":
+            server.bridge_status["daemon"]["openids"] = {}
+        else:
+            server.bridge_status["config_hash"] = "changed"
+        result = await confirm(storage, tool, session, 2)
+        assert not result["success"] and not server.posts
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("flag", ["--answers-json", "--answers_json"])
+def test_malformed_answer_quoting_is_still_redacted(workflow, capsys, flag):
+    async def run():
+        server, _, tool, session = workflow
+        command = f"yuketang quiz save {TARGET} --revision {'a' * 64} {flag} '{{\"601\":[\"private-answer\"]}}"
+        result = await tool.call({"command": command}, session, 1)
+        assert not result["success"] and not server.posts
+        assert "private-answer" not in str(result)
+    asyncio.run(run())
+    assert "private-answer" not in capsys.readouterr().out

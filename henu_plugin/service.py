@@ -1191,7 +1191,7 @@ class HenuPluginService:
         try:
             catalog = self._yuketang_catalog()
             classroom = resolve_classroom(catalog.courses(), _text(params.get("course")))
-            activities = catalog.exams(classroom)
+            activities = catalog.exams(classroom, quizzes_only=True)
             matches = [activity for activity in activities if activity.get("quiz_id") == _text(params.get("quiz_id"))]
             if len(matches) != 1:
                 raise QuizError("quiz_target_invalid", "没有找到该班级中唯一匹配的测验；不能使用考试编号代替。")
@@ -1206,7 +1206,14 @@ class HenuPluginService:
                 live = bridge_client.fetch_status(identity.storage_key, timeout=8)
                 daemon = live.get("daemon")
                 registrations = daemon.get("openids") if isinstance(daemon, dict) else None
-                if live.get("ok") is not True or not isinstance(registrations, (list, dict)) or identity.storage_key in registrations:
+                age = daemon.get("age_s") if isinstance(daemon, dict) else None
+                local_config = self._yuketang_read()
+                config_hash = bridge_client.canonical_hash(yuketang_config.sanitize_config(local_config))
+                if (live.get("ok") is not True or live.get("daemon_wired") is not True
+                        or not isinstance(registrations, list) or any(not isinstance(item, str) for item in registrations)
+                        or identity.storage_key in registrations or type(age) not in {int, float} or not 0 <= age <= 75
+                        or local_config["enabled"] is not False or live.get("config_present") is not True
+                        or live.get("config_hash") != config_hash):
                     raise QuizError("quiz_executor_conflict", "请先关闭当前身份的雨课堂监听并核对停止，再直接操作测验。")
                 if operation == "start":
                     return client.start(revision)

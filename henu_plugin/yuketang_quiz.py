@@ -304,7 +304,7 @@ class RainQuiz:
                             "time": math.ceil(time.time())})
         self._post("entire_quiz_submit", {**self.params, "user_id": state.user_id, "results": results})
         after = self._get("user_quiz_status")
-        activities = RainCatalog(self.domain, self.headers["Cookie"]).exams(self.classroom)
+        activities = RainCatalog(self.domain, self.headers["Cookie"]).exams(self.classroom, quizzes_only=True)
         matches = [activity for activity in activities if activity.get("quiz_id") == self.params["quiz_id"]
                    and activity["title"] == state.quiz["title"]]
         if (not isinstance(after, dict) or after.get("status") != 2 or len(matches) != 1 or matches[0]["status"] != 2):
@@ -338,7 +338,10 @@ class RainQuiz:
         data = self._get("quiz_result")
         if not isinstance(data, dict):
             raise QuizError("quiz_response_invalid", "官方成绩格式无效。")
-        if not data.get("quiz_visible"):
+        visible = data.get("quiz_visible")
+        if type(visible) not in {bool, int} or visible not in {0, 1}:
+            raise QuizError("quiz_visibility_unverified", "无法核对官方成绩可见性，未展示成绩或标准答案。")
+        if not visible:
             return {"success": True, "quiz": state.quiz, "grade": {"visible": False},
                     "msg": "测验成绩尚未公布", "reply_text": "官方成绩尚未公布，未读取或展示隐藏成绩。"}
         if data.get("Title") != state.quiz["title"] or data.get("problem_count") != state.quiz["question_count"]:
