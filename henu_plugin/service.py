@@ -1165,8 +1165,8 @@ class HenuPluginService:
             exams = catalog.exams(classroom)
         except CatalogError as exc:
             return self._yuketang_catalog_failure(exc)
-        lines = [f"{classroom['course_name']} / {classroom['classroom_label']}：本次查询返回 {len(exams)} 个考试。"]
-        lines.extend(f"{exam['title']}：{exam['status_label']}；截止 {exam.get('deadline_china', '未提供')}" for exam in exams)
+        lines = [f"{classroom['course_name']} / {classroom['classroom_label']}：本次查询返回 {len(exams)} 项测验／考试。"]
+        lines.extend(f"{'测验' if exam['assessment_type'] == 'quiz' else '考试'} · {exam['title']}：{exam['status_label']}；截止 {exam.get('deadline_china', '未提供')}" for exam in exams)
         lines.append("以上为只读查询；未开始考试、获取试卷或提交答案。")
         return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams),
                 "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}

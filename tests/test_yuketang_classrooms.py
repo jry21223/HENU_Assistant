@@ -85,11 +85,90 @@ def course_payload(courses=None):
     return {"errcode": 0, "data": {"list": [COURSE] if courses is None else courses}}
 
 
+def test_public_cli_keeps_quiz_identity_and_never_uses_exam_cover(monkeypatch):
+    async def run():
+        payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
+            {"type": 4, "courseware_id": 4446945, "status": 0,
+             "title": "数字逻辑第2次测试", "deadline": 1792943940000}]}}]
+        _, tool, session, get, push = make_tool(monkeypatch, payloads)
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert result["success"], result
+        activity = result["exams"][0]
+        assert activity["assessment_type"] == "quiz"
+        assert activity["quiz_id"] == "4446945" and "exam_id" not in activity
+        assert activity["classroom_id"] == "31921915"
+        assert activity["deadline_china"] == "2026-10-25T23:59:00+08:00"
+        assert "测验" in result["reply_text"]
+        assert not push.called
+        assert all("/v/exam/" not in call.args[0] for call in get.call_args_list)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cover_change", [
+    {"title": "另一份试卷"},
+    {"classroom_id": 999},
+    {"classroom_id": None},
+    {"exam_id": 999},
+])
+def test_public_cli_rejects_exam_cover_not_bound_to_requested_activity(monkeypatch, cover_change):
+    async def run():
+        cover = {"title": "目标考试", "classroom_id": 31921915, "exam_id": 900,
+                 "deadline": 1792943940000, **cover_change}
+        payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
+            {"type": 5, "courseware_id": 900, "status": 0, "title": "目标考试"}]}},
+            {"status": 200, "data": cover}]
+        _, tool, session, _, push = make_tool(monkeypatch, payloads)
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert not result["success"]
+        assert result["error_code"] == "rain_assessment_mismatch"
+        assert not push.called and "exams" not in result
+        assert "另一份试卷" not in str(result)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("activity_change", [
+    {"type": None}, {"type": True}, {"type": "4"}, {"type": 6},
+    {"classroom_id": 999},
+])
+def test_public_cli_rejects_unknown_type_or_foreign_classroom_before_cover(monkeypatch, activity_change):
+    async def run():
+        activity = {"type": 4, "courseware_id": 123, "status": 0,
+                    "title": "测验", **activity_change}
+        _, tool, session, get, push = make_tool(monkeypatch, [course_payload(),
+            {"errcode": 0, "data": {"activities": [activity]}}])
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert not result["success"] and result["error_code"] == "rain_response_invalid"
+        assert len(get.call_args_list) == 2 and not push.called
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("same_type", [True, False])
+def test_public_cli_uses_type_and_classroom_as_part_of_activity_identity(monkeypatch, same_type):
+    async def run():
+        rows = [
+            {"type": 4, "courseware_id": 123, "status": 2, "title": "测验"},
+            {"type": 4 if same_type else 5, "courseware_id": 123, "status": 2, "title": "另一活动"},
+        ]
+        _, tool, session, get, push = make_tool(monkeypatch, [course_payload(),
+            {"errcode": 0, "data": {"activities": rows}}])
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        if same_type:
+            assert not result["success"] and result["error_code"] == "rain_response_invalid"
+        else:
+            assert result["success"] and result["total"] == 2
+            assert result["exams"][0]["assessment_type"] == "quiz"
+            assert result["exams"][1]["assessment_type"] == "exam"
+            assert "quiz_id" in result["exams"][0] and "exam_id" in result["exams"][1]
+        assert len(get.call_args_list) == 2 and not push.called
+    asyncio.run(run())
+
+
 def test_public_cli_reads_unstarted_exam_and_only_returns_metadata(monkeypatch):
     async def run():
         payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
-            {"courseware_id": 4637969, "status": 0, "title": "过程性测试1（第1-2章）"}]}},
+            {"type": 5, "courseware_id": 4637969, "status": 0, "title": "过程性测试1（第1-2章）"}]}},
             {"status": 200, "data": {"deadline": 1791734340000, "description": "private-never-output",
+                                     "classroom_id": 31921915, "title": "过程性测试1（第1-2章）",
                                      "questions": ["private-never-output"], "user": "private-never-output"}}]
         _, tool, session, get, push = make_tool(monkeypatch, payloads)
         result = await tool.call({"command": 'yuketang exam list --course "数据结构"'}, session, 1)
