@@ -109,6 +109,7 @@ def test_public_cli_keeps_quiz_identity_and_never_uses_exam_cover(monkeypatch):
     {"classroom_id": 999},
     {"classroom_id": None},
     {"exam_id": 999},
+    {"exam_id": None},
 ])
 def test_public_cli_rejects_exam_cover_not_bound_to_requested_activity(monkeypatch, cover_change):
     async def run():
@@ -123,6 +124,51 @@ def test_public_cli_rejects_exam_cover_not_bound_to_requested_activity(monkeypat
         assert result["error_code"] == "rain_assessment_mismatch"
         assert not push.called and "exams" not in result
         assert "另一份试卷" not in str(result)
+    asyncio.run(run())
+
+
+def test_public_cli_does_not_use_idless_cover_to_override_activity_time(monkeypatch):
+    async def run():
+        payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
+            {"type": 5, "courseware_id": 900, "status": 0, "title": "目标考试",
+             "deadline": 1791734340000}]}}, {"status": 200, "data": {
+                 "title": "目标考试", "classroom_id": 31921915, "deadline": 1792943940000}}]
+        _, tool, session, _, push = make_tool(monkeypatch, payloads)
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert result["success"], result
+        assert result["exams"][0]["deadline_china"] == "2026-10-11T23:59:00+08:00"
+        assert result["exams"][0]["cover_association_verified"] is False
+        assert "封面关联未核实" in result["reply_text"] and not push.called
+    asyncio.run(run())
+
+
+def test_public_cli_rejects_foreign_classroom_declared_by_cover_envelope(monkeypatch):
+    async def run():
+        payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
+            {"type": 5, "courseware_id": 900, "status": 0, "title": "目标考试"}]}},
+            {"status": 200, "classroom_id": 999, "data": {
+                "title": "目标考试", "classroom_id": 31921915, "exam_id": 900}}]
+        plugin, tool, session, _, push = make_tool(monkeypatch, payloads)
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert not result["success"] and result["error_code"] == "rain_assessment_mismatch"
+        assert "exams" not in result and not push.called
+        assert "user:classroom-test:yuketang_config" not in plugin.data
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("level", ["payload", "data"])
+def test_public_cli_rejects_foreign_classroom_declared_by_response_envelope(monkeypatch, level):
+    async def run():
+        payload = {"errcode": 0, "data": {"activities": [
+            {"type": 4, "courseware_id": 123, "status": 0, "title": "测验"}]}}
+        envelope = payload if level == "payload" else payload["data"]
+        envelope["classroom_id"] = 999
+        plugin, tool, session, get, push = make_tool(monkeypatch, [course_payload(), payload])
+        result = await tool.call({"command": 'yuketang exam list --course "010 班"'}, session, 1)
+        assert not result["success"] and result["error_code"] == "rain_response_invalid"
+        assert "exams" not in result and not push.called
+        assert len(get.call_args_list) == 2
+        assert "user:classroom-test:yuketang_config" not in plugin.data
     asyncio.run(run())
 
 
@@ -168,7 +214,7 @@ def test_public_cli_reads_unstarted_exam_and_only_returns_metadata(monkeypatch):
         payloads = [course_payload(), {"errcode": 0, "data": {"activities": [
             {"type": 5, "courseware_id": 4637969, "status": 0, "title": "过程性测试1（第1-2章）"}]}},
             {"status": 200, "data": {"deadline": 1791734340000, "description": "private-never-output",
-                                     "classroom_id": 31921915, "title": "过程性测试1（第1-2章）",
+                                     "classroom_id": 31921915, "exam_id": 4637969, "title": "过程性测试1（第1-2章）",
                                      "questions": ["private-never-output"], "user": "private-never-output"}}]
         _, tool, session, get, push = make_tool(monkeypatch, payloads)
         result = await tool.call({"command": 'yuketang exam list --course "数据结构"'}, session, 1)
@@ -176,6 +222,7 @@ def test_public_cli_reads_unstarted_exam_and_only_returns_metadata(monkeypatch):
         assert result["classroom"]["classroom_label"] == "010 班"
         assert result["exams"][0]["status_label"] == "尚未开始作答"
         assert result["exams"][0]["deadline_china"] == "2026-10-11T23:59:00+08:00"
+        assert result["exams"][0]["cover_association_verified"] is True
         assert len(get.call_args_list) == 3 and not push.called
         urls = [call.args[0] for call in get.call_args_list]
         assert urls[-1] == "https://www.yuketang.cn/v/exam/cover?exam_id=4637969&classroom_id=31921915"

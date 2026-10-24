@@ -69,6 +69,10 @@ class RainCatalog:
         activities = data.get("activities") if isinstance(data, dict) else None
         if payload.get("errcode") != 0 or not isinstance(activities, list):
             raise CatalogError("rain_query_failed", "考试列表查询失败，不能判断是否有考试。")
+        for envelope in (payload, data):
+            if (isinstance(envelope, dict) and "classroom_id" in envelope
+                    and str(envelope["classroom_id"]) != identifier):
+                raise CatalogError("rain_response_invalid", "测评列表所属班级无效，未继续读取。")
         records = []
         identities: set[tuple[int, str]] = set()
         for activity in activities:
@@ -99,10 +103,13 @@ class RainCatalog:
                 if cover.get("status") != 200 or not isinstance(cover_data, dict) or not cover_data:
                     raise CatalogError("rain_query_failed", "考试封面查询失败，不能确认考试状态。")
                 if (str(cover_data.get("classroom_id")) != identifier
+                        or ("classroom_id" in cover and str(cover["classroom_id"]) != identifier)
                         or cover_data.get("title") != title
                         or ("exam_id" in cover_data and str(cover_data["exam_id"]) != exam_id)):
                     raise CatalogError("rain_assessment_mismatch", "试卷与当前班级或活动不一致，未继续读取或作答。")
-                timing = cover_data
+                record["cover_association_verified"] = "exam_id" in cover_data
+                if record["cover_association_verified"]:
+                    timing = cover_data
             for key in ("start_time", "deadline"):
                 value = timing.get(key)
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
