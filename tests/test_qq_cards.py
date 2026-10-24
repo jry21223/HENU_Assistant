@@ -540,6 +540,13 @@ def test_status_copy_is_direct_but_does_not_claim_saved_login_is_valid():
     assert '2026001234' not in page
 
 
+def test_status_without_login_history_does_not_invent_an_unknown_attempt():
+    page = result_card({'success': True, 'account': {'account': {
+        'student_id': 'synthetic-student', 'has_password': True}}}, 'system_status').pages()[0]
+    assert '验证登录' in page
+    assert '结果不确定' not in page
+
+
 def test_cancel_binding_copy_keeps_original_account_clear():
     from henu_plugin.qq_cards import text_card
     page = text_card('校园账号与校准', '已取消账号凭据录入。')[0]

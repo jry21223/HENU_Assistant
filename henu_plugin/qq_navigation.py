@@ -59,6 +59,9 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    if text == '验证登录':
+        from henu_plugin.saved_login import handle_saved_login
+        return await handle_saved_login(plugin, ctx, listener)
     from henu_plugin.library_seat_map import handle_library_text
     if await handle_library_text(plugin, ctx, text):
         return True

@@ -571,7 +571,7 @@ def _mask_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return {
         "student_id": str(profile.get("student_id", "") or ""),
         "has_password": bool(profile.get("password")),
-        "last_login_attempt": load_json(Path(PROFILE_FILE).with_name("login_attempt.json")),
+        "last_login_attempt": profile.get('last_login_attempt') or load_json(Path(PROFILE_FILE).with_name("login_attempt.json")),
         "library_default_location": location,
         "library_default_seat_no": seat_no,
         "seminar_groups_total": len(seminar_groups),

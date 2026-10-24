@@ -33,6 +33,7 @@ def page_request_text(chain: list) -> str:
 # Every service dispatch route has a deliberate presentation title.
 TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
+    "verify_saved_login": "校园账号验证",
     "preferences": "图书馆偏好",
     "sync_schedule": "课表更新", "schedule_query": "我的课表",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
@@ -488,11 +489,13 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         lines.append("账号已保存，查询时会检查登录。" if account.get("has_password") else "还没保存校园账号，请私聊发送“绑定账号”。")
         attempt = account.get("last_login_attempt") or {}
         attempt_status = {
-            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没检查过登录。",
+            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没有登录验证记录，可私聊发送“验证登录”。",
             "pending": "上次登录还在处理中，请稍等。", "unknown": "上次登录结果不确定，请勿重复提交密码。",
         }.get(attempt.get("status")) if isinstance(attempt, dict) else None
         if attempt_status:
             lines.append(attempt_status)
+        elif not attempt and account.get('has_password'):
+            lines.append('还没有登录验证记录，可私聊发送“验证登录”。')
         clock = result.get("server_time") or {}
         if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))

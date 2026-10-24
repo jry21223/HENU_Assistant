@@ -57,6 +57,68 @@ def school_http(
     return calls
 
 
+def test_saved_account_can_be_verified_without_resending_credentials_in_chat(account_files, monkeypatch):
+    from henu_plugin.saved_login import verify_saved_login
+    calls = school_http(monkeypatch, subject="old-student")
+    # The existing session is expired; only the saved password may renew it.
+    account_files["xk_cookie_file"].write_text("{}")
+    result = verify_saved_login()
+    assert result == {"success": True, "verified": True, "msg": "校园账号验证成功，可以继续查询。"}
+    assert api.show_account()["account"]["last_login_attempt"]["status"] == "verified"
+    assert sum(method == "POST" for method, _ in calls) == 1
+    assert "offline-old-password" not in str(result)
+
+
+def test_uncertain_saved_login_cannot_be_resubmitted(account_files, monkeypatch):
+    from henu_plugin.saved_login import verify_saved_login
+    from henu_mcp.core.secure_storage import load_encrypted_profile, save_encrypted_profile
+    path = account_files['profile_file']
+    profile = load_encrypted_profile(path)
+    profile['last_login_attempt'] = {'status': 'unknown', 'error_code': 'auth_state_unknown'}
+    save_encrypted_profile(path, profile)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Uncertain authentication must not resubmit credentials')
+    monkeypatch.setattr(requests.Session, 'request', forbidden)
+    assert verify_saved_login()['error_code'] == 'auth_state_unknown'
+
+
+def test_legacy_uncertain_verification_cannot_be_resubmitted(account_files, monkeypatch):
+    from henu_plugin.saved_login import verify_saved_login
+    from henu_mcp.core.secure_storage import load_encrypted_profile, save_encrypted_profile
+    path = account_files['profile_file']
+    profile = load_encrypted_profile(path)
+    profile.pop('last_login_attempt', None)
+    profile['login_verification'] = {'status': 'unknown', 'error_code': 'auth_state_unknown'}
+    save_encrypted_profile(path, profile)
+    calls = school_http(monkeypatch, subject='old-student')
+    result = verify_saved_login()
+    assert result['error_code'] == 'auth_state_unknown'
+    assert not any(method == 'POST' for method, _ in calls)
+
+
+def test_failed_saved_login_preserves_binding_and_limits_retries(account_files, monkeypatch):
+    from henu_plugin.saved_login import verify_saved_login
+    calls = school_http(monkeypatch, reject=True)
+    account_files['xk_cookie_file'].write_text('{}')
+    assert verify_saved_login()['error_code'] == 'invalid_credentials'
+    assert verify_saved_login()['error_code'] == 'login_rate_limited'
+    assert api.show_account()['account']['student_id'] == 'old-student'
+    assert sum(method == 'POST' for method, _ in calls) == 1
+
+
+def test_saved_login_failure_budget_survives_successes_within_the_day(account_files, monkeypatch):
+    from henu_plugin.saved_login import verify_saved_login
+    moment = [1800000000.0]
+    monkeypatch.setattr('henu_plugin.saved_login.time.time', lambda: moment[0])
+    for reject in (True, False, True, False, True):
+        school_http(monkeypatch, subject='old-student', reject=reject)
+        assert verify_saved_login()['success'] is not reject
+        moment[0] += 61
+    calls = school_http(monkeypatch, subject='old-student')
+    assert verify_saved_login()['error_code'] == 'login_rate_limited'
+    assert not calls
+
+
 def test_saved_session_cannot_verify_a_new_password(account_files, monkeypatch):
     school_http(monkeypatch, reject=True)
 

@@ -71,6 +71,49 @@ def test_status_does_not_treat_saved_credentials_as_verified_login():
     assert '2026001234' not in page
 
 
+def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_only(account_files, monkeypatch):
+    import asyncio
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+    from components.event_listener.identity_capture import IdentityCaptureListener
+    from henu_plugin.service import HenuPluginService
+    from henu_plugin.qq_navigation import handle_navigation
+    from test_account_binding import school_http
+
+    calls = school_http(monkeypatch, subject='old-student')
+    class Plugin:
+        def __init__(self):
+            self.records = {'user:alice:profile': account_files['profile_file'].read_bytes()}
+            self.service = HenuPluginService(Path.cwd())
+        async def get_plugin_storage(self, key):
+            return self.records.get(key, b'')
+        async def set_plugin_storage(self, key, value):
+            self.records[key] = value
+    plugin = Plugin()
+    listener = IdentityCaptureListener.__new__(IdentityCaptureListener)
+    listener.plugin = plugin
+    def context(kind):
+        ctx = SimpleNamespace(event=SimpleNamespace(launcher_type=kind, launcher_id='alice', sender_id='alice',
+            message_chain=MessageChain(root=[Plain(text='验证登录')])), reply=AsyncMock(), query_id=7,
+            is_prevent_postorder=False)
+        ctx.prevent_default = lambda: None
+        ctx.prevent_postorder = lambda: setattr(ctx, 'is_prevent_postorder', True)
+        return ctx
+    async def run():
+        group = context('group')
+        assert await handle_navigation(plugin, group, listener=listener)
+        assert '群内未执行' in str(group.reply.call_args)
+        assert not calls
+        private = context('person')
+        assert await handle_navigation(plugin, private, listener=listener)
+        assert '校园账号验证成功' in str(private.reply.call_args)
+        assert 'offline-old-password' not in str(private.reply.call_args_list)
+        assert sum(method == 'POST' for method, _ in calls) == 1
+    asyncio.run(run())
+
+
 def test_preferences_card_retains_production_defaults():
     from henu_plugin.qq_cards import result_card
     page = result_card({'success': True, 'preferences': {'library_location': '金明馆', 'library_seat_no': 'A101'}}, 'preferences').pages()[0]
