@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import pytest
 from datetime import datetime
 from types import SimpleNamespace
@@ -115,6 +116,56 @@ def test_missing_campus_only_asks_campus(monkeypatch, entry):
     assert '第几大节' not in str(ctx.reply.call_args)
     call.assert_not_awaited()
     assert '十号楼101' not in str(ctx.reply.call_args)
+
+
+def test_every_quoted_campus_prompt_reply_continues_the_conversation(monkeypatch):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+
+    call = AsyncMock(return_value={'success': True, 'rooms': []})
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+
+    async def run():
+        initial = context('找自习室')
+        plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+        assert await handle_navigation(plugin, initial)
+        suggestions = re.findall('“([^”]+)”', str(initial.reply.call_args))
+        assert suggestions
+        for suggestion in suggestions:
+            plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+            assert await handle_navigation(plugin, context('找自习室'))
+            reply = context(suggestion)
+            assert await handle_navigation(plugin, reply), suggestion
+            assert reply.is_prevent_postorder
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('campus', ['郑州', '龙子湖', '郑州龙子湖'])
+@pytest.mark.parametrize('kind', ['person', 'group'])
+def test_zhengzhou_building_reply_keeps_its_campus_and_block(monkeypatch, campus, kind):
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+
+    call = AsyncMock(return_value={
+        'success': True,
+        'rooms': [{'roomName': '友兰学堂南楼C座301', 'campusName': '郑州校区'}],
+        'freshness': {'liveChecked': True, 'stale': False},
+    })
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+
+    async def run():
+        initial = context('找自习室')
+        initial.event.launcher_type = kind
+        await handle_navigation(plugin, initial)
+        ctx = context(f'{campus}校区友兰学堂南楼C座第3大节')
+        ctx.event.launcher_type = kind
+        assert await handle_navigation(plugin, ctx)
+        command = call.call_args.args[0]['command']
+        assert '--campus-text 郑州' in command
+        assert '--building-text 友兰学堂南楼C座' in command
+        assert '友兰学堂南楼C座301' in str(ctx.reply.call_args)
+
+    asyncio.run(run())
 
 
 def test_location_reply_continues_lookup_only_for_same_conversation(monkeypatch):

@@ -112,10 +112,12 @@ def account_binding_card() -> list[str]:
 def classroom_command(text: str) -> str:
     """Translate the bounded classroom guide grammar into an existing read-only query."""
     import re
-    match = re.fullmatch(r'查(金明|明伦|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}楼)(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节)?的空教室', text)
+    match = re.fullmatch(r'查(金明|明伦|郑州龙子湖|郑州|龙子湖)校区([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))(?:第([1-9]\d?)周)?(?:星期([一二三四五六日天]))?(?:第([1-5])大节)?的空教室', text)
     if not match:
         return ''
     campus, building, week, day, period = match.groups()
+    from campus_core.resource_registry.alias import normalize_campus_name
+    campus = normalize_campus_name(campus).removesuffix('校区')
     if week and int(week) > 60:
         return ''
     command = f'empty classroom query --campus-text {campus} --building-text {building}'

@@ -93,7 +93,7 @@ async def handle_self_study(plugin, ctx, text):
 
     initial = text in {'找自习室', '空教室查询'}
     number_choice = re.fullmatch(r'[1-9][0-9]?', text)
-    location = re.fullmatch(r'(?:(金明|明伦|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}楼(?:[1-9]\d?)?)?(?:第([1-5])大节)?', text)
+    location = re.fullmatch(r'(?:(金明|明伦|郑州龙子湖|郑州|龙子湖)(?:校区)?)?([\u4e00-\u9fffA-Za-z0-9]{1,30}(?:楼(?:[1-9]\d?)?|[A-Da-d]座))?(?:第([1-5])大节)?', text)
     if not initial and not number_choice and (not location or not any(location.groups())):
         return False
     if getattr(ctx, 'is_prevent_postorder', False):
@@ -129,6 +129,9 @@ async def handle_self_study(plugin, ctx, text):
     elif not initial:
         for field, value in zip(('campus', 'building', 'period'), location.groups()):
             if value:
+                if field == 'campus':
+                    from campus_core.resource_registry.alias import normalize_campus_name
+                    value = normalize_campus_name(value).removesuffix('校区')
                 if field == 'campus' and state.get('campus') != value:
                     state.pop('building', None)
                     state.pop('building_choices', None)
@@ -149,7 +152,7 @@ async def handle_self_study(plugin, ctx, text):
     tool = HenuCliSafe()
     tool.plugin = plugin
     if not state.get('campus'):
-        await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
+        await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“郑州”；郑州校区也可回复“龙子湖”。')
         return True
     period = state.get('period')
     automatic = not period
@@ -164,7 +167,7 @@ async def handle_self_study(plugin, ctx, text):
     if not period:
         await _reply(ctx, '需确认当前大节', [
             '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
-            '可直接回复“第2大节”；如需限定地点，可一并回复“金明校区十号楼第2大节”。'])
+            '可直接回复“第2大节”；如需限定地点，可一并回复“明伦校区十号楼第2大节”。'])
         return True
     if state.get('building') and not state.get('campus'):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
@@ -250,5 +253,5 @@ async def handle_self_study(plugin, ctx, text):
         if len(rooms) > 10:
             lines.append('仅展示前10间，请补充校区和教学楼缩小范围。')
     await _reply(ctx, '过期缓存 · 待核验' if stale else '缓存参考' if cached else '该大节课程占用查询', lines,
-        '可回复校区和教学楼继续查询，例如“金明校区十号楼”。')
+        '可回复校区和教学楼继续查询，例如“明伦校区十号楼”。')
     return True

@@ -96,7 +96,8 @@ def test_normal_message_stage_handles_help_when_earlier_listener_owns_received_e
     from langbot_plugin.api.entities import events
     from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
     async def run():
-        listener=SafeIdentityCaptureListener();listener.plugin=SimpleNamespace()
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = SimpleNamespace()
         await listener.initialize()
         from langbot_plugin.api.entities.builtin.platform import events as pe, entities, message as pm
         chain=pm.MessageChain(root=[pm.Plain(text='使用帮助')])
@@ -240,6 +241,24 @@ def test_short_classroom_guide_keeps_missing_filters_for_service_to_resolve():
     assert spec.params['week'] == 0 and spec.params['period'] == 0
     assert spec.params['view'] == 'day_matrix'
     assert spec.params['campus_text'] == '金明' and spec.params['building_text'] == '十号楼'
+
+
+def test_three_campus_classroom_guides_keep_campus_and_building():
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+
+    for campus, building, expected_campus in [
+        ('郑州', '友兰学堂南楼C座', '郑州'),
+        ('龙子湖', '九章学堂北楼B座', '郑州'),
+        ('郑州龙子湖', '友兰学堂南楼B座', '郑州'),
+        ('金明', '综合楼3', '金明'),
+        ('明伦', '十号楼', '明伦'),
+    ]:
+        spec = inspect_cli_command(menu_command(f'查{campus}校区{building}第3大节的空教室'))
+        assert spec.resolved_tool == 'empty_classroom_query'
+        assert spec.params['campus_text'] == expected_campus
+        assert spec.params['building_text'] == building
+        assert spec.params['period'] == 3
 
 
 def test_classroom_question_rejects_nonexistent_sixth_large_period():
