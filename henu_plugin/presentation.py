@@ -21,6 +21,7 @@ class ResultCard:
     image: str | None = None
     selection: dict | None = None
     fallback: Card | None = None
+    expires: float = float('inf')
 
 
 @dataclass
@@ -83,6 +84,14 @@ class Presentations:
     def guard(self, owner: tuple, query_id: int) -> tuple:
         return self.requests[(*owner, query_id)].guard
 
+    def classroom_deadline(self, owner: tuple, query_id: int, result: dict) -> float:
+        from henu_plugin.classroom_map import source_duration
+        entry = self.requests.get((*owner, query_id))
+        # Request start is conservative: RPC, clock/storage reads and image
+        # rendering consume lifetime too, before a card can be captured.
+        start = min(time.monotonic(), entry.started) if entry and entry.begun else time.monotonic()
+        return start + source_duration(result)
+
     def with_region(self, owner: tuple, query_id: int, result: dict) -> dict:
         entry = self.requests.get((*owner, query_id))
         area = result.get('area')
@@ -91,7 +100,7 @@ class Presentations:
         region = entry.regions.get(str(area.get('id') or ''))
         return {**result, 'area': {**area, **region}} if region else result
 
-    def capture(self, owner: tuple, query_id: int, result: dict, *, image: str | None = None, reserved: int | None = None) -> str:
+    def capture(self, owner: tuple, query_id: int, result: dict, *, image: str | None = None, reserved: int | None = None, expires: float | None = None) -> str:
         now = time.monotonic()
         for key in list(self.requests):
             if self.requests[key].expires <= now:
@@ -109,8 +118,10 @@ class Presentations:
                 and row.get('campus') in {'金明校区', '明伦校区', '龙子湖校区', '郑州校区'}}
         rendered = dict(result)
         selection = None
+        from henu_plugin.classroom_map import is_classroom, source_duration
+        classroom = is_classroom(result)
         if image:
-            rendered['_qq_seat_image'] = True
+            rendered['_qq_classroom_image' if classroom else '_qq_seat_image'] = True
         if reserved is not None:
             rendered['reserved_count'] = reserved
         if ((cli.get('resolved_tool') or result.get('_resolved_tool_name')) == 'library_query'
@@ -128,7 +139,9 @@ class Presentations:
             from henu_plugin.library_availability import availability_card
             for campus in {'金明校区', '明伦校区', '龙子湖校区'}:
                 variants[campus] = availability_card(result, campus=campus)
-        entry.cards[ref] = ResultCard(card, variants, image, selection, result_card({**rendered, '_qq_seat_image': False}) if image else card)
+        entry.cards[ref] = ResultCard(card, variants, image, selection, result_card({**rendered, '_qq_seat_image': False,
+            '_qq_classroom_image': False, '_qq_classroom_image_failed': True}) if image else card,
+            (expires if expires is not None else now + source_duration(result)) if classroom else float('inf'))
         self.requests.move_to_end(key)
         while len(entry.cards) > 32:
             del entry.cards[next(iter(entry.cards))]
@@ -149,6 +162,7 @@ class Presentations:
         chosen, remaining, images, seats = [], [], [], []
         continuation_at = None
         seen = set()
+        deadline = entry.expires if entry is not None else time.monotonic() + PAGE_TTL
         for selection in selections:
             if not isinstance(selection, dict) or set(selection) - {'ref', 'campus'}:
                 raise ValueError('invalid_selection')
@@ -156,7 +170,8 @@ class Presentations:
             if not isinstance(ref, str) or ref in seen or ref not in entry.cards:
                 raise ValueError('invalid_reference')
             seen.add(ref)
-            asset = entry.cards[ref]
+            asset = self.asset(owner, query_id, ref)
+            deadline = min(deadline, asset.expires)
             if asset.selection and not self.is_latest(owner, query_id):
                 raise ValueError('request_superseded')
             card, campuses = (asset.fallback if failed_images and ref in failed_images else asset.card), asset.campuses
@@ -202,13 +217,16 @@ class Presentations:
             raise ValueError('too_many_pages')
         return {'pages': pages, 'more': remaining, 'images': images,
                 'seat_selection': seats[0] if len(seats) == 1 else None,
-                'expires': entry.expires if entry is not None else time.monotonic() + PAGE_TTL}
+                'expires': deadline}
 
     def asset(self, owner: tuple, query_id: int, ref: str) -> ResultCard:
         entry = self.requests.get((*owner, query_id))
         if entry is None or entry.expires <= time.monotonic() or ref not in entry.cards:
             raise ValueError('results_expired')
-        return entry.cards[ref]
+        asset = entry.cards[ref]
+        if asset.expires <= time.monotonic():
+            raise ValueError('results_expired')
+        return asset
 
 
 def presentations(plugin: Any) -> Presentations:

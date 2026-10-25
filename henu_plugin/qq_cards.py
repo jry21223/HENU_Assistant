@@ -33,6 +33,7 @@ def page_request_text(chain: list) -> str:
 # Every service dispatch route has a deliberate presentation title.
 TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
+    "verify_saved_login": "校园账号验证",
     "preferences": "图书馆偏好",
     "sync_schedule": "课表更新", "schedule_query": "我的课表",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
@@ -267,6 +268,13 @@ def _without_query_resource_ids(value):
 
 
 def _classroom_query_card(result: dict) -> Card:
+    if not result.get('_qq_full_classroom_list'):
+        from henu_plugin.classroom_map import classroom_summary
+        return classroom_summary(result, image_ok=bool(result.get('_qq_classroom_image')),
+                                 image_failed=bool(result.get('_qq_classroom_image_failed')))
+    from henu_plugin.classroom_map import verified, classroom_summary
+    if not verified(result):
+        return classroom_summary(result)
     query = result.get('query') if isinstance(result.get('query'), dict) else {}
     freshness = result.get('freshness') if isinstance(result.get('freshness'), dict) else {}
     scope = []
@@ -310,6 +318,94 @@ def _classroom_query_card(result: dict) -> Card:
     return Card('空教室', status, tuple(lines))
 
 
+def _classroom_day_card(result: dict) -> Card:
+    data = result['data']
+    query = result.get('query') if isinstance(result.get('query'), dict) else {}
+    lines = []
+    if _first(data, 'roomName'):
+        lines.append('查询教室：' + escape(data['roomName'], 100))
+    if not _first(data, 'date'):
+        lines.append('日期待核验；以下仅按所列学期、教学周和星期查询。')
+    for label, keys in (('日期', ('date', 'target_date')), ('校区', ('campusName',)), ('楼宇', ('buildingName',))):
+        value = _first(data, *keys)
+        if label != '日期':
+            value = value or _first(query, *keys)
+        if value:
+            lines.append(f'**{label}**：{escape(value, 100)}')
+    for key, label in (('termName', '学期'), ('week', '教学周'), ('dayOfWeek', '星期')):
+        if _first(data, key):
+            lines.append(f'**{label}**：{escape(_first(data, key), 60)}')
+    lines.append('按第一至第五大节分别查看课程占用；同一教室的状态可随时段变化。')
+    if data.get('clockVerified'):
+        lines.append('时间按机器人已保存并核对的开封校区作息换算。')
+    pending = False
+    full = bool(result.get('_qq_full_classroom_list'))
+    examples_left = 3
+    from henu_plugin.classroom_map import verified as classroom_verified
+    for slot in data['periods']:
+        if not isinstance(slot, dict):
+            continue
+        name = escape(slot.get('periodName') or f"第{slot.get('period')}大节", 30)
+        if data.get('clockVerified') and slot.get('clockStart') and slot.get('clockEnd'):
+            name = escape(slot['clockStart'] + '–' + slot['clockEnd'], 30)
+        else:
+            name += '（时刻待核验）'
+        proof = slot.get('freshness') if isinstance(slot.get('freshness'), dict) else {}
+        age, ttl = proof.get('ageSeconds'), proof.get('ttlSeconds')
+        expired = proof.get('stale') is True or (
+            type(age) in (int, float) and type(ttl) in (int, float) and age > ttl)
+        missing = proof.get('cacheHit') is False
+        verified = classroom_verified(slot) and not result.get('partial')
+        rooms = [r for r in slot.get('rooms', []) if isinstance(r, dict)]
+        if missing or expired or proof.get('partial') is True or slot.get('partial') or result.get('partial'):
+            reason = '暂无缓存' if missing else '缓存已过期' if expired else '数据不完整'
+            lines.append(f'**{name}** · 待核验（{reason}）')
+            pending = True
+        elif not verified:
+            lines.append(f'**{name}** · 来源时效待核验')
+            if rooms and examples_left:
+                examples = rooms[:examples_left]
+                examples_left -= len(examples)
+                references = '、'.join(escape(_first(r, 'roomName', 'room_name') or '未标名教室', 70) for r in examples)
+                lines.append('历史记录参考：' + references + '；未列为当前可用。')
+            pending = True
+        else:
+            count = slot.get('total')
+            if type(count) is not int or count < 0:
+                count = len(rooms)
+            lines.append(f'**{name}** · 课程未占用 {count} 间')
+            if rooms and full:
+                block = ''
+                for room in rooms:
+                    row = '- ' + escape(_first(room, 'roomName', 'room_name') or '未标名教室', 100)
+                    if len((block + '\n' + row).encode()) > 1800:
+                        lines.append(block)
+                        block = ''
+                    block += ('\n' if block else '') + row
+                if block:
+                    lines.append(block)
+            elif rooms and examples_left:
+                examples = rooms[:examples_left]
+                examples_left -= len(examples)
+                lines.append('教室示例：' + '、'.join(escape(_first(r, 'roomName', 'room_name') or '未标名教室', 70) for r in examples))
+        if proof.get('fetchedAt'):
+            lines.append('来源获取时间：' + escape(proof['fetchedAt'], 40))
+        if proof.get('refreshFailed') is True:
+            lines.append('本次上游查询未完成。')
+        elif proof.get('liveChecked') is False:
+            lines.append('本次读取缓存，未请求上游核验。')
+    if not full:
+        if result.get('_qq_classroom_image_failed'):
+            lines.append('示意图未能显示，仍可查看简短结果。')
+        elif not result.get('_qq_classroom_image'):
+            lines.append('该楼栋暂未提供可核对的位置示意图。')
+        else:
+            lines.append('图中仅标记已核对位置，其余房间可查看清单。')
+    lines.append('仅反映学校课表已登记的占用，不保证现场无人或楼门开放。')
+    return Card('全天空教室', '部分时段待核验' if pending else '全天课程占用概览', tuple(lines),
+                '回复“教室清单”查看完整结果；仍可指定大节查询。' if not full else '可指定大节查询详细教室。')
+
+
 def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) -> Card:
     if private:
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
@@ -331,6 +427,9 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return availability_card(result)
     if tool == 'empty_classroom_query' and result.get('success') and isinstance(result.get('rooms'), list):
         return _classroom_query_card(result)
+    if (tool == 'empty_classroom_query' and result.get('success')
+            and isinstance(result.get('data'), dict) and isinstance(result['data'].get('periods'), list)):
+        return _classroom_day_card(result)
     title = TOOL_TITLES.get(tool, "美食查询" if tool == "food" else "校园服务")
     if tool == "food":
         title = {"list": "校园美食榜", "detail": "美食详情", "mine": "我的美食投稿", "venues": "美食店铺", "create": "美食草稿"}.get(cli.get("action"), title)
@@ -423,11 +522,13 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         lines.append("账号已保存，查询时会检查登录。" if account.get("has_password") else "还没保存校园账号，请私聊发送“绑定账号”。")
         attempt = account.get("last_login_attempt") or {}
         attempt_status = {
-            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没检查过登录。",
+            "verified": "上次登录成功，当前状态以查询结果为准。", "failed": "上次登录没成功，请检查账号信息。", "unverified": "还没有登录验证记录，可私聊发送“验证登录”。",
             "pending": "上次登录还在处理中，请稍等。", "unknown": "上次登录结果不确定，请勿重复提交密码。",
         }.get(attempt.get("status")) if isinstance(attempt, dict) else None
         if attempt_status:
             lines.append(attempt_status)
+        elif not attempt and account.get('has_password'):
+            lines.append('还没有登录验证记录，可私聊发送“验证登录”。')
         clock = result.get("server_time") or {}
         if isinstance(clock, dict) and _first(clock, "now_text", "now_iso"):
             lines.append("**校园时间**：" + escape(_first(clock, "now_text", "now_iso")))
@@ -596,8 +697,8 @@ class CardCache:
         self.preview_receipts: dict[tuple, tuple[set[int], Any]] = {}
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
 
-    def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
-        self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], current)
+    def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0, expires: float | None = None) -> None:
+        self.entries[key] = (min(time.monotonic() + PAGE_TTL, expires) if expires is not None else time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], current)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
         if on_read is not None:
@@ -608,7 +709,7 @@ class CardCache:
             self.preview_receipts.pop(expired, None)
             self.request_results.pop(expired, None)
 
-    def stage(self, key: tuple, query_id: int, result_id: str, pages: list[str]) -> list[str]:
+    def stage(self, key: tuple, query_id: int, result_id: str, pages: list[str], *, expires: float | None = None) -> list[str]:
         previous = self.request_results.get(key)
         groups = previous[1] if previous and previous[0] == query_id else OrderedDict()
         groups[result_id] = pages
@@ -627,7 +728,9 @@ class CardCache:
                 retained[identifier] = group[:remaining]
                 remaining -= len(retained[identifier])
             groups = retained
-        self.put(key, combined)
+        if previous and previous[0] == query_id and key in self.entries:
+            expires = min(self.entries[key][0], expires) if expires is not None else self.entries[key][0]
+        self.put(key, combined, expires=expires)
         self.request_results[key] = (query_id, groups)
         return combined
 
@@ -691,8 +794,14 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
         from henu_plugin.presentation import presentations, build_seat_image
         import asyncio
         store = presentations(plugin)
+        from henu_plugin.classroom_map import is_classroom
+        deadline = store.classroom_deadline(key, query_id, result) if is_classroom(result) else None
         snapshot = store.with_region(key, query_id, result)
         image, reserved = await asyncio.to_thread(build_seat_image, snapshot) if snapshot.get('_qq_seat_map') else (None, None)
+        from henu_plugin.classroom_map import is_classroom, build_classroom_image
+        classroom = is_classroom(snapshot)
+        if classroom:
+            image = await asyncio.to_thread(build_classroom_image, snapshot)
     async with publication_lock(plugin, key, query_id):
         if not authoritative:
             getter = getattr(proxy, 'get_query_vars', None)
@@ -716,11 +825,16 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
             pages = result_card(result).pages()
             cache(plugin).put(key, pages)
         else:
-            result['display_ref'] = store.capture(key, query_id, snapshot, image=image, reserved=reserved)
-            pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages())
+            result['display_ref'] = store.capture(key, query_id, snapshot, image=image, reserved=reserved, expires=deadline)
+            if classroom:
+                from henu_plugin.classroom_map import remember_details
+                remember_details(plugin, key, snapshot, expires=deadline)
+            pages = cache(plugin).stage(key, query_id, result_id, result_card(result).pages(), expires=deadline)
         await proxy.set_query_var("_henu_card", {
             "owner": list(key), "page": pages[0],
             "authoritative": authoritative,
+            **({'expires': cache(plugin).entries[key][0]} if not authoritative else {}),
+            **({'classroom_ref': result['display_ref']} if not authoritative and classroom else {}),
             # Exact menu shortcuts read page directly. Read results, including a
             # failed subquery, leave room for synthesis and necessary followups.
             "prefer_agent": not authoritative,
@@ -818,7 +932,7 @@ async def _deliver_presentation(ctx, plugin, owner):
                 set_card_reply(ctx.event, page)
                 cache(plugin).put(owner, [page])
                 return
-        cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1)
+        cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1, expires=plan.get('expires'))
 
 
 async def present_card(ctx, *, plugin: Any = None):
@@ -841,11 +955,14 @@ async def present_card(ctx, *, plugin: Any = None):
             return
         if owner is None or card.get("owner") != list(owner):
             return
+        if card.get('expires', float('inf')) <= time.monotonic():
+            await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询。')[0])
+            return
         answer = str(getattr(ctx.event, "response_text", "") or "").strip()
         pages = agent_answer_pages(answer) if card.get('prefer_agent') and answer else [card['page']]
         protected = await _finish_card(ctx, plugin, owner, pages[0])
         if not protected and plugin is not None and card.get('prefer_agent') and answer:
-            cache(plugin).put(owner, pages)
+            cache(plugin).put(owner, pages, expires=card.get('expires'))
     except Exception:
         # Preserve the pipeline's original text response on API failure.
         return

@@ -1,3 +1,5 @@
+import pytest
+
 from henu_plugin.qq_navigation import navigation_config
 
 
@@ -71,6 +73,52 @@ def test_status_does_not_treat_saved_credentials_as_verified_login():
     assert '2026001234' not in page
 
 
+@pytest.mark.parametrize('provide_listener', [True, False])
+def test_private_saved_login_runs_real_storage_and_service_and_group_is_read_only(account_files, monkeypatch, provide_listener):
+    import asyncio
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+    from components.event_listener.identity_capture import IdentityCaptureListener
+    from henu_plugin.service import HenuPluginService
+    from henu_plugin.qq_navigation import handle_navigation
+    from test_account_binding import school_http
+
+    calls = school_http(monkeypatch, subject='old-student')
+    class Plugin:
+        def __init__(self):
+            self.records = {'user:alice:profile': account_files['profile_file'].read_bytes()}
+            self.service = HenuPluginService(Path.cwd())
+        async def get_plugin_storage(self, key):
+            return self.records[key]
+        async def get_plugin_storage_keys(self):
+            return list(self.records)
+        async def set_plugin_storage(self, key, value):
+            self.records[key] = value
+    plugin = Plugin()
+    listener = IdentityCaptureListener.__new__(IdentityCaptureListener)
+    listener.plugin = plugin
+    def context(kind):
+        ctx = SimpleNamespace(event=SimpleNamespace(launcher_type=kind, launcher_id='alice', sender_id='alice',
+            message_chain=MessageChain(root=[Plain(text='验证登录')])), reply=AsyncMock(), query_id=7,
+            is_prevent_postorder=False)
+        ctx.prevent_default = lambda: None
+        ctx.prevent_postorder = lambda: setattr(ctx, 'is_prevent_postorder', True)
+        return ctx
+    async def run():
+        group = context('group')
+        assert await handle_navigation(plugin, group, listener=listener if provide_listener else None)
+        assert '群内未执行' in str(group.reply.call_args)
+        assert not calls
+        private = context('person')
+        assert await handle_navigation(plugin, private, listener=listener if provide_listener else None)
+        assert '校园账号验证成功' in str(private.reply.call_args)
+        assert 'offline-old-password' not in str(private.reply.call_args_list)
+        assert sum(method == 'POST' for method, _ in calls) == 1
+    asyncio.run(run())
+
+
 def test_preferences_card_retains_production_defaults():
     from henu_plugin.qq_cards import result_card
     page = result_card({'success': True, 'preferences': {'library_location': '金明馆', 'library_seat_no': 'A101'}}, 'preferences').pages()[0]
@@ -96,7 +144,8 @@ def test_normal_message_stage_handles_help_when_earlier_listener_owns_received_e
     from langbot_plugin.api.entities import events
     from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
     async def run():
-        listener=SafeIdentityCaptureListener();listener.plugin=SimpleNamespace()
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = SimpleNamespace()
         await listener.initialize()
         from langbot_plugin.api.entities.builtin.platform import events as pe, entities, message as pm
         chain=pm.MessageChain(root=[pm.Plain(text='使用帮助')])
@@ -240,6 +289,39 @@ def test_short_classroom_guide_keeps_missing_filters_for_service_to_resolve():
     assert spec.params['week'] == 0 and spec.params['period'] == 0
     assert spec.params['view'] == 'day_matrix'
     assert spec.params['campus_text'] == '金明' and spec.params['building_text'] == '十号楼'
+
+
+def test_explicit_all_day_command_keeps_date_location_and_never_reauthenticates():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+    for word in ('全天', '一整天'):
+        spec = inspect_cli_command(menu_command(f'查金明校区金明综合楼3{word}的空教室',
+                                               datetime(2026, 10, 24, tzinfo=ZoneInfo('Asia/Shanghai'))))
+        assert spec.resolved_tool == 'empty_classroom_query'
+        assert spec.params['view'] == 'day_matrix'
+        assert spec.params['target_date'] == '2026-10-24'
+        assert spec.params['saved_session_only'] is True
+        assert spec.params['building_text'] == '金明综合楼3'
+
+
+def test_three_campus_classroom_guides_keep_campus_and_building():
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+
+    for campus, building, expected_campus in [
+        ('郑州', '友兰学堂南楼C座', '郑州'),
+        ('龙子湖', '九章学堂北楼B座', '郑州'),
+        ('郑州龙子湖', '友兰学堂南楼B座', '郑州'),
+        ('金明', '综合楼3', '金明'),
+        ('明伦', '十号楼', '明伦'),
+    ]:
+        spec = inspect_cli_command(menu_command(f'查{campus}校区{building}第3大节的空教室'))
+        assert spec.resolved_tool == 'empty_classroom_query'
+        assert spec.params['campus_text'] == expected_campus
+        assert spec.params['building_text'] == building
+        assert spec.params['period'] == 3
 
 
 def test_classroom_question_rejects_nonexistent_sixth_large_period():

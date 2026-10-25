@@ -1,0 +1,178 @@
+diff --git a/langbot_plugin/runtime/plugin/mgr.py b/langbot_plugin/runtime/plugin/mgr.py
+index bb406ca..a01aa8c 100644
+--- a/langbot_plugin/runtime/plugin/mgr.py
++++ b/langbot_plugin/runtime/plugin/mgr.py
+@@ -2036,11 +2036,9 @@ class PluginManager:
+                 runtime_binding = await self.context.wait_for_workspace_binding()
+ 
+             # get plugin settings from LangBot
+-            settings_kwargs: dict[str, typing.Any] = {}
+-            if installation_binding is not None or debug_plugin:
+-                settings_kwargs["action_context"] = (
+-                    installation_binding or runtime_binding
+-                )
++            # A legacy worker still has its trusted Workspace binding. Never
++            # inherit the control bridge's installation from a nested restart.
++            settings_kwargs = {"action_context": installation_binding or runtime_binding}
+             plugin_settings = await self.context.control_handler.call_action(
+                 RuntimeToLangBotAction.GET_PLUGIN_SETTINGS,
+                 {
+diff --git a/tests/test_legacy_reload.py b/tests/test_legacy_reload.py
+new file mode 100644
+index 0000000..69529e2
+--- /dev/null
++++ b/tests/test_legacy_reload.py
+@@ -0,0 +1,153 @@
++"""Exercise legacy worker launch against the real outgoing envelope resolver."""
++
++import copy
++import json
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import pytest
++
++from langbot_plugin.entities.io.actions.enums import RuntimeToLangBotAction
++from langbot_plugin.entities.io.context import ActionContext, InstallationBinding
++from langbot_plugin.runtime.io.handler import Handler
++from langbot_plugin.runtime.io.handlers.control import ControlConnectionHandler
++from langbot_plugin.runtime.plugin import mgr
++
++
++WORKSPACE = ActionContext(instance_uuid="instance-a", workspace_uuid="workspace-a")
++BRIDGE = InstallationBinding(
++    **WORKSPACE.model_dump(exclude={"installation_uuid"}),
++    installation_uuid="legacy-control-bridge",
++    runtime_revision=1,
++    artifact_digest="b" * 64,
++)
++
++
++class SettingsPeer(ControlConnectionHandler):
++    """The external Core RPC endpoint keeps its installation fence."""
++
++    incoming = None
++
++    @property
++    def current_action_context(self):
++        return self.incoming
++
++    async def call_action(self, action, data, **kwargs):
++        envelope = self.resolve_outbound_action_context(kwargs.get("action_context"))
++        if envelope != WORKSPACE:
++            raise ValueError(
++                "Plugin installation binding does not match the active setting"
++            )
++        assert action == RuntimeToLangBotAction.GET_PLUGIN_SETTINGS
++        return {
++            "enabled": True,
++            "priority": 0,
++            "plugin_config": {"setting": "retained-value"},
++            "installation_uuid": "trusted-plugin-installation",
++            "install_source": "local",
++        }
++
++
++class Worker(Handler):
++    debug_plugin = False
++    stdio_process = None
++
++    async def initialize_plugin(self, settings):
++        self.received_settings = copy.deepcopy(settings)
++
++    async def get_plugin_container(self):
++        return {**self.container_data, "status": "initialized"}
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "incoming,returned_binding,should_work",
++    [
++        (None, WORKSPACE, True),
++        (BRIDGE, WORKSPACE, True),
++        (BRIDGE, WORKSPACE.model_copy(update={"workspace_uuid": "workspace-b"}), False),
++        (BRIDGE, WORKSPACE.model_copy(update={"placement_generation": 2}), False),
++        (BRIDGE, None, False),
++    ],
++    ids=[
++        "cold-start",
++        "config-reload",
++        "cross-workspace",
++        "stale-generation",
++        "missing-binding",
++    ],
++)
++async def test_legacy_worker_keeps_its_own_settings_after_control_reload(
++    tmp_path, monkeypatch, incoming, returned_binding, should_work
++):
++    monkeypatch.chdir(tmp_path)
++    context = SimpleNamespace(
++        runtime_profile="oss_dev",
++        worker_policy=None,
++        workspace_binding=WORKSPACE,
++        wait_for_workspace_binding=AsyncMock(return_value=returned_binding),
++        is_active_control_handler=lambda handler: context.control_handler is handler,
++    )
++    peer = SettingsPeer(None, context)
++    peer.incoming = incoming
++    peer.bind_action_context(WORKSPACE)
++    context.control_handler = peer
++    manager = mgr.PluginManager(context)
++    manifest = {
++        "apiVersion": "v1",
++        "kind": "Plugin",
++        "metadata": {
++            "author": "tester",
++            "name": "sample",
++            "label": {"en_US": "sample"},
++        },
++        "spec": {},
++    }
++    plugin_path = tmp_path / "tester__sample"
++    plugin_path.mkdir()
++    (plugin_path / "manifest.yaml").write_text(json.dumps(manifest))
++    worker = Worker(None, file_storage_dir=tmp_path / "worker-files")
++    worker.container_data = {
++        "debug": False,
++        "manifest": {
++            "owner": "tester",
++            "manifest": manifest,
++            "rel_path": "manifest.yaml",
++        },
++        "enabled": True,
++        "priority": 0,
++        "plugin_config": {},
++        "status": "mounted",
++        "components": [],
++    }
++
++    class ProcessBoundary:
++        def __init__(self, **kwargs):
++            self.environment = kwargs["env"]
++
++        async def run(self, _callback):
++            await manager.register_plugin(
++                worker,
++                worker.container_data,
++                registration_capability=self.environment[
++                    mgr.PLUGIN_REGISTRATION_CAPABILITY_ENV
++                ],
++            )
++
++    monkeypatch.setattr(
++        mgr.stdio_client_controller, "StdioClientController", ProcessBoundary
++    )
++    if not should_work:
++        with pytest.raises(ValueError, match="Failed to get plugin settings"):
++            await manager.launch_plugin(str(plugin_path))
++        assert manager.find_plugin("tester", "sample") is None
++        assert not hasattr(worker, "received_settings")
++        return
++    await manager.launch_plugin(str(plugin_path))
++
++    plugin = manager.find_plugin("tester", "sample")
++    assert plugin is not None and plugin.status.value == "initialized"
++    assert worker.received_settings["plugin_config"] == {"setting": "retained-value"}
++    assert worker.bound_action_context == WORKSPACE.for_installation(
++        "trusted-plugin-installation"
++    )

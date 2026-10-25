@@ -390,6 +390,29 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
 
 
+def test_all_day_card_keeps_location_and_separates_expired_missing_and_verified_slots():
+    result = {'success': True, 'data': {
+        'date': '2026-10-24', 'week': 8, 'dayOfWeek': 6,
+        'campusName': '金明校区', 'buildingName': '金明综合楼3',
+        'periods': [
+            {'period': 1, 'periodName': '第一大节', 'total': 1,
+             'freshness': {'liveChecked': True, 'stale': False},
+             'rooms': [{'roomName': '金明综合楼3-101'}]},
+            {'period': 2, 'periodName': '第二大节', 'total': 1,
+             'freshness': {'liveChecked': False, 'stale': True, 'fetchedAt': '2026-10-20T08:00:00+08:00'},
+             'rooms': [{'roomName': 'expired-room-should-not-be-listed'}]},
+            {'period': 3, 'periodName': '第三大节', 'total': 0,
+             'freshness': {'liveChecked': False, 'cacheHit': False}, 'rooms': []},
+        ],
+    }}
+    page = '\n'.join(result_card(result, 'empty_classroom_query').pages())
+    for expected in ('2026-10-24', '金明校区', '金明综合楼3', '第一大节', '第二大节', '第三大节', '金明综合楼3-101'):
+        assert expected in page
+    assert 'expired-room-should-not-be-listed' not in page
+    assert '待核验' in page and '暂无缓存' in page
+    assert '空闲 0 间' not in page
+
+
 def test_food_detail_keeps_existing_public_description_and_dishes():
     detail = {"post": {"shop": {"name": "面馆"}, "campus": "jinming", "tier": "hang", "review_text": "面筋道汤清爽", "price_reference": "12元", "hours_reference": "10:00–21:00", "dishes": [{"name": "刀削面", "price": "12元", "reason": "汤清爽"}], "author": "hidden-author", "images": ["https://private-image.test"]}}
     page = "\n".join(result_card({"success": True, "reply_text": "详情：" + json.dumps(detail, ensure_ascii=False)}, "food").pages())
@@ -482,7 +505,7 @@ def test_library_regions_are_compact_and_next_step_is_a_query_not_a_reservation(
     assert all(len(page.encode()) <= MAX_BYTES for page in pages)
 
 
-def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
+def test_classrooms_default_to_three_examples_with_opt_in_complete_list():
     source = {'success': True, 'total': 5,
               'query': {'termCode': '2026,0', 'week': 8, 'dayOfWeek': 2,
                         'period': 2, 'periodName': '第二大节', 'campusName': '金明校区', 'buildingName': '金明综合楼'},
@@ -492,10 +515,12 @@ def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
               'rooms': [{'roomName': f'金明综合楼610{i}', 'capacity': 120} for i in range(1, 6)]}
     pages = result_card(source, 'empty_classroom_query').pages()
     assert len(pages) == 1
-    assert all(f'金明综合楼610{i}' in pages[0] for i in range(1, 6))
+    assert all(f'金明综合楼610{i}' in pages[0] for i in range(1, 4))
+    assert all(f'金明综合楼610{i}' not in pages[0] for i in (4, 5))
+    assert '教室清单' in pages[0]
     assert '第8周' in pages[0] and '星期二' in pages[0] and '第二大节' in pages[0]
     assert '2026,0' not in pages[0] and 'xk_room_schedule' not in pages[0]
-    assert '缓存年龄' not in pages[0] and '来源获取时间' not in pages[0]
+    assert '缓存年龄' not in pages[0] and '来源获取时间：2026-10-19' in pages[0]
     assert '现场为准' in pages[0]
 
 
@@ -515,6 +540,13 @@ def test_status_copy_is_direct_but_does_not_claim_saved_login_is_valid():
     assert '上次登录结果不确定，请勿重复提交密码' in page
     assert '不代表当前会话仍有效' not in page and '登录凭据' not in page
     assert '2026001234' not in page
+
+
+def test_status_without_login_history_does_not_invent_an_unknown_attempt():
+    page = result_card({'success': True, 'account': {'account': {
+        'student_id': 'synthetic-student', 'has_password': True}}}, 'system_status').pages()[0]
+    assert '验证登录' in page
+    assert '结果不确定' not in page
 
 
 def test_cancel_binding_copy_keeps_original_account_clear():
