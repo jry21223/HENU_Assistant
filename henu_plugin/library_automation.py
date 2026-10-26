@@ -127,7 +127,12 @@ async def reserve_plan(sender, plan):
 
 
 def _reserve_saved_plan(paths, plan):
-    """Use an isolated client and explicit paths, never process-global user paths."""
+    """Use an isolated client and an ownership-proven saved session.
+
+    Unmarked legacy jars fail closed. This path must never assign an owner to
+    an existing token; fresh canonical installs need cookie-provenance parity
+    in the trusted login/save path before scheduled writes can be enabled.
+    """
     from campus_core.bot import HenuCampusBot
 
     cookies = json.loads(paths.library_cookie_file.read_text())
