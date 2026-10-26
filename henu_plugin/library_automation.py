@@ -127,11 +127,22 @@ async def reserve_plan(sender, plan):
 
 
 def _reserve_saved_plan(paths, plan):
-    """Use an isolated client and explicit paths, never process-global user paths."""
+    """Use an isolated client and an ownership-proven saved session.
+
+    Unmarked legacy jars fail closed. This path must never assign an owner to
+    an existing token; fresh canonical installs need cookie-provenance parity
+    in the trusted login/save path before scheduled writes can be enabled.
+    """
     from campus_core.bot import HenuCampusBot
 
     cookies = json.loads(paths.library_cookie_file.read_text())
-    bot = HenuCampusBot(plan["campus_subject"], "", cookies)
+    subject = str(plan.get("campus_subject") or "").strip()
+    if (not isinstance(cookies, dict) or not subject
+            or str(cookies.get("_subject_student_id") or "").strip() != subject):
+        return {"success": False, "account_changed": True, "not_submitted": True}
+    cookies = {key: value for key, value in cookies.items()
+               if key == "_v4_token" or not str(key).startswith("_")}
+    bot = HenuCampusBot(subject, "", cookies)
     bot._saved_session_only = True
     try:
         if not bot._is_token_valid():
@@ -149,7 +160,9 @@ def _reserve_saved_plan(paths, plan):
                 datetime.fromisoformat(plan["run_at"]) + timedelta(seconds=90)
             ).isoformat(),
         )
-        paths.library_cookie_file.write_text(json.dumps(bot.get_cookies()))
+        paths.library_cookie_file.write_text(json.dumps({
+            **bot.get_cookies(), "_subject_student_id": subject,
+        }))
         return result
     finally:
         bot.session.close()

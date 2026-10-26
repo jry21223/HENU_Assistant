@@ -608,6 +608,8 @@ def test_real_saved_plan_adapter_runs_concurrently_without_global_user_paths(tmp
     def valid(self):
         assert self.password == '' and self._saved_session_only is True
         assert self.token == 'token-' + self.username
+        assert '_subject_student_id' not in self.session.cookies.get_dict()
+        assert '_private_metadata' not in self.session.cookies.get_dict()
         return True
     def reserve(self, location, seat, date, **kwargs):
         barrier.wait()  # Serial execution or a global runtime lock would fail.
@@ -621,14 +623,18 @@ def test_real_saved_plan_adapter_runs_concurrently_without_global_user_paths(tmp
         tasks = []
         for sender in ('alice', 'bob'):
             path = tmp_path / (sender + '.json')
-            path.write_text(json.dumps({'_v4_token': 'token-' + sender}))
+            path.write_text(json.dumps({'_v4_token': 'token-' + sender,
+                                        '_subject_student_id': sender, '_private_metadata': 'never send'}))
             plan = dict(ARGS, run_at='2026-10-27T07:00:00+08:00', campus_subject=sender)
             tasks.append(asyncio.to_thread(_reserve_saved_plan,
                          SimpleNamespace(library_cookie_file=path), plan))
         assert all(r['success'] for r in await asyncio.gather(*tasks))
         assert sorted(calls) == ['alice', 'bob']
         for sender in calls:
-            assert json.loads((tmp_path / (sender + '.json')).read_text())['_v4_token'] == 'token-' + sender
+            persisted = json.loads((tmp_path / (sender + '.json')).read_text())
+            assert persisted['_v4_token'] == 'token-' + sender
+            assert persisted['_subject_student_id'] == sender
+            assert '_private_metadata' not in persisted
     asyncio.run(run())
 
 
@@ -689,9 +695,30 @@ def test_saved_client_school_timeout_is_never_replayed(tmp_path, monkeypatch):
         return response
     monkeypatch.setattr(requests.Session, 'request', request)
     path = tmp_path / 'cookies.json'
-    path.write_text(json.dumps({'_v4_token': 'fake'}))
+    path.write_text(json.dumps({'_v4_token': 'fake', '_subject_student_id': 'student'}))
     plan = dict(ARGS, location='30', campus_subject='student',
                 run_at='2099-01-01T07:00:00+08:00', target_date='2099-01-02')
     result = _reserve_saved_plan(SimpleNamespace(library_cookie_file=path), plan)
     assert result.get('success') is not True
     assert len(writes) == 1
+
+
+def test_saved_plan_rejects_missing_or_different_cookie_subject_before_client_creation(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import campus_core.bot as bots
+    from henu_plugin.library_automation import _reserve_saved_plan
+
+    constructor = Mock(side_effect=AssertionError('No school client may be created'))
+    monkeypatch.setattr(bots, 'HenuCampusBot', constructor)
+    for owner in (None, '', 'different-student'):
+        cookies = {'_v4_token': 'another-account-token'}
+        if owner is not None:
+            cookies['_subject_student_id'] = owner
+        path = tmp_path / 'saved-session.json'
+        path.write_text(json.dumps(cookies))
+        plan = dict(ARGS, campus_subject='intended-student', run_at='2099-01-01T07:00:00+08:00')
+        result = _reserve_saved_plan(SimpleNamespace(library_cookie_file=path), plan)
+        assert result['success'] is False and result['account_changed'] is True
+        assert json.loads(path.read_text()) == cookies
+    constructor.assert_not_called()
