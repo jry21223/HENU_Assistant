@@ -435,3 +435,263 @@ def test_saved_session_probe_rejects_unknown_authentication_responses():
         bot = SimpleNamespace(token='cached', _saved_session_only=True,
                               _post_json=lambda *args, **kwargs: {'code': code})
         assert AuthMixin._is_token_valid(bot) is (type(code) is int and code == 0)
+
+
+async def configured(plugin=None, reserve=None):
+    async def authorize(bot, sender):
+        return 'member-' + sender
+    return LibraryAutomation(plugin or Plugin(), authorize=authorize,
+                             campus_subject=campus_subject, reserve=reserve)
+
+
+async def schedule(jobs, sender='alice', source='s1'):
+    preview = await jobs.prepare('bot', sender, ARGS, source, NOW)
+    await jobs.confirm('bot', sender, preview['token'], source + '-confirm', NOW)
+
+
+def test_slow_request_does_not_block_other_users_status_or_next_scan():
+    async def run():
+        entered, finish = asyncio.Event(), asyncio.Event()
+        calls = []
+        async def reserve(sender, plan):
+            calls.append(sender)
+            if sender == 'alice':
+                entered.set()
+                await finish.wait()
+            return {'success': True}
+        jobs = await configured(reserve=reserve)
+        await schedule(jobs)
+        await jobs.tick(NOW + timedelta(minutes=1), wait=False)
+        await entered.wait()
+        # A later scan must run even while an earlier school request is pending.
+        await schedule(jobs, 'bob')
+        await asyncio.wait_for(jobs.tick(NOW + timedelta(minutes=1)), .5)
+        assert (await jobs.status('bot', 'bob'))['state'] == 'success'
+        assert (await jobs.status('bot', 'alice'))['state'] == 'attempting'
+        finish.set()
+        await asyncio.gather(*list(jobs.workers.values()))
+        assert calls == ['alice', 'bob']
+        assert (await jobs.status('bot', 'bob'))['state'] == 'success'
+    asyncio.run(run())
+
+
+def test_manual_release_after_restart_never_retries_old_plan():
+    import pytest
+    async def run():
+        calls = []
+        async def reserve(sender, plan):
+            calls.append(sender)
+            return {'success': True}
+        jobs = await configured(reserve=reserve)
+        await schedule(jobs)
+        data = await jobs.read()
+        data[jobs.scope('bot', 'alice')]['state'] = 'attempting'  # legacy crash
+        await jobs.write(data)
+        restarted = await configured(jobs.plugin, reserve)
+        await restarted.tick(NOW + timedelta(minutes=1))
+        assert calls == []
+        plan = await restarted.status('bot', 'alice')
+        token = plan['recovery_token']
+        for bot, sender, value in [('other', 'alice', token), ('bot', 'bob', token),
+                                   ('bot', 'alice', 'wrong')]:
+            with pytest.raises(ValueError):
+                await restarted.release(bot, sender, value)
+        with pytest.raises(ValueError):
+            await restarted.prepare('bot', 'alice', ARGS, 'new', NOW)
+        await restarted.release('bot', 'alice', token)
+        await restarted.tick(NOW + timedelta(minutes=1))
+        assert not calls
+        await schedule(restarted, source='new')
+        await restarted.tick(NOW + timedelta(minutes=1))
+        assert calls == ['alice']
+        with pytest.raises(ValueError):
+            await restarted.release('bot', 'alice', token)
+    asyncio.run(run())
+
+
+def test_active_request_cannot_be_released_and_cancelled_scan_does_not_cancel_write():
+    import pytest
+    async def run():
+        entered, finish = asyncio.Event(), asyncio.Event()
+        async def reserve(sender, plan):
+            entered.set()
+            await finish.wait()
+            return {'success': True}
+        jobs = await configured(reserve=reserve)
+        await schedule(jobs)
+        scan = asyncio.create_task(jobs.tick(NOW + timedelta(minutes=1)))
+        await entered.wait()
+        scan.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await scan
+        plan = await jobs.status('bot', 'alice')
+        with pytest.raises(ValueError):
+            await jobs.release('bot', 'alice', plan['recovery_token'])
+        await jobs.cancel('bot', 'alice')
+        assert (await jobs.status('bot', 'alice'))['state'] == 'attempting'
+        finish.set()
+        await asyncio.gather(*list(jobs.workers.values()))
+        assert (await jobs.status('bot', 'alice'))['state'] == 'success'
+    asyncio.run(run())
+
+
+def test_storage_failures_before_claim_after_claim_and_after_submit():
+    async def run():
+        for failing_state, applied in [('attempting', False), ('attempting', True),
+                                       ('success', False), ('success', True)]:
+            class FailingPlugin(Plugin):
+                fail = False
+                async def set_plugin_storage(self, key, value):
+                    match = self.fail and any(p['state'] == failing_state for p in json.loads(value).values())
+                    if not match or applied:
+                        await super().set_plugin_storage(key, value)
+                    if match:
+                        raise OSError('lost storage response')
+            calls = []
+            async def reserve(sender, plan):
+                calls.append(sender)
+                return {'success': True}
+            plugin = FailingPlugin()
+            jobs = await configured(plugin, reserve)
+            await schedule(jobs)
+            plugin.fail = True
+            import pytest
+            with pytest.raises(OSError):
+                await jobs.tick(NOW + timedelta(minutes=1))
+            assert len(calls) == (1 if failing_state == 'success' else 0)
+            # An unapplied claim can safely be scanned again: no request occurred.
+            plugin.fail = False
+            if failing_state == 'attempting' and not applied:
+                await jobs.cancel('bot', 'alice')
+            restarted = await configured(plugin, reserve)
+            await restarted.tick(NOW + timedelta(minutes=1))
+            assert len(calls) == (1 if failing_state == 'success' else 0)
+            if (await restarted.status('bot', 'alice'))['state'] == 'attempting':
+                token = (await restarted.status('bot', 'alice'))['recovery_token']
+                await restarted.release('bot', 'alice', token)
+                assert (await restarted.status('bot', 'alice'))['state'] == 'released_unknown'
+    asyncio.run(run())
+
+
+def test_cancel_during_slow_authorization_prevents_submit():
+    async def run():
+        entered, finish = asyncio.Event(), asyncio.Event()
+        jobs = await configured()
+        await schedule(jobs)
+        original = jobs.authorize
+        async def authorize(bot, sender):
+            entered.set()
+            await finish.wait()
+            return await original(bot, sender)
+        jobs.authorize = authorize
+        calls = []
+        async def reserve(sender, plan):
+            calls.append(sender)
+        jobs.reserve = reserve
+        scan = asyncio.create_task(jobs.tick(NOW + timedelta(minutes=1)))
+        await entered.wait()
+        await jobs.cancel('bot', 'alice')
+        finish.set()
+        await scan
+        assert not calls
+        assert (await jobs.status('bot', 'alice'))['state'] == 'cancelled'
+    asyncio.run(run())
+
+
+def test_real_saved_plan_adapter_runs_concurrently_without_global_user_paths(tmp_path, monkeypatch):
+    import threading
+    from types import SimpleNamespace
+    from henu_plugin.library_automation import _reserve_saved_plan
+    from campus_core.bot import HenuCampusBot
+    barrier = threading.Barrier(2, timeout=2)
+    calls = []
+    def valid(self):
+        assert self.password == '' and self._saved_session_only is True
+        assert self.token == 'token-' + self.username
+        return True
+    def reserve(self, location, seat, date, **kwargs):
+        barrier.wait()  # Serial execution or a global runtime lock would fail.
+        calls.append(self.username)
+        assert kwargs['strict_window'] is True
+        assert kwargs['max_attempts'] == 1 and kwargs['retry_until'] == ''
+        return {'success': True}
+    monkeypatch.setattr(HenuCampusBot, '_is_token_valid', valid)
+    monkeypatch.setattr(HenuCampusBot, 'reserve', reserve)
+    async def run():
+        tasks = []
+        for sender in ('alice', 'bob'):
+            path = tmp_path / (sender + '.json')
+            path.write_text(json.dumps({'_v4_token': 'token-' + sender}))
+            plan = dict(ARGS, run_at='2026-10-27T07:00:00+08:00', campus_subject=sender)
+            tasks.append(asyncio.to_thread(_reserve_saved_plan,
+                         SimpleNamespace(library_cookie_file=path), plan))
+        assert all(r['success'] for r in await asyncio.gather(*tasks))
+        assert sorted(calls) == ['alice', 'bob']
+        for sender in calls:
+            assert json.loads((tmp_path / (sender + '.json')).read_text())['_v4_token'] == 'token-' + sender
+    asyncio.run(run())
+
+
+def test_private_recovery_requires_fresh_source_and_explicit_acknowledgement(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain, Source
+    async def run():
+        jobs = await configured()
+        await schedule(jobs)
+        data = await jobs.read()
+        data[jobs.scope('bot', 'alice')]['state'] = 'attempting'
+        await jobs.write(data)
+        plan = await jobs.status('bot', 'alice')
+        token = plan['recovery_token']
+        now = datetime.now(ZONE)
+        def ctx(text, *, stamp=now):
+            return SimpleNamespace(event=SimpleNamespace(sender_id='alice', launcher_id='alice', launcher_type='person',
+                message_chain=MessageChain(root=[Source(id='new-message', time=stamp), Plain(text=text)])),
+                get_bot_uuid=AsyncMock(return_value='bot'), reply=AsyncMock(),
+                prevent_default=lambda: None, prevent_postorder=lambda: None)
+        command = '解除自动预约 ' + token + ' 已核对'
+        for request, group in [(ctx(command), True), (ctx(command, stamp=now-timedelta(minutes=3)), False),
+                               (ctx('解除自动预约 ' + token), False)]:
+            assert await jobs.handle(request, is_group=group)
+            assert (await jobs.status('bot', 'alice'))['state'] == 'attempting'
+        request = ctx(command)
+        assert await jobs.handle(request)
+        assert (await jobs.status('bot', 'alice'))['state'] == 'released_unknown'
+        assert '未重试' in str(request.reply.call_args)
+    asyncio.run(run())
+
+
+def test_saved_client_school_timeout_is_never_replayed(tmp_path, monkeypatch):
+    import requests
+    from types import SimpleNamespace
+    from urllib.parse import urlsplit
+    from henu_plugin.library_automation import _reserve_saved_plan
+    writes = []
+    def request(self, method, url, **kwargs):
+        path = urlsplit(url).path
+        assert kwargs['timeout'] == 25
+        if path == '/v4/space/confirm':
+            writes.append(path)
+            raise requests.Timeout('response lost after school submission')
+        if path == '/v4/space/pick':
+            data = {'area': []}
+        elif path == '/v4/Space/map':
+            data = {'type': '1', 'date': {'reserveType': '3', 'list': [
+                {'day': '2099-01-02', 'def_start_time': '08:00', 'def_end_time': '11:00'}]}}
+        elif path == '/v4/Space/seat':
+            data = {'list': [{'id': 'seat1', 'no': '001', 'status': '1'}]}
+        else:
+            raise AssertionError('unexpected school operation ' + path)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({'code': 0, 'data': data}).encode()
+        return response
+    monkeypatch.setattr(requests.Session, 'request', request)
+    path = tmp_path / 'cookies.json'
+    path.write_text(json.dumps({'_v4_token': 'fake'}))
+    plan = dict(ARGS, location='30', campus_subject='student',
+                run_at='2099-01-01T07:00:00+08:00', target_date='2099-01-02')
+    result = _reserve_saved_plan(SimpleNamespace(library_cookie_file=path), plan)
+    assert result.get('success') is not True
+    assert len(writes) == 1

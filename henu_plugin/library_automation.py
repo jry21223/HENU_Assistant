@@ -47,34 +47,48 @@ async def lifetime_account(bot, sender):
 
 def validate_campus_state(profile, attempt, refresh):
     """Explicit failed/uncertain or paused authentication cannot run unattended."""
-    records = [attempt] + [profile.get(key, {}) for key in
-                          ("last_login_attempt", "login_verification", "saved_login_guard")]
+    records = [attempt] + [
+        profile.get(key, {})
+        for key in ("last_login_attempt", "login_verification", "saved_login_guard")
+    ]
     blocked = "校园登录已暂停或尚未确认，请先私聊手动验证登录并查询图书馆座位。"
     for record in records:
         if not isinstance(record, dict):
             raise ValueError(blocked)
-        if (record.get("status") not in (None, "", "verified", "success")
-                or ("verified" in record and record["verified"] is not True)
-                or (record.get("subject_student_id") and str(record["subject_student_id"]).strip() != str(profile.get("student_id", "")).strip())
-                or record.get("error_code")
-                or record.get("paused") or float(record.get("next_at", 0)) > time.time()):
+        if (
+            record.get("status") not in (None, "", "verified", "success")
+            or ("verified" in record and record["verified"] is not True)
+            or (
+                record.get("subject_student_id")
+                and str(record["subject_student_id"]).strip()
+                != str(profile.get("student_id", "")).strip()
+            )
+            or record.get("error_code")
+            or record.get("paused")
+            or float(record.get("next_at", 0)) > time.time()
+        ):
             raise ValueError(blocked)
     if refresh and refresh.get("paused") is not False:
-        raise ValueError("校园自动登录已暂停，请先核对学校账号状态，再手动成功同步课表后重试。")
+        raise ValueError(
+            "校园自动登录已暂停，请先核对学校账号状态，再手动成功同步课表后重试。"
+        )
 
 
 async def check_campus_state(plugin, paths, profile):
     from henu_plugin.reminder_schedule import _read_guard
+
     path = paths.profile_file.with_name("login_attempt.json")
     attempt = json.loads(path.read_text()) if path.exists() else {}
     subject = str(profile.get("student_id", "")).strip()
-    refresh = await _read_guard(plugin, "schedule_refresh:v1:" + hashlib.sha256(subject.encode()).hexdigest())
+    refresh = await _read_guard(
+        plugin, "schedule_refresh:v1:" + hashlib.sha256(subject.encode()).hexdigest()
+    )
     validate_campus_state(profile, attempt, refresh)
 
 
 async def campus_account(plugin, sender):
-    from henu_plugin.storage_adapter import PluginStorageAdapter
     from henu_mcp.core.secure_storage import load_encrypted_profile
+    from henu_plugin.storage_adapter import PluginStorageAdapter
 
     adapter = PluginStorageAdapter(plugin, sender, read_only=True)
     try:
@@ -90,10 +104,7 @@ async def campus_account(plugin, sender):
 
 
 async def reserve_plan(sender, plan):
-    from functools import partial
     from henu_plugin.storage_adapter import PluginStorageAdapter
-    from henu_plugin.service import _run_in_user_storage
-    from henu_mcp.tools.server_impl import _library_reserve_impl
 
     plugin = plan.pop("_plugin")
     adapter = PluginStorageAdapter(plugin, sender)
@@ -109,28 +120,40 @@ async def reserve_plan(sender, plan):
             seconds=90
         ):
             return {"success": False, "missed": True}
-        result = await asyncio.to_thread(
-            _run_in_user_storage,
-            paths,
-            partial(
-                _library_reserve_impl,
-                location=plan["location"],
-                seat_no=plan["seat_no"],
-                target_date=plan["target_date"],
-                preferred_time=plan["start"],
-                preferred_end_time=plan["end"],
-                max_attempts=1,
-                retry_until="",
-                strict_window=True,
-                submit_before=(
-                    datetime.fromisoformat(plan["run_at"]) + timedelta(seconds=90)
-                ).isoformat(),
-            ),
-        )
+        result = await asyncio.to_thread(_reserve_saved_plan, paths, plan)
         await adapter.save_all()
         return result
     finally:
         await adapter.abort()
+
+
+def _reserve_saved_plan(paths, plan):
+    """Use an isolated client and explicit paths, never process-global user paths."""
+    from campus_core.bot import HenuCampusBot
+
+    cookies = json.loads(paths.library_cookie_file.read_text())
+    bot = HenuCampusBot(plan["campus_subject"], "", cookies)
+    bot._saved_session_only = True
+    try:
+        if not bot._is_token_valid():
+            return {"success": False}
+        result = bot.reserve(
+            plan["location"],
+            plan["seat_no"],
+            plan["target_date"],
+            preferred_time=plan["start"],
+            preferred_end_time=plan["end"],
+            max_attempts=1,
+            retry_until="",
+            strict_window=True,
+            submit_before=(
+                datetime.fromisoformat(plan["run_at"]) + timedelta(seconds=90)
+            ).isoformat(),
+        )
+        paths.library_cookie_file.write_text(json.dumps(bot.get_cookies()))
+        return result
+    finally:
+        bot.session.close()
 
 
 class LibraryAutomation:
@@ -146,6 +169,9 @@ class LibraryAutomation:
         if not hasattr(plugin, "_library_automation_lock"):
             plugin._library_automation_lock = asyncio.Lock()
         self.lock = plugin._library_automation_lock
+        if not hasattr(plugin, "_library_automation_workers"):
+            plugin._library_automation_workers = {}
+        self.workers = plugin._library_automation_workers
         self.task = None
 
     async def _reserve(self, sender, plan):
@@ -228,7 +254,7 @@ class LibraryAutomation:
             data = await self.read()
             old = data.get(key, {})
             if old.get("state") in {"scheduled", "attempting"}:
-                raise ValueError("已有待执行计划，请先取消后再设置")
+                raise ValueError("已有活动计划：待执行可取消；结果待核对请先查询自动预约状态并按提示解除")
             if old.get("source") == source:
                 return old
             plan.update(
@@ -268,10 +294,6 @@ class LibraryAutomation:
             await self.write(data)
             return plan
 
-    async def status(self, bot, sender):
-        async with self.lock:
-            return (await self.read()).get(self.scope(bot, sender), {"state": "none"})
-
     async def cancel(self, bot, sender):
         async with self.lock:
             data = await self.read()
@@ -281,59 +303,132 @@ class LibraryAutomation:
                 await self.write(data)
             return plan or {"state": "none"}
 
-    async def tick(self, now=None):
-        now = now or datetime.now(ZONE)
-        started = time.monotonic()
+    async def release(self, bot, sender, token):
+        """Acknowledge an uncertain result, never cancel or repeat a school write."""
+        key = self.scope(bot, sender)
         async with self.lock:
             data = await self.read()
-            for plan in data.values():
+            plan = data.get(key, {})
+            worker = self.workers.get(key)
+            if worker is not None and not worker.done():
+                raise ValueError("请求仍在执行，暂不能解除，请稍后查询状态。")
+            if (
+                plan.get("state") != "attempting"
+                or not token
+                or not secrets.compare_digest(
+                    str(plan.get("recovery_token", "")), token
+                )
+            ):
+                raise ValueError("解除确认已失效，请重新查询自动预约状态。")
+            plan.update(
+                state="released_unknown", released_at=datetime.now(ZONE).isoformat()
+            )
+            await self.write(data)
+            return plan
+
+    async def status(self, bot, sender):
+        async with self.lock:
+            data = await self.read()
+            plan = data.get(self.scope(bot, sender), {"state": "none"})
+            # Upgrade legacy crash claims only on explicit status inspection.
+            if plan.get("state") == "attempting" and not plan.get("recovery_token"):
+                plan["recovery_token"] = secrets.token_hex(8)
+                await self.write(data)
+            return plan
+
+    async def tick(self, now=None, *, wait=True):
+        now = now or datetime.now(ZONE)
+        started = time.monotonic()
+        tasks = []
+        async with self.lock:
+            data = await self.read()
+            for key, plan in data.items():
                 if plan.get("state") != "scheduled":
                     continue
-                current = now + timedelta(seconds=time.monotonic() - started)
-                lag = (current - datetime.fromisoformat(plan["run_at"])).total_seconds()
-                if lag < 0:
+                worker = self.workers.get(key)
+                if worker is not None and not worker.done():
                     continue
-                if lag > 90:
-                    plan["state"] = "missed"
-                    await self.write(data)
+                if now < datetime.fromisoformat(plan["run_at"]):
                     continue
-                try:
-                    uid = await self.authorize(plan["bot"], plan["sender"])
-                    subject = await self.campus_subject(plan["sender"])
-                    if uid != plan["user_id"] or subject != plan["campus_subject"]:
-                        raise KitError("ACCOUNT_CHANGED")
-                except Exception:
-                    plan["state"] = "authorization_failed"
-                    await self.write(data)
-                    continue
-                if now + timedelta(
-                    seconds=time.monotonic() - started
-                ) > datetime.fromisoformat(plan["run_at"]) + timedelta(seconds=90):
-                    plan["state"] = "missed"
-                    await self.write(data)
-                    continue
-                plan["state"] = "attempting"
-                # Any crash/timeout after this durable claim is terminal, including restart.
-                await self.write(data)
-                try:
-                    result = await self.reserve(plan["sender"], dict(plan))
-                    if result.get("account_changed") is True:
-                        plan["state"] = "authorization_failed"
-                    elif result.get("missed") is True:
-                        plan["state"] = "missed"
-                    elif result.get("success") is True:
-                        plan["state"] = "success"
-                    elif result.get("submit_success") is True:
-                        plan["state"] = "submitted_unverified"
-                    else:
-                        plan["state"] = "failed_or_unknown"
-                except Exception:
-                    plan["state"] = "failed_or_unknown"
+                task = asyncio.create_task(self._execute(key, dict(plan), now, started))
+                self.workers[key] = task
+                task.add_done_callback(
+                    lambda done, key=key: self._worker_done(key, done)
+                )
+                tasks.append(task)
+        # Cancellation of a caller/scan must not detach a running school write.
+        if wait and tasks:
+            await asyncio.shield(asyncio.gather(*tasks))
+
+    def _worker_done(self, key, task):
+        if self.workers.get(key) is task:
+            self.workers.pop(key, None)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning(
+                "Library plan worker failed; claimed writes will not be retried"
+            )
+
+    async def _execute(self, key, plan, now, started):
+        def expired():
+            return now + timedelta(seconds=time.monotonic() - started) > (
+                datetime.fromisoformat(plan["run_at"]) + timedelta(seconds=90)
+            )
+
+        # Per-user authorization and school I/O never hold the registry lock.
+        state = "missed"
+        if not expired():
+            try:
+                uid = await self.authorize(plan["bot"], plan["sender"])
+                subject = await self.campus_subject(plan["sender"])
+                if uid != plan["user_id"] or subject != plan["campus_subject"]:
+                    raise KitError("ACCOUNT_CHANGED")
+                state = "missed" if expired() else "attempting"
+            except Exception:
+                state = "authorization_failed"
+        async with self.lock:
+            data = await self.read()
+            current = data.get(key, {})
+            if current.get("state") != "scheduled" or current != plan:
+                return  # Cancelled/replaced while authorization was pending.
+            current["state"] = state
+            if state == "attempting":
+                current["recovery_token"] = claim_token = secrets.token_hex(8)
+            # No school request on a failed or ambiguous claim commit.
+            await self.write(data)
+        if state != "attempting":
+            return
+        try:
+            result = (
+                {"missed": True}
+                if expired()
+                else await self.reserve(plan["sender"], dict(plan))
+            )
+            if result.get("account_changed") is True:
+                state = "authorization_failed"
+            elif result.get("missed") is True:
+                state = "missed"
+            elif result.get("success") is True:
+                state = "success"
+            elif result.get("submit_success") is True:
+                state = "submitted_unverified"
+            else:
+                state = "failed_or_unknown"
+        except Exception:
+            state = "failed_or_unknown"
+        async with self.lock:
+            # Reload: other users may have changed the registry during school I/O.
+            data = await self.read()
+            current = data.get(key, {})
+            if (current.get("state") == "attempting"
+                    and current.get("recovery_token") == claim_token):
+                current["state"] = state
                 await self.write(data)
 
     async def handle(self, ctx, *, is_group=False):
         import shlex
-        from langbot_plugin.api.entities.builtin.platform.message import Source, Plain
+
+        from langbot_plugin.api.entities.builtin.platform.message import Plain, Source
+
         from henu_plugin.qq_cards import reply_card
 
         chain = getattr(getattr(ctx.event, "message_chain", None), "root", [])
@@ -348,6 +443,7 @@ class LibraryAutomation:
                 "取消自动预约",
                 "自动预约状态",
                 "自动预约帮助",
+                "解除自动预约",
             )
         ):
             return False
@@ -368,7 +464,8 @@ class LibraryAutomation:
                     "请先手动查询图书馆座位。定时执行仅复用有效登录态；失效或登录已暂停时停止，不会自动提交校园密码。\n"
                     '设置自动预约 执行时间 预约日期 "区域" 座位 开始 结束\n'
                     "格式：执行时间 YYYY-MM-DDTHH:MM；预约日期 YYYY-MM-DD；时段 HH:MM（均为北京时间）。\n"
-                    "核对后发送“确认自动预约 确认码”。可发送“自动预约状态”或“取消自动预约”。"
+                    "核对后发送“确认自动预约 确认码”。可发送“自动预约状态”或“取消自动预约”。\n"
+                    "结果待核对的计划：先查询学校预约记录，再按状态提示发送解除命令。解除不会取消学校预约，也不会重试原计划。"
                 )
             elif words == ["自动预约状态"] or words == ["取消自动预约"]:
                 plan = await (
@@ -420,6 +517,13 @@ class LibraryAutomation:
                         + plan["token"]
                         + "”。"
                     )
+                elif (
+                    words[0] == "解除自动预约"
+                    and len(words) == 3
+                    and words[2] == "已核对"
+                ):
+                    plan = await self.release(bot, sender, words[1])
+                    message = self.describe(plan)
                 elif words[0] == "确认自动预约" and len(words) == 2:
                     plan = await self.confirm(bot, sender, words[1], source, now)
                     message = self.describe(plan)
@@ -449,6 +553,7 @@ class LibraryAutomation:
             "missed": "已错过执行时间，请重新设置",
             "authorization_failed": "会员、绑定或校园登录状态核验失败，未执行，请重新核验后设置",
             "attempting": "执行结果待核对，请查询图书馆预约记录，勿重复提交",
+            "released_unknown": "已解除结果不确定的计划；未取消学校预约，未重试原计划。新计划须另行设置并确认",
             "success": "预约成功",
             "submitted_unverified": "学校已接受提交，结果待核对，请查询预约记录",
             "failed_or_unknown": "未确认预约成功，请查询预约记录，系统不会自动重试",
@@ -469,6 +574,13 @@ class LibraryAutomation:
                 + " · 座位："
                 + plan["seat_no"]
             )
+        if plan.get("state") == "attempting" and plan.get("recovery_token"):
+            text += (
+                "\n请先查询学校预约记录，确认后发送“解除自动预约 "
+                + plan["recovery_token"]
+                + " 已核对”。请求仍在执行时不能解除。"
+                "解除不代表预约失败，不会取消学校预约或重试原计划。"
+            )
         return text
 
     def start(self):
@@ -478,7 +590,7 @@ class LibraryAutomation:
     async def run(self):
         while True:
             try:
-                await self.tick()
+                await self.tick(wait=False)
             except Exception:
                 logger.warning(
                     "Library plan scan failed; no automatic retry of claimed writes"
