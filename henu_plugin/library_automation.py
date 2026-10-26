@@ -44,6 +44,33 @@ async def lifetime_account(bot, sender):
     return str(uid)
 
 
+def validate_campus_state(profile, attempt, refresh):
+    """Explicit failed/uncertain or paused authentication cannot run unattended."""
+    records = [attempt] + [profile.get(key, {}) for key in
+                          ("last_login_attempt", "login_verification", "saved_login_guard")]
+    blocked = "校园登录已暂停或尚未确认，请先私聊手动验证登录并查询图书馆座位。"
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError(blocked)
+        if (record.get("status") not in (None, "", "verified", "success")
+                or ("verified" in record and record["verified"] is not True)
+                or (record.get("subject_student_id") and str(record["subject_student_id"]).strip() != str(profile.get("student_id", "")).strip())
+                or record.get("error_code")
+                or record.get("paused") or float(record.get("next_at", 0)) > time.time()):
+            raise ValueError(blocked)
+    if refresh and refresh.get("paused") is not False:
+        raise ValueError("校园自动登录已暂停，请先核对学校账号状态，再手动成功同步课表后重试。")
+
+
+async def check_campus_state(plugin, paths, profile):
+    from henu_plugin.reminder_schedule import _read_guard
+    path = paths.profile_file.with_name("login_attempt.json")
+    attempt = json.loads(path.read_text()) if path.exists() else {}
+    subject = str(profile.get("student_id", "")).strip()
+    refresh = await _read_guard(plugin, "schedule_refresh:v1:" + hashlib.sha256(subject.encode()).hexdigest())
+    validate_campus_state(profile, attempt, refresh)
+
+
 async def campus_account(plugin, sender):
     from henu_plugin.storage_adapter import PluginStorageAdapter
     from henu_mcp.core.secure_storage import load_encrypted_profile
@@ -55,6 +82,7 @@ async def campus_account(plugin, sender):
         subject = str(profile.get("student_id", "")).strip()
         if not subject or not profile.get("password"):
             raise ValueError("请先绑定校园账号，再设置自动预约。")
+        await check_campus_state(plugin, paths, profile)
         return subject
     finally:
         await adapter.abort()
@@ -66,7 +94,8 @@ async def reserve_plan(sender, plan):
     from henu_plugin.service import _run_in_user_storage
     from henu_mcp.tools.server_impl import _library_reserve_impl
 
-    adapter = PluginStorageAdapter(plan.pop("_plugin"), sender)
+    plugin = plan.pop("_plugin")
+    adapter = PluginStorageAdapter(plugin, sender)
     try:
         paths = await adapter.load_all()
         from henu_mcp.core.secure_storage import load_encrypted_profile
@@ -74,6 +103,7 @@ async def reserve_plan(sender, plan):
         profile = load_encrypted_profile(paths.profile_file)
         if str(profile.get("student_id", "")).strip() != plan["campus_subject"]:
             return {"success": False, "account_changed": True}
+        await check_campus_state(plugin, paths, profile)
         if datetime.now(ZONE) > datetime.fromisoformat(plan["run_at"]) + timedelta(
             seconds=90
         ):
@@ -268,7 +298,8 @@ class LibraryAutomation:
                     continue
                 try:
                     uid = await self.authorize(plan["bot"], plan["sender"])
-                    if uid != plan["user_id"]:
+                    subject = await self.campus_subject(plan["sender"])
+                    if uid != plan["user_id"] or subject != plan["campus_subject"]:
                         raise KitError("ACCOUNT_CHANGED")
                 except Exception:
                     plan["state"] = "authorization_failed"
@@ -333,6 +364,7 @@ class LibraryAutomation:
             if words == ["自动预约帮助"]:
                 message = (
                     "仅限已绑定 Kit 的终身会员。每个用户可设置一个单次计划。\n"
+                    "请先手动查询图书馆座位。定时执行仅复用有效登录态；失效或登录已暂停时停止，不会自动提交校园密码。\n"
                     '设置自动预约 执行时间 预约日期 "区域" 座位 开始 结束\n'
                     "格式：执行时间 YYYY-MM-DDTHH:MM；预约日期 YYYY-MM-DD；时段 HH:MM（均为北京时间）。\n"
                     "核对后发送“确认自动预约 确认码”。可发送“自动预约状态”或“取消自动预约”。"
@@ -414,7 +446,7 @@ class LibraryAutomation:
             "scheduled": "已启用",
             "cancelled": "已取消",
             "missed": "已错过执行时间，请重新设置",
-            "authorization_failed": "会员或绑定核验失败，未执行，请重新核验后设置",
+            "authorization_failed": "会员、绑定或校园登录状态核验失败，未执行，请重新核验后设置",
             "attempting": "执行结果待核对，请查询图书馆预约记录，勿重复提交",
             "success": "预约成功",
             "submitted_unverified": "学校已接受提交，结果待核对，请查询预约记录",

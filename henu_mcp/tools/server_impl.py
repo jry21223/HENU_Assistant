@@ -1625,14 +1625,20 @@ def _library_login_failed(extra: dict[str, Any] | None = None, default: str = "�
     return result
 
 
-def _build_library_bot(student_id: str, password: str):
+def _build_library_bot(student_id: str, password: str, *, saved_session_only: bool = False):
     if HenuCampusBot is None:
         raise RuntimeError(f"校园核心模块不可用: {CAMPUS_CORE_EXPECTED_FILE}")
 
     _set_library_login_error("")
     stored = _load_library_cookies() or {}
     cas_cookies = _load_cas_cookies()
-    bot = HenuCampusBot(student_id, password, stored or None, cas_cookies or None)  # type: ignore
+    bot = HenuCampusBot(student_id, "" if saved_session_only else password, stored or None, cas_cookies or None)  # type: ignore
+    if saved_session_only:
+        bot._saved_session_only = True
+        if bot._is_token_valid():
+            return bot
+        _set_library_login_error("图书馆登录态已失效，定时预约未执行；请先手动查询图书馆座位。")
+        return None
 
     if bot.login():
         _save_library_cookies(bot.get_cookies())
@@ -2329,7 +2335,8 @@ def _library_reserve_impl(
     if not target_location or not target_seat:
         return {"success": False, "msg": "请提供 location/seat_no 或在 setup_account 中设置默认值"}
     
-    bot = _build_library_bot(sid, pwd)
+    bot = (_build_library_bot(sid, pwd, saved_session_only=True)
+           if strict_window else _build_library_bot(sid, pwd))
     if not bot:
         return _library_login_failed()
 
