@@ -13,6 +13,9 @@ class HenuAssistantPlugin(BasePlugin):
         from henu_plugin.schedule_reminders import ScheduleReminders
         self.schedule_reminders = ScheduleReminders(self)
         self.schedule_reminders.start()
+        from henu_plugin.library_automation import LibraryAutomation
+        self.library_automation = LibraryAutomation(self)
+        self.library_automation.start()
 
     def __del__(self) -> None:
         pass

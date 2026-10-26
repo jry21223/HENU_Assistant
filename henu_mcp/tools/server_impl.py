@@ -1709,19 +1709,6 @@ def _build_hebao_bot(student_id: str, password: str):
         return bot
 
     first_error = str(getattr(bot, "get_hebao_last_error", lambda: "")() or "").strip()
-    if stored_token:
-        fresh_bot = HenuCampusBot(student_id, password, None, cas_cookies or None, None)  # type: ignore
-        if fresh_bot.hebao_login():
-            token = fresh_bot.get_hebao_token()
-            if token:
-                _save_hebao_token(token)
-            _save_cas_cookies(fresh_bot.get_hebao_cas_cookies())
-            _set_hebao_login_error("")
-            return fresh_bot
-        fresh_error = str(getattr(fresh_bot, "get_hebao_last_error", lambda: "")() or "").strip()
-        _set_hebao_login_error(fresh_error or first_error)
-        return None
-
     _set_hebao_login_error(first_error)
     return None
 
@@ -2303,6 +2290,8 @@ def _library_reserve_impl(
     retry_interval_seconds: int = 2,
     max_attempts: int = 1,
     end_policy: str = "",
+    strict_window: bool = False,
+    submit_before: str = "",
 ) -> dict[str, Any]:
     """
     【必须调用】预约图书馆座位 - 执行真实的座位预约操作
@@ -2353,6 +2342,7 @@ def _library_reserve_impl(
         retry_until=str(retry_until or ""),
         retry_interval_seconds=retry_interval_seconds,
         max_attempts=max_attempts,
+        **({"strict_window": True, "submit_before": submit_before} if strict_window else {}),
     )
     _save_library_cookies(bot.get_cookies())
     if hasattr(bot, "get_cas_cookies"):

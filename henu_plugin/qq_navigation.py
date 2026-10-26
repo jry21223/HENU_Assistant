@@ -5,15 +5,15 @@ from __future__ import annotations
 
 TASKS = (
     ('我的校园', (('我的状态', '查看绑定与服务状态'), ('今天课表', '查看今天的课程安排'), ('明天课表', '提前查看明天课程'), ('下一节课', '查看接下来上的课'), ('同步课表', '从教务更新课表'))),
-    ('找自习室', (('找自习室', '查询当前时段空教室'), ('空教室查询', '按校区楼栋时段查询'), ('图书馆座位', '查看各区域剩余座位'))),
-    ('账号与帮助', (('绑定账号', '校园账号与网站绑定'), ('绑定Kit', '关联 HENU KIT 网站'), ('使用帮助', '查看常用说法与流程'), ('课表推送', '查看课表提醒支持情况'))),
+    ('找自习室', (('找自习室', '查询当前时段空教室'), ('空教室查询', '按校区楼栋时段查询'), ('图书馆座位', '查看各区域剩余座位'), ('自动预约帮助', '设置终身会员定时预约'))),
+    ('账号与帮助', (('绑定账号', '校园账号与网站绑定'), ('绑定Kit', '关联 HENU KIT 网站'), ('使用帮助', '查看常用说法与流程'), ('课表推送', '查看课表提醒支持情况'), ('河宝社区', '查询状态和个人记录'))),
 )
 
 MENU_LABELS = {'我的校园': '🎓我的校园', '找自习室': '📍找自习室', '账号与帮助': '⚙️账号帮助'}
 TASK_ICONS = {
     '我的状态': '👤', '今天课表': '📅', '明天课表': '🗓️', '下一节课': '⏰',
     '同步课表': '🔄', '找自习室': '📍', '空教室查询': '🏫', '图书馆座位': '📚',
-    '绑定账号': '🔐', '绑定Kit': '🔗', '使用帮助': '❓', '课表推送': '🔔',
+    '自动预约帮助': '⏱️', '河宝社区': '🧾', '绑定账号': '🔐', '绑定Kit': '🔗', '使用帮助': '❓', '课表推送': '🔔',
 }
 
 
@@ -38,8 +38,9 @@ def navigation_config() -> dict:
 
 
 GUIDES = {
+    '河宝社区': ('河宝社区', '使用校园账号查询，请先绑定校园账号。\n发送“河宝状态”查看任务统计；还可发送“河宝请假记录”“河宝签到任务”“河宝查寝任务”“河宝活动”“河宝信息收集”。\n个人记录仅私聊展示；当前仅提供查询，不会办理请假、签到或查寝。'),
     '绑定账号': ('绑定账号', '校园账号：用于查询个人课表和校园服务。请在私聊填写机器人提供的绑定模板。\nHENU KIT 网站账号：私聊发送“绑定Kit”，打开授权链接；核对目标账号后按原提示引用确认。\n两种绑定独立，网站绑定不会自动绑定校园账号。不要在群聊发送学号、密码或授权链接。'),
-    '使用帮助': ('从这里开始', '1. 首次使用：私聊发送“绑定账号”。\n2. 看个人状态：发送“我的状态”。\n3. 看课程：发送“今天课表”“明天课表”或“下一节课”；数据有变化时发送“同步课表”。\n4. 找地方自习：发送“找自习室”。\n5. 关联网站：私聊发送“绑定Kit”。\n个人信息仅私聊展示；预约需核对地点、日期、完整时段，再由本人确认。'),
+    '使用帮助': ('从这里开始', '1. 首次使用：私聊发送“绑定账号”。\n2. 看个人状态：发送“我的状态”。\n3. 看课程：发送“今天课表”“明天课表”或“下一节课”；数据有变化时发送“同步课表”。\n4. 找地方自习：发送“找自习室”。\n5. 关联网站：私聊发送“绑定Kit”。\n6. 河宝查询：私聊发送“河宝社区”。\n7. 定时预约：私聊发送“自动预约帮助”。\n个人信息仅私聊展示；预约需核对地点、日期、完整时段，再由本人确认。'),
     '课表推送': ('课表推送', '提醒服务暂未就绪，请稍后重试；已保存的提醒设置不会因此更改。'),
 }
 
@@ -77,6 +78,11 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     # Existing production credential intake must own binding intent and arm its guard.
     if text == '绑定账号' and (defer_binding or callable(getattr(listener, '_arm_credential_intake', None))):
         return False
+    automation = getattr(plugin, 'library_automation', None)
+    if automation is not None:
+        kind = getattr(getattr(ctx.event, 'launcher_type', ''), 'value', getattr(ctx.event, 'launcher_type', ''))
+        if await automation.handle(ctx, is_group=kind != 'person'):
+            return True
     if text == '课表推送' and getattr(plugin, 'schedule_reminders', None) is not None:
         return False
     if classroom_command(text):
@@ -140,7 +146,9 @@ def menu_command(text: str, now=None) -> str:
         return 'schedule day --date ' + day.isoformat()
     if classroom_command(text):
         return classroom_command(text)
-    return {'我的状态': 'account status', '下一节课': 'schedule now', '本周课表': 'schedule week',
+    return {'河宝状态': 'yunfz signin statistics', '河宝请假记录': 'yunfz leave list',
+            '河宝签到任务': 'yunfz signin list', '河宝查寝任务': 'yunfz checksleep list',
+            '河宝活动': 'yunfz activity list', '河宝信息收集': 'yunfz collection list', '我的状态': 'account status', '下一节课': 'schedule now', '本周课表': 'schedule week',
             '同步课表': 'schedule sync', '图书馆座位': 'library locations'}.get(text, '')
 
 

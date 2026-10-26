@@ -54,7 +54,9 @@ def test_kit_settings_accepts_public_core_proxy_path(monkeypatch, tmp_path):
         ),
     ],
 )
-def test_kit_request_signs_body_and_rejects_redirects(monkeypatch, core_url, expected_url):
+def test_kit_request_signs_body_and_rejects_redirects(
+    monkeypatch, core_url, expected_url
+):
     settings = {
         "core_url": core_url,
         "client_id": "henu-bot-test",
@@ -105,3 +107,102 @@ def test_kit_request_signs_body_and_rejects_redirects(monkeypatch, core_url, exp
     Response.status_code = 302
     with pytest.raises(KitError):
         kit_request(settings, "status", {"subject": "alice"})
+
+
+def test_member_lookup_requires_owner_boolean_and_signed_uid(monkeypatch):
+    from henu_plugin.kit_entitlement import membership_request
+
+    settings = {
+        "url": "https://membership.test",
+        "client_id": "bot-reader",
+        "key_id": "key",
+        "secret": "m" * 40,
+    }
+    uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    class Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def iter_content(self, size):
+            yield json.dumps({"data": {"user_id": uid, "lifetime": True}}).encode()
+
+    def get(url, **kwargs):
+        assert url == "https://membership.test/api/v1/bot/membership-entitlement"
+        assert kwargs["allow_redirects"] is False
+        headers = kwargs["headers"]
+        assert headers["X-Actor-User-Id"] == uid
+        canonical = "\n".join(
+            (
+                "GET",
+                "/api/v1/bot/membership-entitlement",
+                headers["X-Timestamp"],
+                headers["X-Nonce"],
+                hashlib.sha256(b"").hexdigest(),
+                uid,
+            )
+        )
+        assert headers["X-Signature"] == base64.urlsafe_b64encode(
+            hmac.new(b"m" * 40, canonical.encode(), hashlib.sha256).digest()
+        ).decode().rstrip("=")
+        return Response()
+
+    monkeypatch.setattr("requests.get", get)
+    assert membership_request(settings, uid) is True
+
+
+@pytest.mark.parametrize("member", [False, "true", None])
+def test_lifetime_gate_rejects_nonmembers_and_malformed_owner_responses(
+    monkeypatch, member
+):
+    import asyncio
+    from henu_plugin.library_automation import lifetime_account
+
+    uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    values = {
+        "CORE_URL": "https://core.test",
+        "PORTAL_URL": "https://portal.test",
+        "CLIENT_ID": "bind-bot",
+        "KEY_ID": "key",
+        "SECRET": "c" * 40,
+        "BOT_UUID": "bot",
+        "ENTITLEMENT_URL": "https://owner.test",
+        "ENTITLEMENT_CLIENT_ID": "reader-bot",
+        "ENTITLEMENT_KEY_ID": "key",
+        "ENTITLEMENT_SECRET": "m" * 40,
+    }
+    for name, value in values.items():
+        monkeypatch.setenv("HENU_KIT_" + name, value)
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, data):
+            self.data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def iter_content(self, size):
+            yield json.dumps({"data": self.data}).encode()
+
+    def post(url, **kwargs):
+        assert json.loads(kwargs["data"]) == {"subject": "alice"}
+        return Response({"bound": True, "user_id": uid})
+
+    def get(url, **kwargs):
+        assert kwargs["headers"]["X-Actor-User-Id"] == uid
+        return Response({"user_id": uid, "lifetime": member})
+
+    monkeypatch.setattr("requests.post", post)
+    monkeypatch.setattr("requests.get", get)
+    with pytest.raises(KitError):
+        asyncio.run(lifetime_account("bot", "alice"))

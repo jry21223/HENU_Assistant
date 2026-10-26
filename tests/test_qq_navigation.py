@@ -27,7 +27,7 @@ def test_shortcut_icons_keep_commands_and_provider_name_limits():
         for command in panel['panel']['items']:
             assert command['name'] in {'我的状态', '今天课表', '明天课表', '下一节课', '同步课表',
                                        '找自习室', '空教室查询', '图书馆座位', '绑定账号',
-                                       '绑定Kit', '使用帮助', '课表推送'}
+                                       '绑定Kit', '使用帮助', '课表推送', '河宝社区', '自动预约帮助'}
             assert len(command['desc'].encode('utf-16-le')) // 2 <= 30
 
 
@@ -245,3 +245,14 @@ def test_short_classroom_guide_keeps_missing_filters_for_service_to_resolve():
 def test_classroom_question_rejects_nonexistent_sixth_large_period():
     from henu_plugin.qq_navigation import menu_command
     assert not menu_command('查金明校区十号楼第6大节的空教室')
+
+
+def test_hebao_queries_use_read_only_cli_commands():
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+    expected = {'河宝状态':'yunfz signin statistics', '河宝请假记录':'yunfz leave list',
+                '河宝签到任务':'yunfz signin list', '河宝查寝任务':'yunfz checksleep list',
+                '河宝活动':'yunfz activity list', '河宝信息收集':'yunfz collection list'}
+    for text, command in expected.items():
+        assert menu_command(text) == command
+        assert inspect_cli_command(command).resolved_tool.startswith('yunfz_')
