@@ -64,3 +64,12 @@ def test_service_credentials_never_enter_the_shared_cas_jar() -> None:
 
     assert library.get_cas_cookies() == {"CASTGC": "shared"}
     assert library.token == "library-token"
+
+
+def test_hebao_does_not_accept_error_or_missing_success_as_logged_in(monkeypatch):
+    from types import SimpleNamespace
+    for status, payload in [(503, {'code': 0}), (200, {}), (200, {'code': 500}), (200, {'code': False})]:
+        monkeypatch.setattr('requests.Session.get', lambda *a, status=status, payload=payload, **k:
+                            SimpleNamespace(status_code=status, json=lambda: payload, url='https://ids.henu.edu.cn/authserver/login', text=''))
+        client = _HebaoClient('student', '', 'cached-token')
+        assert client.login() is False

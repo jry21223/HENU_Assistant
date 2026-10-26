@@ -66,6 +66,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
                 return
             if await handle_card_page(self.plugin, ctx):
                 return
+            if getattr(self.plugin, 'library_automation', None) is not None and await self.plugin.library_automation.handle(ctx, is_group=False):
+                return
             if await self._kit_binding.handle(ctx, is_group=False):
                 return
             if await self._confirmation_shortcut.handle(ctx):
@@ -77,6 +79,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
             if await handle_navigation(self.plugin, ctx, listener=self):
                 return
             if await handle_card_page(self.plugin, ctx):
+                return
+            if getattr(self.plugin, 'library_automation', None) is not None and await self.plugin.library_automation.handle(ctx, is_group=True):
                 return
             if await self._kit_binding.handle(ctx, is_group=True):
                 return
@@ -263,6 +267,9 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         *,
         is_group: bool,
     ) -> None:
+        automation = getattr(self.plugin, 'library_automation', None)
+        if automation is not None and await automation.handle(ctx, is_group=is_group):
+            return
         kit_binding = getattr(self, '_kit_binding', None)
         if kit_binding is not None and await kit_binding.handle(ctx, is_group=is_group):
             return

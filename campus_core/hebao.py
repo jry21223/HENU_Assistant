@@ -155,7 +155,8 @@ class _HebaoClient:
                 timeout=15,
             )
             data = resp.json()
-            return data.get("code") == 0 or data.get("code") != -1
+            return (resp.status_code == 200 and isinstance(data, dict)
+                    and type(data.get("code")) is int and data["code"] == 0)
         except Exception:
             return False
 

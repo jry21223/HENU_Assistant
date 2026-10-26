@@ -797,6 +797,8 @@ class SeatReservationMixin:
         target_date: str,
         preferred_time: str | None = None,
         preferred_end_time: str | None = None,
+        strict_window: bool = False,
+        submit_before: str = "",
     ) -> dict[str, Any]:
         area_id, area_name = self._resolve_area(location_name, target_date)
         space_map = self._get_space_map(area_id)
@@ -807,6 +809,11 @@ class SeatReservationMixin:
             preferred_time=preferred_time,
             preferred_end_time=preferred_end_time,
         )
+        if strict_window:
+            query = plan.get("seat_query") or {}
+            if (plan.get("space_type") != "1" or query.get("day") != target_date
+                    or query.get("start_time") != preferred_time or query.get("end_time") != preferred_end_time):
+                return {"success": False, "retryable": False, "msg": "学校可预约时段与确认计划不一致，未提交"}
         seats = self._query_seats(plan["seat_query"])
         if not seats:
             return {
@@ -847,12 +854,15 @@ class SeatReservationMixin:
                 },
             }
 
+        if submit_before and _now_dt() > dt.datetime.fromisoformat(submit_before):
+            return {"success": False, "retryable": False, "missed": True, "msg": "已错过执行时间，未提交"}
         confirm_payload = dict(plan["confirm_payload"])
         confirm_payload["seat_id"] = str(target_seat.get("id"))
         confirm_resp = self._post_json(
             plan["confirm_path"],
             confirm_payload,
             is_crypto=bool(plan.get("confirm_crypto")),
+            **({"allow_reauth": False} if strict_window else {}),
         )
         submit_success = confirm_resp.get("code") == 0
         response = {
@@ -907,6 +917,8 @@ class SeatReservationMixin:
         retry_until: str | None = None,
         retry_interval_seconds: int = 2,
         max_attempts: int = 1,
+        strict_window: bool = False,
+        submit_before: str = "",
     ) -> dict[str, Any]:
         try:
             dt.date.fromisoformat(target_date)
@@ -945,6 +957,7 @@ class SeatReservationMixin:
                     target_date=target_date,
                     preferred_time=preferred_time,
                     preferred_end_time=preferred_end_time,
+                    **({"strict_window": True, "submit_before": submit_before} if strict_window else {}),
                 )
             except Exception as exc:
                 message = f"预约流程异常: {exc}"
