@@ -23,6 +23,7 @@ from henu_plugin.confirmation import (
     conversation_context,
 )
 from henu_plugin.kit_client import kit_settings, kit_request, KitError
+from henu_plugin.background import create_background_task
 
 COMMANDS = {
     "绑定kit": "start",
@@ -565,8 +566,9 @@ class KitBindingCoordinator:
                 previous = self.watchers.get(key)
                 if previous and not previous.done():
                     previous.cancel()
-                self.watchers[key] = asyncio.create_task(
-                    self._watch(ctx, settings, sender, key, request_id)
+                self.watchers[key] = create_background_task(
+                    self.listener.plugin,
+                    self._watch(ctx, settings, sender, key, request_id),
                 )
             except UsedSourceLedgerFull:
                 await self._stop_reply(

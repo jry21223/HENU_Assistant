@@ -15,6 +15,7 @@ from henu_plugin import bridge_client
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import create_pending_operation, validate_pending_operation, conversation_context
 from henu_plugin.yuketang_nl import match_action
+from henu_plugin.background import create_background_task
 
 
 SENSITIVE_TOOLS = {'yuketang_account_set', 'yuketang_set_token', 'yuketang_login', 'yuketang_logout'}
@@ -64,7 +65,9 @@ class YuketangLoginCoordinator:
             await self.reply(ctx, '敏感命令格式无效。请使用 yuketang account set --account 手机号 --password \'密码\'；不要填写尖括号。')
             return True
         start = asyncio.Event()
-        task = asyncio.create_task(self.run(ctx, text, sender, start, waiting))
+        task = create_background_task(
+            self.listener.plugin, self.run(ctx, text, sender, start, waiting)
+        )
         self.tasks[query_id] = task
         self.users[sender] = task
         try:

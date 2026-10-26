@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from henu_plugin.kit_client import KitError, kit_request, kit_settings
+from henu_plugin.background import create_background_task
 
 ZONE = ZoneInfo("Asia/Shanghai")
 KEY = "library_automation:v1"
@@ -362,7 +363,9 @@ class LibraryAutomation:
                     continue
                 if now < datetime.fromisoformat(plan["run_at"]):
                     continue
-                task = asyncio.create_task(self._execute(key, dict(plan), now, started))
+                task = create_background_task(
+                    self.plugin, self._execute(key, dict(plan), now, started)
+                )
                 self.workers[key] = task
                 task.add_done_callback(
                     lambda done, key=key: self._worker_done(key, done)
@@ -597,7 +600,7 @@ class LibraryAutomation:
 
     def start(self):
         if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self.run())
+            self.task = create_background_task(self.plugin, self.run())
 
     async def run(self):
         while True:
