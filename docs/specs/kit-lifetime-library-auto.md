@@ -37,3 +37,17 @@ Kit 会员接口必须来自服务端的真实会员记录，不采用聊天自�
 - 会员接口需要另行部署并配置独立 HTTPS 服务凭据；现有生产没有切换。
 - 没有真实校园登录、预约、请假、签到或查寝写入；河宝真实账号验收待完成。
 - 多进程/多主机调度未启用：当前仅支持单活动插件实例，扩展前需 Storage CAS/租约。
+
+
+### Saved-session requirement for unattended execution
+
+The scheduled path never submits a campus password or performs CAS login.
+It constructs its library client without a password and marks the client as
+saved-session-only, so token expiry during any later operation also cannot
+trigger login. An invalid saved token stops the one-shot job; users must
+manually query library seats before execution to renew their session.
+
+Creation, confirmation and execution reject explicit failed, pending, unknown,
+unverified or frozen campus authentication records and the account-wide
+schedule refresh pause. Execution rechecks this state inside user storage
+before library I/O. Membership and school account subject checks remain fresh.

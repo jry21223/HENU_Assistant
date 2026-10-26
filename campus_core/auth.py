@@ -223,6 +223,8 @@ class AuthMixin:
             check_day = dt.date.today().strftime("%Y-%m-%d")
             resp = self._post_json("/v4/space/pick", {"date": check_day}, allow_reauth=False)
             code = resp.get("code")
+            if getattr(self, "_saved_session_only", False):
+                return type(code) is int and code == 0
             msg = str(resp.get("message") or resp.get("msg") or "")
             if code == 10001 or "尚未登录" in msg:
                 return False
@@ -231,6 +233,9 @@ class AuthMixin:
             return False
 
     def login(self) -> bool:
+        if getattr(self, "_saved_session_only", False):
+            self._set_last_error("定时预约只使用已有图书馆登录态，请先手动查询图书馆座位。")
+            return False
         self._set_last_error("")
 
         # 1) 先试缓存 token

@@ -355,3 +355,83 @@ def test_strict_reservation_rejects_school_time_changes_before_submit(monkeypatc
                 )
             )
             assert payload["start_time"] == "08:00" and payload["end_time"] == "10:00"
+
+
+def test_paused_campus_state_blocks_prepare_confirm_and_due_execution():
+    async def run():
+        blocked = False
+        calls = []
+        async def subject(sender):
+            if blocked:
+                raise ValueError('校园登录已暂停')
+            return 'campus-student'
+        async def authorize(bot, sender):
+            return 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        async def reserve(sender, plan):
+            calls.append(plan)
+            return {'success': True}
+        jobs = LibraryAutomation(Plugin(), campus_subject=subject, authorize=authorize, reserve=reserve)
+        blocked = True
+        import pytest
+        with pytest.raises(ValueError):
+            await jobs.prepare('bot', 'alice', ARGS, 'source1', NOW)
+        blocked = False
+        plan = await jobs.prepare('bot', 'alice', ARGS, 'source1', NOW)
+        blocked = True
+        with pytest.raises(ValueError):
+            await jobs.confirm('bot', 'alice', plan['token'], 'source2', NOW)
+        blocked = False
+        await jobs.confirm('bot', 'alice', plan['token'], 'source2', NOW)
+        blocked = True
+        await jobs.tick(NOW + timedelta(minutes=1))
+        assert not calls
+        assert (await jobs.status('bot', 'alice'))['state'] == 'authorization_failed'
+    asyncio.run(run())
+
+
+def test_campus_login_guards_reject_failed_unknown_and_paused_states():
+    import pytest
+    from henu_plugin.library_automation import validate_campus_state
+    for field in ('last_login_attempt', 'login_verification', 'saved_login_guard'):
+        for status in ('failed', 'unknown', 'pending', 'frozen', 'unverified'):
+            with pytest.raises(ValueError):
+                validate_campus_state({field: {'status': status}}, {}, {})
+    with pytest.raises(ValueError):
+        validate_campus_state({}, {'status': 'failed'}, {})
+    with pytest.raises(ValueError):
+        validate_campus_state({}, {}, {'paused': True})
+    with pytest.raises(ValueError):
+        validate_campus_state({}, {}, {'paused': 'unknown'})
+    validate_campus_state({'login_verification': {'status': 'verified', 'verified': True}}, {}, {'paused': False})
+
+
+def test_saved_session_builder_cannot_attempt_campus_login(monkeypatch):
+    from henu_mcp.tools import server_impl as api
+    from types import SimpleNamespace
+    created = []
+    class Bot:
+        def __init__(self, sid, password, *args):
+            assert password == ''
+            created.append(self)
+        def _is_token_valid(self):
+            return valid
+        def login(self):
+            raise AssertionError('Password/CAS login must never be attempted')
+    monkeypatch.setattr(api, 'HenuCampusBot', Bot)
+    monkeypatch.setattr(api, '_load_library_cookies', lambda: {'_v4_token': 'cached'})
+    monkeypatch.setattr(api, '_load_cas_cookies', lambda: {'CASTGC': 'cached-tgt'})
+    for valid in (True, False):
+        result = api._build_library_bot('student', 'never-transmit-password', saved_session_only=True)
+        assert bool(result) is valid
+        assert created[-1]._saved_session_only is True
+    from campus_core.auth import AuthMixin
+    assert AuthMixin.login(SimpleNamespace(_saved_session_only=True, _set_last_error=lambda message: None)) is False
+
+
+def test_saved_session_probe_rejects_unknown_authentication_responses():
+    from campus_core.auth import AuthMixin
+    from types import SimpleNamespace
+    for code in (None, False, 500, 10001, '0', 0):
+        bot = SimpleNamespace(token='cached', _saved_session_only=True,
+                              _post_json=lambda *args, **kwargs: {'code': code})
+        assert AuthMixin._is_token_valid(bot) is (type(code) is int and code == 0)
