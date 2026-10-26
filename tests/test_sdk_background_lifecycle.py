@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -110,5 +111,41 @@ def test_private_credential_confirmation_is_saved_after_event_returns():
         assert payload["key"] == "user:user-a:yuketang_pending_credentials"
         assert "synthetic" not in str(payload)
         assert "确认" in str(request.reply.call_args)
+
+    asyncio.run(run())
+
+
+def test_scheduled_worker_keeps_storage_authority_after_scan_invocation_returns():
+    from tests.test_library_automation import ARGS, NOW, campus_subject
+
+    async def run():
+        scope = binding()
+        storage = {}
+
+        async def action(operation, payload):
+            if operation.name == "GET_PLUGIN_STORAGE":
+                return {"value_base64": base64.b64encode(storage.get(payload["key"], b"{}")).decode()}
+            if operation.name == "SET_PLUGIN_STORAGE":
+                storage[payload["key"]] = base64.b64decode(payload["value_base64"])
+                return {}
+            raise AssertionError("Unexpected RPC; school/network access is forbidden")
+
+        rpc = SimpleNamespace(bound_action_context=scope, call_action=action)
+        plugin = LangBotAPIProxy(rpc)
+
+        async def authorize(_bot, _sender):
+            await plugin.get_plugin_storage("library_automation:v1")
+            return "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+        reserve = AsyncMock(return_value={"success": True})
+        jobs = LibraryAutomation(plugin, authorize=authorize, reserve=reserve,
+                                 campus_subject=campus_subject)
+        plan = await jobs.prepare("bot", "alice", ARGS, "source1", NOW)
+        await jobs.confirm("bot", "alice", plan["token"], "source2", NOW)
+        with invocation.bind_invocation(rpc, binding=scope):
+            await jobs.tick(NOW.replace(hour=7, minute=0), wait=False)
+        await asyncio.gather(*jobs.workers.values())
+        reserve.assert_awaited_once()
+        assert next(iter(json.loads(storage["library_automation:v1"]).values()))["state"] == "success"
 
     asyncio.run(run())

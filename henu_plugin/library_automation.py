@@ -350,7 +350,9 @@ class LibraryAutomation:
                     continue
                 if now < datetime.fromisoformat(plan["run_at"]):
                     continue
-                task = asyncio.create_task(self._execute(key, dict(plan), now, started))
+                task = create_background_task(
+                    self.plugin, self._execute(key, dict(plan), now, started)
+                )
                 self.workers[key] = task
                 task.add_done_callback(
                     lambda done, key=key: self._worker_done(key, done)
