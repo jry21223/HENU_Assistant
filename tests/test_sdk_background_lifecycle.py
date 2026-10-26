@@ -10,14 +10,15 @@ from unittest.mock import AsyncMock
 import pytest
 import langbot_plugin
 
-invocation = pytest.importorskip("langbot_plugin.api.proxies.invocation")
 from langbot_plugin.api.proxies.langbot_api import LangBotAPIProxy
-from langbot_plugin.entities.io.context import InstallationBinding
 from langbot_plugin.entities.io.actions.enums import RuntimeToPluginAction
 
 from henu_plugin.schedule_reminders import ScheduleReminders
 from henu_plugin.library_automation import LibraryAutomation
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
+
+invocation = pytest.importorskip("langbot_plugin.api.proxies.invocation")
+InstallationBinding = pytest.importorskip("langbot_plugin.entities.io.context").InstallationBinding
 
 spec = importlib.util.spec_from_file_location(
     "sdk_lifecycle_dispatch", Path(langbot_plugin.__file__).parent / "cli/run/handler.py"
