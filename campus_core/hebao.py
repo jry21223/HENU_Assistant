@@ -161,52 +161,55 @@ class _HebaoClient:
             return False
 
     def _exchange_cas_ticket(self, cas_ticket: str) -> bool:
-        """Use CAS ticket to get authentication token"""
+        """Exchange once using the same OAuth form as the official CAS page."""
         if not cas_ticket:
             self._set_last_error("CAS 未返回有效 ticket")
             return False
-
         try:
-            # The service expects the ticket as a query parameter
-            resp = self.session.get(
-                f"{self.cas_return_url}",
-                params={"ticket": cas_ticket},
-                allow_redirects=True,
+            response = self.session.post(
+                f"{self.base_url}/auth/oauth/token",
+                data={"grant_type": "cas", "ticket": cas_ticket,
+                      "redirectUrl": self.cas_return_url},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    # Public browser client identifier, supplied by the official frontend.
+                    "Authorization": "Basic eGN6OjEyMzQ1Ng==",
+                },
+                allow_redirects=False,
                 timeout=25,
             )
-
-            # Check if we got a token in the URL or need to extract from response
-            # The frontend stores token in localStorage from query params
-            if "token=" in resp.url:
-                match = re.search(r"[?&]token=([^&#]+)", resp.url)
-                if match:
-                    self.token = match.group(1)
-                    self.session.headers["Authorization"] = self.token
-                    self._set_last_error("")
-                    return True
-
-            # Check if we're already on a page that indicates successful login
-            if "/home" in resp.url or resp.status_code == 200:
-                # Try to extract token from response headers or cookies
-                token = resp.headers.get("Authorization", "")
-                if not token:
-                    # Check for token in Set-Cookie or response body
-                    for cookie in self.session.cookies:
-                        if cookie.name in ("token", "Authorization"):
-                            token = cookie.value
-                            break
-
-                if token:
-                    self.token = token
-                    self.session.headers["Authorization"] = self.token
-                    self._set_last_error("")
-                    return True
-
-            self._set_last_error("CAS ticket 换取 token 失败")
-            return False
-
-        except Exception as exc:
-            self._set_last_error(f"使用 CAS ticket 换取 token 失败: {exc}")
+            if response.status_code != 200:
+                self._set_last_error("河宝 OAuth 换票失败，请重新登录河宝")
+                return False
+            data = response.json()
+            access_token = data.get("access_token") if isinstance(data, dict) else None
+            token_type = data.get("token_type", "bearer") if isinstance(data, dict) else ""
+            if (not isinstance(access_token, str) or not access_token.strip()
+                    or not isinstance(token_type, str) or token_type.lower() != "bearer"
+                    or any(ch.isspace() for ch in access_token)):
+                self._set_last_error("河宝 OAuth 未返回有效 token")
+                return False
+            token = "Bearer " + access_token
+            info = self.session.get(
+                f"{self.base_url}/admin/user/info",
+                headers={"Authorization": token},
+                allow_redirects=False,
+                timeout=25,
+            )
+            payload = info.json()
+            user = payload.get("data", {}).get("userinfo", {}) if isinstance(payload, dict) and isinstance(payload.get("data"), dict) else {}
+            if (info.status_code != 200 or not isinstance(payload, dict)
+                    or type(payload.get("code")) is not int or payload["code"] != 0
+                    or not isinstance(user, dict)
+                    or str(user.get("studentNo", "")).strip() != self.username):
+                self._set_last_error("河宝登录主体核验失败，未保存 token")
+                return False
+            self.token = token
+            self.session.headers["Authorization"] = token
+            self._set_last_error("")
+            return True
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            self._set_last_error("河宝 OAuth 换票响应异常，未重试")
             return False
 
     def login(self) -> bool:
@@ -232,8 +235,8 @@ class _HebaoClient:
             try:
                 resp = self.session.get(cas_auth_url, allow_redirects=True, timeout=25)
                 cas_ticket = self._extract_cas_ticket(resp.url)
-                if cas_ticket and self._exchange_cas_ticket(cas_ticket):
-                    return True
+                if cas_ticket:
+                    return self._exchange_cas_ticket(cas_ticket)
             except Exception as exc:
                 self._set_last_error(f"访问 CAS 登录入口失败: {exc}")
 
