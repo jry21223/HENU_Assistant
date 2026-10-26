@@ -11,6 +11,7 @@ from langbot_plugin.api.entities.builtin.provider.session import Session, Launch
 from henu_mcp.core.secure_storage import decrypt_value
 from henu_plugin.confirmation import conversation_context, validate_pending_operation
 from henu_plugin.qq_cards import reply_card
+from henu_plugin.background import create_background_task
 
 
 CONFIRM_WORDS = {'确认', '确认操作', '确认绑定', '确认雨课堂绑定'}
@@ -92,7 +93,9 @@ class ConfirmationShortcut:
             await self.reply(ctx, '上一项确认正在执行，请等待结果，不要重复确认。')
             return True
         start = asyncio.Event()
-        task = asyncio.create_task(self.execute(ctx, sender, conversation, token, start))
+        task = create_background_task(
+            self.listener.plugin, self.execute(ctx, sender, conversation, token, start)
+        )
         self.tasks[sender] = task
         try:
             await self.reply(ctx, '已收到确认，正在执行，请等待结果。')

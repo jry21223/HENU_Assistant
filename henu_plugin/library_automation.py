@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from henu_plugin.kit_client import KitError, kit_request, kit_settings
+from henu_plugin.background import create_background_task
 
 ZONE = ZoneInfo("Asia/Shanghai")
 KEY = "library_automation:v1"
@@ -472,7 +473,7 @@ class LibraryAutomation:
 
     def start(self):
         if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self.run())
+            self.task = create_background_task(self.plugin, self.run())
 
     async def run(self):
         while True:

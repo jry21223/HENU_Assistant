@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from henu_plugin.qq_cards import Card, card_chain, escape, text_card
+from henu_plugin.background import create_background_task
 
 ZONE = ZoneInfo('Asia/Shanghai')
 KEY = 'schedule_reminders:v1'
@@ -59,9 +60,9 @@ class ScheduleReminders:
 
     def start(self):
         if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self.run())
+            self.task = create_background_task(self.plugin, self.run())
         if self.refresh_task is None or self.refresh_task.done():
-            self.refresh_task = asyncio.create_task(self.run_refresh())
+            self.refresh_task = create_background_task(self.plugin, self.run_refresh())
 
     async def read(self):
         try:

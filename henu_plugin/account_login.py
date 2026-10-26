@@ -11,6 +11,7 @@ from langbot_plugin.api.entities.builtin.provider.session import LauncherTypes, 
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.login_guard import guarded_login
 from henu_plugin.qq_cards import card_chain, text_card
+from henu_plugin.background import create_background_task
 
 
 def account_login_intent(text: str) -> bool:
@@ -98,7 +99,9 @@ class AccountLoginCoordinator:
         # Capture routing while the query is alive; background delivery must not
         # use ctx.reply after LangBot has closed the originating invocation.
         start = asyncio.Event()
-        task = asyncio.create_task(self.run(bot, sender, ctx.query_id, spec.params, start))
+        task = create_background_task(
+            self.listener.plugin, self.run(bot, sender, ctx.query_id, spec.params, start)
+        )
         self.tasks[key] = task
         self.users[sender] = task
         self.last_started[sender] = now
