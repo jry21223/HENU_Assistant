@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .client import EmptyClassroomClient
@@ -25,7 +25,6 @@ from .storage import (
     format_iso,
     get_locks_dir,
     get_parsed_schedule_age,
-    get_query_cache_age,
     get_schedule_html_age,
     load_parsed_schedule,
     load_query_cache,
@@ -286,10 +285,11 @@ def query_free_classrooms(
     if freshness == "cache_first" and not force_refresh:
         cached = load_query_cache(query_hash, ttl_seconds=ttl_seconds)
         if cached:
-            age = get_query_cache_age(query_hash)
-            return _build_result_from_cache(
+            result = _build_result_from_cache(
                 cached, strategy, False, False, ttl_seconds, expected_query,
             )
+            if not result.freshness.get('stale'):
+                return result
         # 缓存未命中，继续刷新
 
     # ── stale_while_revalidate 模式 ──
@@ -354,8 +354,8 @@ def query_free_classrooms(
 
     # 确定缓存时间戳
     if live_checked:
-        fetched_at = format_iso(now)
-        parsed_at = format_iso(now)
+        fetched_at = datetime.fromtimestamp(now, timezone.utc).isoformat()
+        parsed_at = fetched_at
     else:
         # 使用已有缓存的时间戳
         first_age = float("inf")
@@ -365,11 +365,11 @@ def query_free_classrooms(
             )
             first_age = min(first_age, age)
         if first_age < float("inf"):
-            fetched_at = format_iso(now - first_age)
+            fetched_at = datetime.fromtimestamp(now - first_age, timezone.utc).isoformat()
             parsed_at = fetched_at
         else:
-            fetched_at = format_iso(now)
-            parsed_at = format_iso(now)
+            fetched_at = datetime.fromtimestamp(now, timezone.utc).isoformat()
+            parsed_at = fetched_at
 
     # ── 计算空闲教室 ──
     free_rooms = _compute_free_rooms(
@@ -385,13 +385,9 @@ def query_free_classrooms(
     )
 
     # ── 构建 freshness ──
-    cache_age = min(
-        get_query_cache_age(query_hash),
-        get_parsed_schedule_age(term_code, campus_code, building_code)
-        if building_code else float("inf"),
-    )
-    if cache_age == float("inf"):
-        cache_age = 0
+    # Source age must survive both process timezone changes and rebuilding a
+    # result-cache file from an older (still valid) school timetable.
+    cache_age = time.time() - datetime.fromisoformat(fetched_at).timestamp()
 
     freshness_obj = Freshness(
         strategy=strategy,
@@ -601,8 +597,10 @@ def _build_result_from_cache(
     """从缓存构建结果。"""
     freshness_dict = dict(cached.get("freshness", {}))
     try:
-        fetched_at = datetime.fromisoformat(freshness_dict.get("fetchedAt", "")).timestamp()
-        age = time.time() - fetched_at
+        fetched_at = datetime.fromisoformat(freshness_dict.get("fetchedAt", ""))
+        if fetched_at.tzinfo is None:
+            raise ValueError('legacy timestamp has no producer timezone')
+        age = time.time() - fetched_at.timestamp()
     except (ValueError, TypeError, OverflowError):
         age = None
     freshness_dict["strategy"] = strategy
