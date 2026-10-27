@@ -25,7 +25,6 @@ from .storage import (
     format_iso,
     get_locks_dir,
     get_parsed_schedule_age,
-    get_query_cache_age,
     get_schedule_html_age,
     load_parsed_schedule,
     load_query_cache,
