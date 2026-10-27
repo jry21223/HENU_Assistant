@@ -174,6 +174,11 @@ def sync_schedule(
             campus_code=campus_code,
             building_code=building_code,
         )
+        # Identity and occupancy have separate upstream inventories. A room
+        # listed here but absent from the schedule remains uncovered, not free.
+        parsed['room_catalog'] = [room.to_dict() for room in client.fetch_classrooms(
+            campus_code=campus_code, building_code=building_code, type_code=type_code
+        ) if room.campus_code == campus_code and room.building_code == building_code]
 
         # 保存解析结果
         save_parsed_schedule(parsed, term_code, campus_code, building_code)
@@ -297,6 +302,7 @@ def query_free_classrooms(
     buildings_to_refresh = _resolve_buildings(client, campus_code, building_code)
 
     all_classrooms: list[dict[str, Any]] = []
+    room_catalog: list[dict[str, Any]] = []
     all_cells: list[dict[str, Any]] = []
     refresh_errors: list[str] = []
 
@@ -313,6 +319,7 @@ def query_free_classrooms(
                     if parsed.get("parse_errors"):
                         refresh_errors.append(f"{bld_campus}/{bld_code}: schedule parsing incomplete")
                     all_classrooms.extend(parsed.get("classrooms", []))
+                    room_catalog.extend(parsed.get('room_catalog', []))
                     all_cells.extend(parsed.get("cells", []))
                     continue
 
@@ -337,6 +344,7 @@ def query_free_classrooms(
                 if parsed.get("parse_errors"):
                     refresh_errors.append(f"{bld_campus}/{bld_code}: schedule parsing incomplete")
                 all_classrooms.extend(parsed.get("classrooms", []))
+                room_catalog.extend(parsed.get('room_catalog', []))
                 all_cells.extend(parsed.get("cells", []))
 
     # 确定缓存时间戳
@@ -444,6 +452,11 @@ def query_free_classrooms(
         "free": sorted(unfiltered_free),
         "occupied": sorted(inventory - unfiltered_free),
         "filtered": bool(min_capacity or keyword or type_code),
+        "catalogUncovered": sorted(
+            [room for room in room_catalog if room.get('roomName') not in inventory
+             and room.get('roomId') and room.get('roomName')
+             and room.get('campusCode') == campus_code and room.get('buildingCode') == building_code],
+            key=lambda room: room['roomName']),
     }
     if refresh_errors or not all_classrooms:
         freshness_metadata.update(partial=True, refreshFailed=bool(refresh_errors))

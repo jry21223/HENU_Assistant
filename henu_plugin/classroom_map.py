@@ -104,6 +104,31 @@ def _room_states(row, campus, building):
     return states
 
 
+def catalog_uncovered(result):
+    """Exact school identities with no course coverage; never status evidence."""
+    query = result.get('query') or {}
+    campus, building = query.get('campusCode'), query.get('buildingCode')
+    if campus != '02' or building not in LAYOUTS:
+        return []
+    states = _room_states(result, campus, building)
+    if not states:
+        return []
+    entries = result.get('freshness', {}).get('roomStates', {}).get('catalogUncovered', [])
+    if not isinstance(entries, list) or not all(isinstance(row, dict) for row in entries):
+        return []
+    ids = [row.get('roomId') for row in entries]
+    if not all(isinstance(value, str) and value for value in ids) or len(set(ids)) != len(ids):
+        return []
+    matched = []
+    for row in entries:
+        if row.get('campusCode') != campus or row.get('buildingCode') != building:
+            continue
+        number = _room_number(row, campus, building)
+        if number and number not in states:
+            matched.append((number, row['roomId']))
+    return sorted(set(matched))
+
+
 def render_classroom_map(result):
     """Return a PNG; absent rooms remain unverified, never inferred occupied."""
     from PIL import Image, ImageDraw, ImageFont
@@ -189,13 +214,23 @@ def render_classroom_map(result):
                      if data.get('clockVerified') else '第' + str(slot['period']) + '大节 · 时刻待核验')
             draw.text((132, y + 20), label, anchor='lm', font=font(32), fill=INK)
     state_rows = data['periods'] if all_day else [result]
+    uncovered = sorted({number for row in state_rows for number, _ in catalog_uncovered(row)})
     if any((row.get('freshness') or {}).get('roomStates', {}).get('filtered') for row in state_rows):
-        draw.text((64, 1630 if all_day else 1390), '图示整栋课程状态；文字清单已筛选。', font=status_font(23), fill=INK)
+        draw.text((64, 1630 if all_day else 1365), '图示整栋课程状态；文字清单已筛选。', font=status_font(23), fill=INK)
+    if uncovered:
+        label = '教室已确认，部分课表未覆盖：' if all_day else '教室已确认，课表未覆盖：'
+        if all_day:
+            draw.text((650, 1370), label, font=status_font(23), fill=INK)
+            for index in range(0, len(uncovered), 6):
+                draw.text((650, 1405 + index // 6 * 32), '、'.join(uncovered[index:index + 6]), font=status_font(23), fill=INK)
+        else:
+            draw.text((64, 1405), label + '、'.join(uncovered), font=status_font(23), fill=INK)
     draw.text((64, 1660 if all_day else 1450), '课程未占用不等于现场开放。', font=font(28), fill='#59697b')
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
     metadata.add_text('Title', title)
+    metadata.add_text('CatalogUncovered', '、'.join(uncovered))
     image.save(output, 'PNG', optimize=True, pnginfo=metadata)
     return output.getvalue()
 
@@ -233,6 +268,9 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
         lines.append('图中仅标记已核对位置，其余房间可查看清单。')
     if image_ok and proof.get('roomStates', {}).get('filtered'):
         lines.append('图片为整栋课程状态；数量及教室清单已按条件筛选。')
+    uncovered = catalog_uncovered(result)
+    if uncovered:
+        lines.append('教室已确认，课表未覆盖：' + '、'.join(number for number, _ in uncovered) + '；状态仍未核验。')
     if proof.get('fetchedAt'):
         lines.append('来源获取时间：' + escape(proof['fetchedAt'], 60))
     if proof.get('liveChecked') is False:
