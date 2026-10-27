@@ -1,6 +1,8 @@
 """School directory identity never supplies missing course occupancy."""
 import copy
 import io
+import os
+import time
 from types import SimpleNamespace
 
 from PIL import Image
@@ -115,3 +117,47 @@ def test_bad_or_expired_catalog_does_not_claim_identity_match(invalid):
         proof['catalogUncovered'][1]['roomId'] = '0000217'
     text = '\n'.join(classroom_summary(row, image_ok=True).pages())
     assert '教室已确认' not in text
+
+
+def test_fresh_school_result_stays_fresh_across_worker_timezones(tmp_path, monkeypatch, school_client):
+    from campus_core import storage_paths
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    args = dict(client=school_client, term_code='2026,0', week=9, day_of_week=2,
+                period=3, campus_code='02', building_code='21')
+    try:
+        with monkeypatch.context() as clock:
+            clock.setenv('TZ', 'Asia/Shanghai')
+            time.tzset()
+            live = query.query_free_classrooms(**args, freshness='live').to_dict()
+            clock.setenv('TZ', 'UTC')
+            time.tzset()
+            cached = query.query_free_classrooms(**args, freshness='cache_first').to_dict()
+            assert cached['freshness']['stale'] is False
+            assert 0 <= cached['freshness']['ageSeconds'] <= 300
+            assert cached['freshness']['roomStates']['catalogUncovered'] == live['freshness']['roomStates']['catalogUncovered']
+    finally:
+        time.tzset()
+
+
+def test_legacy_unzoned_cache_is_unverified_in_cache_only_and_refreshed_in_cache_first(tmp_path, monkeypatch, school_client):
+    from campus_core import storage_paths
+    from campus_core.empty_classroom import storage
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    args = dict(client=school_client, term_code='2026,0', week=9, day_of_week=2,
+                period=3, campus_code='02', building_code='21')
+    live = query.query_free_classrooms(**args, freshness='live').to_dict()
+    live['freshness']['fetchedAt'] = live['freshness']['fetchedAt'].split('+')[0]
+    key = storage.compute_query_hash('2026,0', 9, 2, 3, '02', '21')
+    storage.save_query_cache(key, live)
+    # Rebuilding result metadata must preserve the age of the actual school
+    # timetable, not renew its lifetime using the newer result-cache file.
+    source_time = time.time() - 120
+    for path in tmp_path.rglob('*'):
+        if path.is_file() and any(part in path.parts for part in ['parsed_schedule', 'schedule_html']):
+            os.utime(path, (source_time, source_time))
+    only = query.query_free_classrooms(**args, freshness='cache_only').to_dict()
+    assert only['freshness']['stale'] is True
+    refreshed = query.query_free_classrooms(**args, freshness='cache_first').to_dict()
+    assert refreshed['freshness']['stale'] is False
+    assert refreshed['freshness']['fetchedAt'].endswith('+00:00')
+    assert 119 <= refreshed['freshness']['ageSeconds'] <= 125
