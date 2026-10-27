@@ -258,12 +258,14 @@ def query_free_classrooms(
         min_capacity=min_capacity,
         keyword=keyword,
     )
+    expected_query = {"termCode": term_code, "week": week, "dayOfWeek": day_of_week,
+                      "period": period, "campusCode": campus_code, "buildingCode": building_code}
 
     # ── cache_only 模式 ──
     if freshness == "cache_only":
         cached = load_query_cache(query_hash, ttl_seconds=999999)
         if cached:
-            return _build_result_from_cache(cached, strategy, False, False, ttl_seconds)
+            return _build_result_from_cache(cached, strategy, False, False, ttl_seconds, expected_query)
         # 无缓存也返回空结果
         return _empty_result(
             term_code, week, day_of_week, period, campus_code, building_code,
@@ -276,7 +278,7 @@ def query_free_classrooms(
         if cached:
             age = get_query_cache_age(query_hash)
             return _build_result_from_cache(
-                cached, strategy, False, False, ttl_seconds,
+                cached, strategy, False, False, ttl_seconds, expected_query,
             )
         # 缓存未命中，继续刷新
 
@@ -286,7 +288,7 @@ def query_free_classrooms(
         if cached:
             # 先返回旧缓存，后台刷新标记
             return _build_result_from_cache(
-                cached, strategy, False, True, ttl_seconds,
+                cached, strategy, False, True, ttl_seconds, expected_query,
             )
         # 无缓存，继续刷新
 
@@ -308,6 +310,8 @@ def query_free_classrooms(
             if html_age < ttl_seconds:
                 parsed = load_parsed_schedule(term_code, bld_campus, bld_code)
                 if parsed:
+                    if parsed.get("parse_errors"):
+                        refresh_errors.append(f"{bld_campus}/{bld_code}: schedule parsing incomplete")
                     all_classrooms.extend(parsed.get("classrooms", []))
                     all_cells.extend(parsed.get("cells", []))
                     continue
@@ -322,7 +326,7 @@ def query_free_classrooms(
             force_refresh=force_refresh or freshness == "live",
         )
 
-        if sync_result.sync_status == "failed":
+        if sync_result.sync_status == "failed" or sync_result.error:
             refresh_errors.append(
                 f"{bld_campus}/{bld_code}: {sync_result.error}"
             )
@@ -330,6 +334,8 @@ def query_free_classrooms(
             live_checked = True
             parsed = load_parsed_schedule(term_code, bld_campus, bld_code)
             if parsed:
+                if parsed.get("parse_errors"):
+                    refresh_errors.append(f"{bld_campus}/{bld_code}: schedule parsing incomplete")
                 all_classrooms.extend(parsed.get("classrooms", []))
                 all_cells.extend(parsed.get("cells", []))
 
@@ -425,11 +431,29 @@ def query_free_classrooms(
     if building_code and building_code in building_map:
         resolved["building"] = {"buildingCode": building_code, "buildingName": building_map[building_code]}
 
+    freshness_metadata = freshness_obj.to_dict()
+    # Preserve the school's actual room coverage, independently of display
+    # filters. A room absent from this inventory must never imply occupied.
+    inventory = {str(room.get("room_name") or "") for room in all_classrooms} - {""}
+    unfiltered_free = {room["roomName"] for room in _compute_free_rooms(
+        all_classrooms, all_cells, week, day_of_week, period, campus_code, building_code
+    )}
+    freshness_metadata["roomStates"] = {
+        "complete": bool(inventory) and not refresh_errors,
+        "scope": expected_query,
+        "free": sorted(unfiltered_free),
+        "occupied": sorted(inventory - unfiltered_free),
+        "filtered": bool(min_capacity or keyword or type_code),
+    }
+    if refresh_errors or not all_classrooms:
+        freshness_metadata.update(partial=True, refreshFailed=bool(refresh_errors))
+        freshness_metadata["refreshErrors"] = refresh_errors
+        freshness_metadata["note"] = "上游查询未完整完成，不能据此判断教室空闲。"
     result = FreeClassroomResult(
         query=query_summary,
         total=len(free_rooms),
         rooms=free_rooms,
-        freshness=freshness_obj.to_dict(),
+        freshness=freshness_metadata,
         resolved=resolved,
     )
 
@@ -546,20 +570,40 @@ def _build_result_from_cache(
     stale: bool,
     needs_refresh: bool,
     ttl_seconds: int,
+    expected_query: dict[str, Any],
 ) -> FreeClassroomResult:
     """从缓存构建结果。"""
-    freshness_dict = cached.get("freshness", {})
+    freshness_dict = dict(cached.get("freshness", {}))
+    try:
+        fetched_at = datetime.fromisoformat(freshness_dict.get("fetchedAt", "")).timestamp()
+        age = time.time() - fetched_at
+    except (ValueError, TypeError, OverflowError):
+        age = None
     freshness_dict["strategy"] = strategy
-    freshness_dict["stale"] = stale
+    freshness_dict["cacheHit"] = True
+    freshness_dict["ttlSeconds"] = ttl_seconds
+    freshness_dict["ageSeconds"] = age
+    freshness_dict["stale"] = stale or age is None or not 0 <= age <= ttl_seconds
     freshness_dict["liveChecked"] = False
     if needs_refresh:
         freshness_dict["stale"] = True
         freshness_dict["_needsRefresh"] = True
 
+    rooms = cached.get("rooms", [])
+    query = cached.get("query", {})
+    invalid_scope = any(query.get(key) != value for key, value in expected_query.items())
+    invalid_scope = invalid_scope or any(
+        room.get(key) and value and room[key] != value
+        for room in rooms for key, value in expected_query.items()
+        if key in {"campusCode", "buildingCode"}
+    )
+    if invalid_scope:
+        freshness_dict.update(partial=True, note="缓存条件或地点不一致；本次未将这些教室列为可用。")
+
     return FreeClassroomResult(
         query=cached.get("query", {}),
-        total=cached.get("total", 0),
-        rooms=cached.get("rooms", []),
+        total=0 if invalid_scope else cached.get("total", 0),
+        rooms=[] if invalid_scope else rooms,
         freshness=freshness_dict,
         resolved=cached.get("resolved", {}),
     )
@@ -580,13 +624,15 @@ def _empty_result(
     freshness_obj = Freshness(
         strategy=strategy,
         source="xk_room_schedule",
-        fetched_at=format_iso(),
-        parsed_at=format_iso(),
+        fetched_at="",
+        parsed_at="",
         ttl_seconds=ttl_seconds,
         age_seconds=0,
-        stale=False,
+        stale=True,
         live_checked=live_checked,
     )
+    freshness_dict = freshness_obj.to_dict()
+    freshness_dict.update(cacheHit=False, ageSeconds=None, note="该条件暂无缓存记录；未访问学校系统，不能据此判断教室空闲。")
     return FreeClassroomResult(
         query={
             "termCode": term_code,
@@ -600,7 +646,7 @@ def _empty_result(
         },
         total=0,
         rooms=[],
-        freshness=freshness_obj.to_dict(),
+        freshness=freshness_dict,
     )
 
 
