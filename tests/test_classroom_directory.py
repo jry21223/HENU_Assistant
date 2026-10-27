@@ -10,12 +10,11 @@ from campus_core.empty_classroom.models import Classroom
 from campus_core.empty_classroom import query
 
 
-def test_query_preserves_school_ids_without_treating_uncovered_rooms_as_free(tmp_path, monkeypatch):
-    from campus_core import storage_paths
-    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+@pytest.fixture
+def school_client():
     empty_slots = ''.join(f'<div class="div1" id="0{day}{period}"></div>'
                           for day in range(1, 8) for period in range(1, 6))
-    client = SimpleNamespace(
+    return SimpleNamespace(
         fetch_schedule_html=lambda **kw: f'<html><p>教室：金明综合楼6101(178)</p><table id="mytable0"><tr><td>{empty_slots}</td></tr></table></html>',
         fetch_classrooms=lambda **kw: [
             Classroom('0000213', '金明综合楼6101', '02', '', '21', '', 178, '多媒体教室'),
@@ -23,6 +22,12 @@ def test_query_preserves_school_ids_without_treating_uncovered_rooms_as_free(tmp
             Classroom('0000222', '金明综合楼6405', '02', '', '21', '', 300, '多媒体教室')],
         get_campus_map=lambda: {'02': '金明校区'},
         get_building_map=lambda code: {'21': '金明综合楼6'})
+
+
+def test_query_preserves_school_ids_without_treating_uncovered_rooms_as_free(tmp_path, monkeypatch, school_client):
+    from campus_core import storage_paths
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    client = school_client
     args = dict(client=client, term_code='2026,0', week=9, day_of_week=2, period=2,
                 campus_code='02', building_code='21')
     live = query.query_free_classrooms(**args, freshness='live').to_dict()
@@ -34,6 +39,33 @@ def test_query_preserves_school_ids_without_treating_uncovered_rooms_as_free(tmp
         ('金明综合楼6305', '0000217'), ('金明综合楼6405', '0000222')]
     cached = query.query_free_classrooms(**args, freshness='cache_first').to_dict()
     assert cached['freshness']['roomStates']['catalogUncovered'] == proof['catalogUncovered']
+
+
+def test_optional_directory_failure_does_not_discard_valid_course_result(tmp_path, monkeypatch, school_client):
+    from campus_core import storage_paths
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    def malformed_directory(**kwargs):
+        raise ValueError('malformed school room capacity')
+    school_client.fetch_classrooms = malformed_directory
+    row = query.query_free_classrooms(client=school_client, term_code='2026,0', week=9,
+        day_of_week=2, period=2, campus_code='02', building_code='21', freshness='live').to_dict()
+    assert row['freshness']['roomStates']['complete'] is True
+    assert row['freshness']['roomStates']['free'] == ['金明综合楼6101']
+    assert row['freshness']['roomStates']['catalogUncovered'] == []
+
+
+def test_mixed_directory_is_not_treated_as_same_scope_proof(tmp_path, monkeypatch, school_client):
+    from campus_core import storage_paths
+    monkeypatch.setattr(storage_paths, '_BASE_DIR', tmp_path)
+    original = school_client.fetch_classrooms
+    school_client.fetch_classrooms = lambda **kw: original(**kw) + [
+        # Real client stamps requested scope onto XML entries. The names must
+        # independently identify the Jinming building rather than trusting it.
+        Classroom('foreign', '明伦综合楼101', '02', '', '21', '', 20, '多媒体教室')]
+    row = query.query_free_classrooms(client=school_client, term_code='2026,0', week=9,
+        day_of_week=2, period=2, campus_code='02', building_code='21', freshness='live').to_dict()
+    assert row['freshness']['roomStates']['free'] == ['金明综合楼6101']
+    assert row['freshness']['roomStates']['catalogUncovered'] == []
 
 
 def directory_result():

@@ -176,9 +176,14 @@ def sync_schedule(
         )
         # Identity and occupancy have separate upstream inventories. A room
         # listed here but absent from the schedule remains uncovered, not free.
-        parsed['room_catalog'] = [room.to_dict() for room in client.fetch_classrooms(
-            campus_code=campus_code, building_code=building_code, type_code=type_code
-        ) if room.campus_code == campus_code and room.building_code == building_code]
+        try:
+            parsed['room_catalog'] = [room.to_dict() for room in client.fetch_classrooms(
+                campus_code=campus_code, building_code=building_code, type_code=type_code
+            ) if room.campus_code == campus_code and room.building_code == building_code]
+        except Exception:
+            # Optional directory parsing must not discard a valid timetable.
+            # Never retain an older identity mapping on a failed refresh.
+            parsed['room_catalog'] = []
 
         # 保存解析结果
         save_parsed_schedule(parsed, term_code, campus_code, building_code)
@@ -440,6 +445,14 @@ def query_free_classrooms(
         resolved["building"] = {"buildingCode": building_code, "buildingName": building_map[building_code]}
 
     freshness_metadata = freshness_obj.to_dict()
+    catalog_prefix = building_map.get(building_code, '')
+    # XML directory entries do not carry scope; the client stamps requested
+    # codes onto them. Require independent Jinming building names and reject a
+    # mixed response instead of treating those stamped codes as evidence.
+    catalog_scoped = (campus_map.get(campus_code) == '金明校区'
+        and catalog_prefix.startswith('金明综合楼')
+        and all(isinstance(room.get('roomName'), str)
+                and room['roomName'].startswith(catalog_prefix) for room in room_catalog))
     # Preserve the school's actual room coverage, independently of display
     # filters. A room absent from this inventory must never imply occupied.
     inventory = {str(room.get("room_name") or "") for room in all_classrooms} - {""}
@@ -453,7 +466,7 @@ def query_free_classrooms(
         "occupied": sorted(inventory - unfiltered_free),
         "filtered": bool(min_capacity or keyword or type_code),
         "catalogUncovered": sorted(
-            [room for room in room_catalog if room.get('roomName') not in inventory
+            [room for room in room_catalog if catalog_scoped and room.get('roomName') not in inventory
              and room.get('roomId') and room.get('roomName')
              and room.get('campusCode') == campus_code and room.get('buildingCode') == building_code],
             key=lambda room: room['roomName']),
