@@ -1604,7 +1604,8 @@ def _parse_empty_classroom(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
 
     if sub in ("楼房", "buildings"):
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="empty_classroom_query",
-            params={"view": "buildings", "campus_code": options.get("campus_code", options.get("校区", ""))},
+            params={"view": "buildings", "campus_code": options.get("campus_code", options.get("校区", "")),
+                "campus_text": options.get("campus_text", "")},
             action="查看楼房", should_preload_runtime_context=True)
 
     return _error_spec(raw, f"不支持: {sub}，支持 查询/同步/校区/楼房", help_topic="empty_classroom")

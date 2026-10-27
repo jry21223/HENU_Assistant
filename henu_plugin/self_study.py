@@ -164,7 +164,7 @@ async def handle_self_study(plugin, ctx, text):
     if not period:
         await _reply(ctx, '需确认当前大节', [
             '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
-            '可直接回复“第2大节”；如需限定地点，可一并回复“金明校区十号楼第2大节”。'])
+            '可直接回复“第2大节”，并补充所选校区的具体楼名。'])
         return True
     if state.get('building') and not state.get('campus'):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
@@ -183,8 +183,14 @@ async def handle_self_study(plugin, ctx, text):
         state.update(building=selected['name'], campus_code=selected['campus_code'], building_code=selected['building_code'])
         building = state['building']
     if not building and not _may_have_current_cache(campus, period, now):
-        await _reply(ctx, '需要查询地点', [
-            '查哪栋教学楼？'], '比如“十号楼”或“综合楼”。')
+        choices = _campus_building_choices(campus, word='')
+        state['building_choices'] = choices
+        if period:
+            state['period'] = period
+        lines = [f'请选择{campus}校区的教学楼：' if choices else f'请提供{campus}校区的具体教学楼名称。']
+        lines.extend(f'{i}. {escape(row["name"])}' for i, row in enumerate(choices, 1))
+        await _reply(ctx, '需要查询地点', lines,
+                     '回复序号或具体楼名即可。' if choices else '')
         return True
     command = f"empty classroom query --view free --period {period}"
     if campus:
@@ -241,7 +247,7 @@ async def handle_self_study(plugin, ctx, text):
     if not rooms:
         lines.append('没有可核验的该时段教室结果；不能据此判断无空教室。')
         if not building:
-            lines.append('请回复教学楼，例如“十号楼”，继续查询该楼栋。')
+            lines.append('请回复教学楼的具体名称，范围为所选校区。')
     else:
         for room in rooms[:10]:
             name = room.get('roomName') or room.get('room_name') or '教室未标名'
@@ -250,5 +256,5 @@ async def handle_self_study(plugin, ctx, text):
         if len(rooms) > 10:
             lines.append('仅展示前10间，请补充校区和教学楼缩小范围。')
     await _reply(ctx, '过期缓存 · 待核验' if stale else '缓存参考' if cached else '该大节课程占用查询', lines,
-        '可回复校区和教学楼继续查询，例如“金明校区十号楼”。')
+        '可回复所选校区的具体教学楼名称继续查询。')
     return True
