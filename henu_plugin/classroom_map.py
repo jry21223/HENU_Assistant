@@ -10,9 +10,6 @@ from collections import OrderedDict
 from pathlib import Path
 
 FREE = (35, 155, 112)
-OCCUPIED = (243, 216, 211)
-OCCUPIED_INK = (129, 57, 47)
-OCCUPIED_BORDER = (175, 75, 61)
 UNKNOWN = (225, 230, 236)
 INK = (30, 45, 61)
 
@@ -61,6 +58,9 @@ def _room_number(row, campus, building):
     if row.get('campusCode', campus) != campus or row.get('buildingCode', building) != building:
         raise ValueError('classroom scope mismatch')
     name = str(row.get('roomName') or row.get('room_name') or '')
+    if campus != '02' or building not in LAYOUTS:
+        from henu_plugin.classroom_floorplans import catalog_name
+        return catalog_name(campus, building, name)
     number = LAYOUTS[building]['number']
     match = re.fullmatch(r'(?:金明综合楼)?(' + number + r'[1-5][0-9]{2})', name)
     return match[1] if match else ''
@@ -138,10 +138,17 @@ def render_classroom_map(result):
     all_day = isinstance(data.get('periods'), list)
     query = data if all_day else result.get('query') or {}
     campus, building = query.get('campusCode'), query.get('buildingCode')
-    if campus != '02' or building not in LAYOUTS:
+    from henu_plugin.classroom_floorplans import plans, render_catalog_plan
+    entry = plans().get(f'{campus}-{building}')
+    if entry:
+        if (query.get('campusName', entry['campus']) != entry['campus']
+                or query.get('buildingName', entry['name']) not in
+                {entry['name'], entry['campus'] + ' ' + entry['name']}):
+            raise ValueError('scope name mismatch')
+    elif campus != '02' or building not in LAYOUTS:
         raise ValueError('no reviewed layout for this scope')
-    layout = LAYOUTS[building]
-    if (query.get('campusName', '金明校区') != '金明校区'
+    layout = LAYOUTS.get(building) if campus == '02' else None
+    if not entry and (query.get('campusName', '金明校区') != '金明校区'
             or query.get('buildingName', '金明综合楼' + layout['number']) not in
             {'金明综合楼' + layout['number'], '金明校区 金明综合楼' + layout['number']}):
         raise ValueError('scope name mismatch')
@@ -150,16 +157,22 @@ def render_classroom_map(result):
         if len(slots) != 5 or {slot.get('period') for slot in slots} != {1, 2, 3, 4, 5}:
             raise ValueError('incomplete day matrix')
         available = {}
+        day_scope = {k: query.get(k, (slots[0].get('query') or {}).get(k))
+                     for k in ('termCode', 'week', 'dayOfWeek')}
         for slot in slots:
             detail = slot.get('query') or {}
-            if detail.get('campusCode') != campus or detail.get('buildingCode') != building:
+            if (detail.get('campusCode') != campus or detail.get('buildingCode') != building
+                    or detail.get('period') != slot['period']
+                    or any(detail.get(k) != value for k, value in day_scope.items())):
                 raise ValueError('mixed day scope')
             available[slot['period']] = _room_states(slot, campus, building) if not result.get('partial') else {}
     else:
         available = {1: _room_states(result, campus, building)}
+    if entry:
+        return render_catalog_plan(entry, query, available, all_day, data['periods'] if all_day else [result])
     font_file = Path(__file__).with_name('assets') / 'NotoSansSC-Classroom.otf'
     font = lambda size: ImageFont.truetype(str(font_file), size)
-    status_font = lambda size: ImageFont.truetype(str(font_file.with_name('NotoSansSC-Classroom-Status.ttf')), size)
+    status_font = font
     image = Image.new('RGB', (1280, 1720 if all_day else 1550), '#f6f8fa')
     draw = ImageDraw.Draw(image)
     title = '金明校区 · 综合楼' + layout['number']
@@ -169,11 +182,10 @@ def render_classroom_map(result):
     if not all_day and query.get('clockVerified'):
         window += ' ' + query['clockStart'] + '–' + query['clockEnd']
     draw.text((64, 106), window, font=font(30), fill=INK)
-    for x, color, label, mark in ((64, FREE, '空闲', '✓'), (400, OCCUPIED, '课程占用', '×'), (850, UNKNOWN, '未核验', '?')):
-        draw.rounded_rectangle((x, 180, x + 40, 220), radius=8, fill=color,
-                               outline=OCCUPIED_BORDER if color == OCCUPIED else None, width=2)
-        draw.text((x + 20, 200), mark, anchor='mm', font=status_font(23), fill='white' if color == FREE else INK)
+    for x, color, label in ((64, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
+        draw.rounded_rectangle((x, 180, x + 40, 220), radius=8, fill=color)
         draw.text((x + 58, 178), label, font=status_font(30), fill=INK)
+    draw.text((64, 248), '按原图相对位置 · 非比例图', font=font(24), fill='#59697b')
     for index, floor in enumerate((5, 4, 3, 2, 1)):
         top = 300 + index * 210
         draw.rounded_rectangle((48, top, 1232, top + 198), radius=18, fill='white')
@@ -187,24 +199,17 @@ def render_classroom_map(result):
                 x, y = 180 + column * 145, top + 28 + row_index * 94
                 state = available[1].get(number, 'unknown') if not all_day else 'unknown'
                 free = state == 'free'
-                occupied = state == 'occupied'
                 draw.rounded_rectangle((x, y, x + 130, y + 64), radius=10,
-                                       fill='white' if all_day else FREE if free else OCCUPIED if occupied else UNKNOWN,
-                                       outline=UNKNOWN if all_day else OCCUPIED_BORDER if occupied else None, width=2)
+                                       fill='white' if all_day else FREE if free else UNKNOWN,
+                                       outline=UNKNOWN if all_day else None, width=2)
                 draw.text((x + 65, y + (20 if all_day else 32)), number, anchor='mm', font=font(32),
-                          fill='white' if free else OCCUPIED_INK if occupied else INK)
-                if not all_day:
-                    draw.text((x + 115, y + 11), '✓' if free else '×' if occupied else '?', anchor='mm',
-                              font=status_font(14), fill='white' if free else OCCUPIED_INK if occupied else INK)
+                          fill='white' if free else INK)
                 if all_day:
                     for p in range(1, 6):
                         cx = x + 17 + (p - 1) * 21
                         state = available[p].get(number, 'unknown')
                         draw.ellipse((cx - 7, y + 43, cx + 7, y + 57),
-                                     fill=FREE if state == 'free' else OCCUPIED if state == 'occupied' else UNKNOWN,
-                                     outline=OCCUPIED_BORDER if state == 'occupied' else None)
-                        draw.text((cx, y + 49), '✓' if state == 'free' else '×' if state == 'occupied' else '?',
-                                  anchor='mm', font=status_font(10), fill='white' if state == 'free' else INK)
+                                     fill=FREE if state == 'free' else UNKNOWN)
     if all_day:
         for index, slot in enumerate(sorted(data['periods'], key=lambda row: row['period'])):
             y = 1370 + index * 52
@@ -225,7 +230,7 @@ def render_classroom_map(result):
                 draw.text((650, 1405 + index // 6 * 32), '、'.join(uncovered[index:index + 6]), font=status_font(23), fill=INK)
         else:
             draw.text((64, 1405), label + '、'.join(uncovered), font=status_font(23), fill=INK)
-    draw.text((64, 1660 if all_day else 1450), '课程未占用不等于现场开放。', font=font(28), fill='#59697b')
+    draw.text((64, 1660 if all_day else 1450), '灰色含课程占用或未核验；现场是否开放以实际为准。', font=font(28), fill='#59697b')
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
@@ -265,7 +270,10 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
     elif not image_ok:
         lines.append('该楼栋暂未提供可核对的位置示意图。')
     else:
-        lines.append('图中仅标记已核对位置，其余房间可查看清单。')
+        from henu_plugin.classroom_floorplans import plans
+        entry = plans().get(f"{query.get('campusCode')}-{query.get('buildingCode')}")
+        lines.append('图片按教室名称排列，位置以现场为准。' if entry and not entry.get('floors')
+                     else '图中仅标记已核对位置，其余房间可查看清单。')
     if image_ok and proof.get('roomStates', {}).get('filtered'):
         lines.append('图片为整栋课程状态；数量及教室清单已按条件筛选。')
     uncovered = catalog_uncovered(result)

@@ -9,9 +9,13 @@ on 2026-10-20. FontTools is needed only to rebuild the subset, not at runtime.
 
 ## Classroom fonts
 
-`NotoSansSC-Classroom.otf` is the unchanged font subset already used by the
-production classroom renderer. `NotoSansSC-Classroom-Status.ttf` is an additional
-Noto Sans SC Regular subset from Google Fonts for the three-state legend,
-check/cross/question symbols and the filtered-list annotation. Keeping these
-separate preserves existing room-number and heading glyphs. Both use SIL OFL
-1.1; see `NotoSansSC-LICENSE.txt`.
+`NotoSansSC-Classroom.otf` is a renamed HENU Classroom subset of Noto Sans
+CJK SC Regular, rebuilt for the two-color classroom plans on 2026-10-29. It
+includes the original glyphs plus every heading, legend, note, and catalog
+name in `classroom_map.py`, `classroom_floorplans.py` and `classroom-plans.json`.
+Source: https://github.com/notofonts/noto-cjk/blob/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+Use FontTools `pyftsubset` with the union of those characters to rebuild it.
+Verify the resulting cmap before release; Pillow silently omits missing glyphs.
+
+`NotoSansSC-Classroom-Status.ttf` remains for older callers; the current maps use
+the main classroom font. Both fonts use SIL OFL 1.1; see `NotoSansSC-LICENSE.txt`.
