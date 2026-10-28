@@ -21,11 +21,11 @@ def result():
                     'free': ['金明综合楼3101'], 'occupied': ['金明综合楼3102']}}}
 
 
-def test_complete_result_distinguishes_free_occupied_and_uncovered_room():
+def test_complete_result_uses_green_only_for_free_and_gray_for_other_rooms():
     image = Image.open(io.BytesIO(render_classroom_map(result())))
     assert image.size == (1280, 1550)
     assert image.getpixel((195, 1180)) == (35, 155, 112)  # 3101: free
-    assert image.getpixel((195, 1274)) == (243, 216, 211)  # 3102: occupied
+    assert image.getpixel((195, 1274)) == (225, 230, 236)  # 3102: occupied
     assert image.getpixel((340, 1180)) == (225, 230, 236)  # 3103: no school coverage
 
 

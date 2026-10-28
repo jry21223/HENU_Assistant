@@ -1,0 +1,3688 @@
+{
+  "01-0013": {
+    "campus": "明伦校区",
+    "name": "十号楼",
+    "rooms": [
+      {
+        "key": "0000231",
+        "name": "十号楼101",
+        "label": "101",
+        "schoolId": "0000231"
+      },
+      {
+        "key": "0000232",
+        "name": "十号楼102",
+        "label": "102",
+        "schoolId": "0000232"
+      },
+      {
+        "key": "0000233",
+        "name": "十号楼103",
+        "label": "103",
+        "schoolId": "0000233"
+      },
+      {
+        "key": "0000241",
+        "name": "十号楼116",
+        "label": "116",
+        "schoolId": "0000241"
+      },
+      {
+        "key": "0000242",
+        "name": "十号楼117",
+        "label": "117",
+        "schoolId": "0000242"
+      },
+      {
+        "key": "0000243",
+        "name": "十号楼119",
+        "label": "119",
+        "schoolId": "0000243"
+      },
+      {
+        "key": "0000246",
+        "name": "十号楼128",
+        "label": "128",
+        "schoolId": "0000246"
+      },
+      {
+        "key": "0000247",
+        "name": "十号楼129",
+        "label": "129",
+        "schoolId": "0000247"
+      },
+      {
+        "key": "0000248",
+        "name": "十号楼201",
+        "label": "201",
+        "schoolId": "0000248"
+      },
+      {
+        "key": "0000249",
+        "name": "十号楼202",
+        "label": "202",
+        "schoolId": "0000249"
+      },
+      {
+        "key": "0000250",
+        "name": "十号楼203",
+        "label": "203",
+        "schoolId": "0000250"
+      },
+      {
+        "key": "0000254",
+        "name": "十号楼220",
+        "label": "220",
+        "schoolId": "0000254"
+      },
+      {
+        "key": "0000255",
+        "name": "十号楼221",
+        "label": "221",
+        "schoolId": "0000255"
+      },
+      {
+        "key": "0000258",
+        "name": "十号楼301",
+        "label": "301",
+        "schoolId": "0000258"
+      },
+      {
+        "key": "0000259",
+        "name": "十号楼302",
+        "label": "302",
+        "schoolId": "0000259"
+      },
+      {
+        "key": "0000260",
+        "name": "十号楼303",
+        "label": "303",
+        "schoolId": "0000260"
+      },
+      {
+        "key": "0000265",
+        "name": "十号楼319",
+        "label": "319",
+        "schoolId": "0000265"
+      },
+      {
+        "key": "0000266",
+        "name": "十号楼320",
+        "label": "320",
+        "schoolId": "0000266"
+      },
+      {
+        "key": "0000267",
+        "name": "十号楼321",
+        "label": "321",
+        "schoolId": "0000267"
+      },
+      {
+        "key": "photo-ten-T1-105",
+        "name": "十号楼105",
+        "label": "105",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-107",
+        "name": "十号楼107",
+        "label": "107",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-109",
+        "name": "十号楼109",
+        "label": "109",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-111",
+        "name": "十号楼111",
+        "label": "111",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-113",
+        "name": "十号楼113",
+        "label": "113",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-115",
+        "name": "十号楼115",
+        "label": "115",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-104",
+        "name": "十号楼104",
+        "label": "104",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-106",
+        "name": "十号楼106",
+        "label": "106",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-108",
+        "name": "十号楼108",
+        "label": "108",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-110",
+        "name": "十号楼110",
+        "label": "110",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-112",
+        "name": "十号楼112",
+        "label": "112",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-114",
+        "name": "十号楼114",
+        "label": "114",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-127",
+        "name": "十号楼127",
+        "label": "127",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-125",
+        "name": "十号楼125",
+        "label": "125",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-123",
+        "name": "十号楼123",
+        "label": "123",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-126",
+        "name": "十号楼126",
+        "label": "126",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-124",
+        "name": "十号楼124",
+        "label": "124",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T1-122",
+        "name": "十号楼122",
+        "label": "122",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-219",
+        "name": "十号楼219",
+        "label": "219",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-205",
+        "name": "十号楼205",
+        "label": "205",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-207",
+        "name": "十号楼207",
+        "label": "207",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-209",
+        "name": "十号楼209",
+        "label": "209",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-215",
+        "name": "十号楼215",
+        "label": "215",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-217",
+        "name": "十号楼217",
+        "label": "217",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-204",
+        "name": "十号楼204",
+        "label": "204",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-206",
+        "name": "十号楼206",
+        "label": "206",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-208",
+        "name": "十号楼208",
+        "label": "208",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-216",
+        "name": "十号楼216",
+        "label": "216",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-218",
+        "name": "十号楼218",
+        "label": "218",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-200",
+        "name": "十号楼200",
+        "label": "200",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-225",
+        "name": "十号楼225",
+        "label": "225",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-226",
+        "name": "十号楼226",
+        "label": "226",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-229",
+        "name": "十号楼229",
+        "label": "229",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T2-228",
+        "name": "十号楼228",
+        "label": "228",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-305",
+        "name": "十号楼305",
+        "label": "305",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-307",
+        "name": "十号楼307",
+        "label": "307",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-315",
+        "name": "十号楼315",
+        "label": "315",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-317",
+        "name": "十号楼317",
+        "label": "317",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-304",
+        "name": "十号楼304",
+        "label": "304",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-306",
+        "name": "十号楼306",
+        "label": "306",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-316",
+        "name": "十号楼316",
+        "label": "316",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-318",
+        "name": "十号楼318",
+        "label": "318",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-310",
+        "name": "十号楼310",
+        "label": "310",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-327",
+        "name": "十号楼327",
+        "label": "327",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-325",
+        "name": "十号楼325",
+        "label": "325",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-328",
+        "name": "十号楼328",
+        "label": "328",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-326",
+        "name": "十号楼326",
+        "label": "326",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-329",
+        "name": "十号楼329",
+        "label": "329",
+        "schoolId": null
+      },
+      {
+        "key": "photo-ten-T3-330",
+        "name": "十号楼330",
+        "label": "330",
+        "schoolId": null
+      }
+    ],
+    "kind": "ten",
+    "floors": [
+      {
+        "floor": 1,
+        "cells": [
+          {
+            "id": "T1-103",
+            "label": "103",
+            "x": 120,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼103",
+            "roomKey": "0000233"
+          },
+          {
+            "id": "T1-101",
+            "label": "101",
+            "x": 0,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-west",
+            "stateKey": "十号楼101",
+            "roomKey": "0000231"
+          },
+          {
+            "id": "T1-102",
+            "label": "102",
+            "x": 120,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼102",
+            "roomKey": "0000232"
+          },
+          {
+            "id": "T1-117",
+            "label": "117",
+            "x": 1280,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼117",
+            "roomKey": "0000242"
+          },
+          {
+            "id": "T1-119",
+            "label": "119",
+            "x": 1380,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-east",
+            "stateKey": "十号楼119",
+            "roomKey": "0000243"
+          },
+          {
+            "id": "T1-116",
+            "label": "116",
+            "x": 1280,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼116",
+            "roomKey": "0000241"
+          },
+          {
+            "id": "T1-105",
+            "label": "105",
+            "x": 265,
+            "y": 470,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼105",
+            "roomKey": "photo-ten-T1-105"
+          },
+          {
+            "id": "T1-107",
+            "label": "107",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼107",
+            "roomKey": "photo-ten-T1-107"
+          },
+          {
+            "id": "T1-109",
+            "label": "109",
+            "x": 520,
+            "y": 470,
+            "w": 80,
+            "h": 90,
+            "stateKey": "十号楼109",
+            "roomKey": "photo-ten-T1-109"
+          },
+          {
+            "id": "T1-111",
+            "label": "111",
+            "x": 950,
+            "y": 470,
+            "w": 75,
+            "h": 90,
+            "stateKey": "十号楼111",
+            "roomKey": "photo-ten-T1-111"
+          },
+          {
+            "id": "T1-113",
+            "label": "113",
+            "x": 1025,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼113",
+            "roomKey": "photo-ten-T1-113"
+          },
+          {
+            "id": "T1-115",
+            "label": "115",
+            "x": 1135,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼115",
+            "roomKey": "photo-ten-T1-115"
+          },
+          {
+            "id": "T1-104",
+            "label": "104",
+            "x": 265,
+            "y": 600,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼104",
+            "roomKey": "photo-ten-T1-104"
+          },
+          {
+            "id": "T1-106",
+            "label": "106",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼106",
+            "roomKey": "photo-ten-T1-106"
+          },
+          {
+            "id": "T1-108",
+            "label": "108",
+            "x": 520,
+            "y": 600,
+            "w": 80,
+            "h": 90,
+            "stateKey": "十号楼108",
+            "roomKey": "photo-ten-T1-108"
+          },
+          {
+            "id": "T1-110",
+            "label": "110",
+            "x": 950,
+            "y": 600,
+            "w": 75,
+            "h": 90,
+            "stateKey": "十号楼110",
+            "roomKey": "photo-ten-T1-110"
+          },
+          {
+            "id": "T1-112",
+            "label": "112",
+            "x": 1025,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼112",
+            "roomKey": "photo-ten-T1-112"
+          },
+          {
+            "id": "T1-114",
+            "label": "114",
+            "x": 1135,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼114",
+            "roomKey": "photo-ten-T1-114"
+          },
+          {
+            "id": "T1-127",
+            "label": "127",
+            "x": 700,
+            "y": 280,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼127",
+            "roomKey": "photo-ten-T1-127"
+          },
+          {
+            "id": "T1-125",
+            "label": "125",
+            "x": 700,
+            "y": 355,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼125",
+            "roomKey": "photo-ten-T1-125"
+          },
+          {
+            "id": "T1-123",
+            "label": "123",
+            "x": 700,
+            "y": 430,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼123",
+            "roomKey": "photo-ten-T1-123"
+          },
+          {
+            "id": "T1-126",
+            "label": "126",
+            "x": 840,
+            "y": 280,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼126",
+            "roomKey": "photo-ten-T1-126"
+          },
+          {
+            "id": "T1-124",
+            "label": "124",
+            "x": 840,
+            "y": 355,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼124",
+            "roomKey": "photo-ten-T1-124"
+          },
+          {
+            "id": "T1-122",
+            "label": "122",
+            "x": 840,
+            "y": 430,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼122",
+            "roomKey": "photo-ten-T1-122"
+          },
+          {
+            "id": "T1-129",
+            "label": "129",
+            "x": 430,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼129",
+            "roomKey": "0000247"
+          },
+          {
+            "id": "T1-128",
+            "label": "128",
+            "x": 940,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼128",
+            "roomKey": "0000246"
+          }
+        ],
+        "blank": [
+          {
+            "id": "blank-south-centre",
+            "x": 600,
+            "y": 600,
+            "w": 350,
+            "h": 90,
+            "label": "原图未标号"
+          }
+        ]
+      },
+      {
+        "floor": 2,
+        "cells": [
+          {
+            "id": "T2-203",
+            "label": "203",
+            "x": 120,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼203",
+            "roomKey": "0000250"
+          },
+          {
+            "id": "T2-201",
+            "label": "201",
+            "x": 0,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-west",
+            "stateKey": "十号楼201",
+            "roomKey": "0000248"
+          },
+          {
+            "id": "T2-202",
+            "label": "202",
+            "x": 120,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼202",
+            "roomKey": "0000249"
+          },
+          {
+            "id": "T2-219",
+            "label": "219",
+            "x": 1280,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼219",
+            "roomKey": "photo-ten-T2-219"
+          },
+          {
+            "id": "T2-221",
+            "label": "221",
+            "x": 1380,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-east",
+            "stateKey": "十号楼221",
+            "roomKey": "0000255"
+          },
+          {
+            "id": "T2-220",
+            "label": "220",
+            "x": 1280,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼220",
+            "roomKey": "0000254"
+          },
+          {
+            "id": "T2-205",
+            "label": "205",
+            "x": 265,
+            "y": 470,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼205",
+            "roomKey": "photo-ten-T2-205"
+          },
+          {
+            "id": "T2-207",
+            "label": "207",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼207",
+            "roomKey": "photo-ten-T2-207"
+          },
+          {
+            "id": "T2-209",
+            "label": "209",
+            "x": 520,
+            "y": 470,
+            "w": 80,
+            "h": 90,
+            "stateKey": "十号楼209",
+            "roomKey": "photo-ten-T2-209"
+          },
+          {
+            "id": "T2-215",
+            "label": "215",
+            "x": 1025,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼215",
+            "roomKey": "photo-ten-T2-215"
+          },
+          {
+            "id": "T2-217",
+            "label": "217",
+            "x": 1135,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼217",
+            "roomKey": "photo-ten-T2-217"
+          },
+          {
+            "id": "T2-204",
+            "label": "204",
+            "x": 265,
+            "y": 600,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼204",
+            "roomKey": "photo-ten-T2-204"
+          },
+          {
+            "id": "T2-206",
+            "label": "206",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼206",
+            "roomKey": "photo-ten-T2-206"
+          },
+          {
+            "id": "T2-208",
+            "label": "208",
+            "x": 520,
+            "y": 600,
+            "w": 80,
+            "h": 90,
+            "stateKey": "十号楼208",
+            "roomKey": "photo-ten-T2-208"
+          },
+          {
+            "id": "T2-216",
+            "label": "216",
+            "x": 1025,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼216",
+            "roomKey": "photo-ten-T2-216"
+          },
+          {
+            "id": "T2-218",
+            "label": "218",
+            "x": 1135,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼218",
+            "roomKey": "photo-ten-T2-218"
+          },
+          {
+            "id": "T2-200",
+            "label": "200",
+            "x": 600,
+            "y": 600,
+            "w": 350,
+            "h": 90,
+            "stateKey": "十号楼200",
+            "roomKey": "photo-ten-T2-200"
+          },
+          {
+            "id": "T2-225",
+            "label": "225",
+            "x": 700,
+            "y": 295,
+            "w": 100,
+            "h": 140,
+            "stateKey": "十号楼225",
+            "roomKey": "photo-ten-T2-225"
+          },
+          {
+            "id": "T2-226",
+            "label": "226",
+            "x": 840,
+            "y": 280,
+            "w": 100,
+            "h": 95,
+            "stateKey": "十号楼226",
+            "roomKey": "photo-ten-T2-226"
+          },
+          {
+            "id": "T2-229",
+            "label": "229",
+            "x": 430,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼229",
+            "roomKey": "photo-ten-T2-229"
+          },
+          {
+            "id": "T2-228",
+            "label": "228",
+            "x": 940,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼228",
+            "roomKey": "photo-ten-T2-228"
+          }
+        ],
+        "blank": [
+          {
+            "id": "blank-main-470-950",
+            "x": 950,
+            "y": 470,
+            "w": 75,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-main-600-950",
+            "x": 950,
+            "y": 600,
+            "w": 75,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-left-top",
+            "x": 700,
+            "y": 265,
+            "w": 100,
+            "h": 30,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-left-bottom",
+            "x": 700,
+            "y": 435,
+            "w": 100,
+            "h": 60,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-right-middle",
+            "x": 840,
+            "y": 375,
+            "w": 100,
+            "h": 60,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-right-bottom",
+            "x": 840,
+            "y": 435,
+            "w": 100,
+            "h": 60,
+            "label": "原图未标号"
+          }
+        ]
+      },
+      {
+        "floor": 3,
+        "cells": [
+          {
+            "id": "T3-303",
+            "label": "303",
+            "x": 120,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼303",
+            "roomKey": "0000260"
+          },
+          {
+            "id": "T3-301",
+            "label": "301",
+            "x": 0,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-west",
+            "stateKey": "十号楼301",
+            "roomKey": "0000258"
+          },
+          {
+            "id": "T3-302",
+            "label": "302",
+            "x": 120,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼302",
+            "roomKey": "0000259"
+          },
+          {
+            "id": "T3-319",
+            "label": "319",
+            "x": 1280,
+            "y": 100,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼319",
+            "roomKey": "0000265"
+          },
+          {
+            "id": "T3-321",
+            "label": "321",
+            "x": 1380,
+            "y": 370,
+            "w": 140,
+            "h": 200,
+            "shape": "round-east",
+            "stateKey": "十号楼321",
+            "roomKey": "0000267"
+          },
+          {
+            "id": "T3-320",
+            "label": "320",
+            "x": 1280,
+            "y": 650,
+            "w": 120,
+            "h": 170,
+            "stateKey": "十号楼320",
+            "roomKey": "0000266"
+          },
+          {
+            "id": "T3-305",
+            "label": "305",
+            "x": 265,
+            "y": 470,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼305",
+            "roomKey": "photo-ten-T3-305"
+          },
+          {
+            "id": "T3-307",
+            "label": "307",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼307",
+            "roomKey": "photo-ten-T3-307"
+          },
+          {
+            "id": "T3-315",
+            "label": "315",
+            "x": 1025,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼315",
+            "roomKey": "photo-ten-T3-315"
+          },
+          {
+            "id": "T3-317",
+            "label": "317",
+            "x": 1135,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼317",
+            "roomKey": "photo-ten-T3-317"
+          },
+          {
+            "id": "T3-304",
+            "label": "304",
+            "x": 265,
+            "y": 600,
+            "w": 145,
+            "h": 90,
+            "stateKey": "十号楼304",
+            "roomKey": "photo-ten-T3-304"
+          },
+          {
+            "id": "T3-306",
+            "label": "306",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼306",
+            "roomKey": "photo-ten-T3-306"
+          },
+          {
+            "id": "T3-316",
+            "label": "316",
+            "x": 1025,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼316",
+            "roomKey": "photo-ten-T3-316"
+          },
+          {
+            "id": "T3-318",
+            "label": "318",
+            "x": 1135,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "十号楼318",
+            "roomKey": "photo-ten-T3-318"
+          },
+          {
+            "id": "T3-310",
+            "label": "310",
+            "x": 600,
+            "y": 600,
+            "w": 350,
+            "h": 90,
+            "stateKey": "十号楼310",
+            "roomKey": "photo-ten-T3-310"
+          },
+          {
+            "id": "T3-327",
+            "label": "327",
+            "x": 700,
+            "y": 280,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼327",
+            "roomKey": "photo-ten-T3-327"
+          },
+          {
+            "id": "T3-325",
+            "label": "325",
+            "x": 700,
+            "y": 355,
+            "w": 100,
+            "h": 80,
+            "stateKey": "十号楼325",
+            "roomKey": "photo-ten-T3-325"
+          },
+          {
+            "id": "T3-328",
+            "label": "328",
+            "x": 840,
+            "y": 280,
+            "w": 100,
+            "h": 65,
+            "stateKey": "十号楼328",
+            "roomKey": "photo-ten-T3-328"
+          },
+          {
+            "id": "T3-326",
+            "label": "326",
+            "x": 840,
+            "y": 355,
+            "w": 100,
+            "h": 80,
+            "stateKey": "十号楼326",
+            "roomKey": "photo-ten-T3-326"
+          },
+          {
+            "id": "T3-329",
+            "label": "329",
+            "x": 430,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼329",
+            "roomKey": "photo-ten-T3-329"
+          },
+          {
+            "id": "T3-330",
+            "label": "330",
+            "x": 940,
+            "y": 40,
+            "w": 250,
+            "h": 170,
+            "stateKey": "十号楼330",
+            "roomKey": "photo-ten-T3-330"
+          }
+        ],
+        "blank": [
+          {
+            "id": "blank-main-470-520",
+            "x": 520,
+            "y": 470,
+            "w": 80,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-main-470-950",
+            "x": 950,
+            "y": 470,
+            "w": 75,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-main-600-520",
+            "x": 520,
+            "y": 600,
+            "w": 80,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-main-600-950",
+            "x": 950,
+            "y": 600,
+            "w": 75,
+            "h": 90,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-left-bottom",
+            "x": 700,
+            "y": 435,
+            "w": 100,
+            "h": 60,
+            "label": "原图未标号"
+          },
+          {
+            "id": "blank-spine-right-bottom",
+            "x": 840,
+            "y": 435,
+            "w": 100,
+            "h": 60,
+            "label": "原图未标号"
+          }
+        ]
+      }
+    ]
+  },
+  "01-0003": {
+    "campus": "明伦校区",
+    "name": "综合教学楼",
+    "rooms": [
+      {
+        "key": "443",
+        "name": "板书室（综合楼606）",
+        "label": "板书室（综合楼606）",
+        "schoolId": "443"
+      },
+      {
+        "key": "439",
+        "name": "管理办公室（综合楼607）",
+        "label": "管理办公室（综合楼607）",
+        "schoolId": "439"
+      },
+      {
+        "key": "441",
+        "name": "微格教室2（综合楼605-2)",
+        "label": "微格教室2（综合楼605-2)",
+        "schoolId": "441"
+      },
+      {
+        "key": "442",
+        "name": "微格教室3（综合楼605-3）",
+        "label": "微格教室3（综合楼605-3）",
+        "schoolId": "442"
+      },
+      {
+        "key": "444",
+        "name": "微课（综合楼608）",
+        "label": "微课（综合楼608）",
+        "schoolId": "444"
+      },
+      {
+        "key": "0000282",
+        "name": "综合教学楼103",
+        "label": "103",
+        "schoolId": "0000282"
+      },
+      {
+        "key": "0000283",
+        "name": "综合教学楼104",
+        "label": "104",
+        "schoolId": "0000283"
+      },
+      {
+        "key": "0000284",
+        "name": "综合教学楼105",
+        "label": "105",
+        "schoolId": "0000284"
+      },
+      {
+        "key": "0000285",
+        "name": "综合教学楼106",
+        "label": "106",
+        "schoolId": "0000285"
+      },
+      {
+        "key": "0000286",
+        "name": "综合教学楼107",
+        "label": "107",
+        "schoolId": "0000286"
+      },
+      {
+        "key": "0000287",
+        "name": "综合教学楼108",
+        "label": "108",
+        "schoolId": "0000287"
+      },
+      {
+        "key": "0000288",
+        "name": "综合教学楼109",
+        "label": "109",
+        "schoolId": "0000288"
+      },
+      {
+        "key": "0000289",
+        "name": "综合教学楼110",
+        "label": "110",
+        "schoolId": "0000289"
+      },
+      {
+        "key": "0000290",
+        "name": "综合教学楼111",
+        "label": "111",
+        "schoolId": "0000290"
+      },
+      {
+        "key": "0000291",
+        "name": "综合教学楼112",
+        "label": "112",
+        "schoolId": "0000291"
+      },
+      {
+        "key": "0000292",
+        "name": "综合教学楼113",
+        "label": "113",
+        "schoolId": "0000292"
+      },
+      {
+        "key": "0000293",
+        "name": "综合教学楼114",
+        "label": "114",
+        "schoolId": "0000293"
+      },
+      {
+        "key": "0000294",
+        "name": "综合教学楼115",
+        "label": "115",
+        "schoolId": "0000294"
+      },
+      {
+        "key": "0000295",
+        "name": "综合教学楼116",
+        "label": "116",
+        "schoolId": "0000295"
+      },
+      {
+        "key": "0000296",
+        "name": "综合教学楼117",
+        "label": "117",
+        "schoolId": "0000296"
+      },
+      {
+        "key": "0000297",
+        "name": "综合教学楼201",
+        "label": "201",
+        "schoolId": "0000297"
+      },
+      {
+        "key": "0000298",
+        "name": "综合教学楼202",
+        "label": "202",
+        "schoolId": "0000298"
+      },
+      {
+        "key": "0000299",
+        "name": "综合教学楼203",
+        "label": "203",
+        "schoolId": "0000299"
+      },
+      {
+        "key": "0000300",
+        "name": "综合教学楼204",
+        "label": "204",
+        "schoolId": "0000300"
+      },
+      {
+        "key": "0000301",
+        "name": "综合教学楼205",
+        "label": "205",
+        "schoolId": "0000301"
+      },
+      {
+        "key": "0000302",
+        "name": "综合教学楼206",
+        "label": "206",
+        "schoolId": "0000302"
+      },
+      {
+        "key": "0000303",
+        "name": "综合教学楼207",
+        "label": "207",
+        "schoolId": "0000303"
+      },
+      {
+        "key": "0000304",
+        "name": "综合教学楼208",
+        "label": "208",
+        "schoolId": "0000304"
+      },
+      {
+        "key": "0000305",
+        "name": "综合教学楼209",
+        "label": "209",
+        "schoolId": "0000305"
+      },
+      {
+        "key": "0000306",
+        "name": "综合教学楼210",
+        "label": "210",
+        "schoolId": "0000306"
+      },
+      {
+        "key": "0000307",
+        "name": "综合教学楼211",
+        "label": "211",
+        "schoolId": "0000307"
+      },
+      {
+        "key": "0000308",
+        "name": "综合教学楼212",
+        "label": "212",
+        "schoolId": "0000308"
+      },
+      {
+        "key": "0000309",
+        "name": "综合教学楼213",
+        "label": "213",
+        "schoolId": "0000309"
+      },
+      {
+        "key": "0000310",
+        "name": "综合教学楼215",
+        "label": "215",
+        "schoolId": "0000310"
+      },
+      {
+        "key": "0000311",
+        "name": "综合教学楼216",
+        "label": "216",
+        "schoolId": "0000311"
+      },
+      {
+        "key": "0000312",
+        "name": "综合教学楼217",
+        "label": "217",
+        "schoolId": "0000312"
+      },
+      {
+        "key": "0000313",
+        "name": "综合教学楼218",
+        "label": "218",
+        "schoolId": "0000313"
+      },
+      {
+        "key": "0000314",
+        "name": "综合教学楼219",
+        "label": "219",
+        "schoolId": "0000314"
+      },
+      {
+        "key": "0000315",
+        "name": "综合教学楼301",
+        "label": "301",
+        "schoolId": "0000315"
+      },
+      {
+        "key": "0000316",
+        "name": "综合教学楼302",
+        "label": "302",
+        "schoolId": "0000316"
+      },
+      {
+        "key": "0000317",
+        "name": "综合教学楼303",
+        "label": "303",
+        "schoolId": "0000317"
+      },
+      {
+        "key": "0000318",
+        "name": "综合教学楼304",
+        "label": "304",
+        "schoolId": "0000318"
+      },
+      {
+        "key": "0000319",
+        "name": "综合教学楼305",
+        "label": "305",
+        "schoolId": "0000319"
+      },
+      {
+        "key": "0000320",
+        "name": "综合教学楼306",
+        "label": "306",
+        "schoolId": "0000320"
+      },
+      {
+        "key": "0000321",
+        "name": "综合教学楼307",
+        "label": "307",
+        "schoolId": "0000321"
+      },
+      {
+        "key": "0000322",
+        "name": "综合教学楼308",
+        "label": "308",
+        "schoolId": "0000322"
+      },
+      {
+        "key": "0000323",
+        "name": "综合教学楼309",
+        "label": "309",
+        "schoolId": "0000323"
+      },
+      {
+        "key": "0000324",
+        "name": "综合教学楼310",
+        "label": "310",
+        "schoolId": "0000324"
+      },
+      {
+        "key": "0000325",
+        "name": "综合教学楼311",
+        "label": "311",
+        "schoolId": "0000325"
+      },
+      {
+        "key": "0000326",
+        "name": "综合教学楼312",
+        "label": "312",
+        "schoolId": "0000326"
+      },
+      {
+        "key": "0000327",
+        "name": "综合教学楼313",
+        "label": "313",
+        "schoolId": "0000327"
+      },
+      {
+        "key": "0000328",
+        "name": "综合教学楼315",
+        "label": "315",
+        "schoolId": "0000328"
+      },
+      {
+        "key": "0000329",
+        "name": "综合教学楼316",
+        "label": "316",
+        "schoolId": "0000329"
+      },
+      {
+        "key": "0000330",
+        "name": "综合教学楼317",
+        "label": "317",
+        "schoolId": "0000330"
+      },
+      {
+        "key": "0000331",
+        "name": "综合教学楼318",
+        "label": "318",
+        "schoolId": "0000331"
+      },
+      {
+        "key": "0000333",
+        "name": "综合教学楼401",
+        "label": "401",
+        "schoolId": "0000333"
+      },
+      {
+        "key": "0000334",
+        "name": "综合教学楼402",
+        "label": "402",
+        "schoolId": "0000334"
+      },
+      {
+        "key": "0000335",
+        "name": "综合教学楼403",
+        "label": "403",
+        "schoolId": "0000335"
+      },
+      {
+        "key": "0000336",
+        "name": "综合教学楼404",
+        "label": "404",
+        "schoolId": "0000336"
+      },
+      {
+        "key": "0000337",
+        "name": "综合教学楼405",
+        "label": "405",
+        "schoolId": "0000337"
+      },
+      {
+        "key": "0000338",
+        "name": "综合教学楼406",
+        "label": "406",
+        "schoolId": "0000338"
+      },
+      {
+        "key": "0000339",
+        "name": "综合教学楼407",
+        "label": "407",
+        "schoolId": "0000339"
+      },
+      {
+        "key": "0000340",
+        "name": "综合教学楼408",
+        "label": "408",
+        "schoolId": "0000340"
+      },
+      {
+        "key": "0000341",
+        "name": "综合教学楼409",
+        "label": "409",
+        "schoolId": "0000341"
+      },
+      {
+        "key": "0000342",
+        "name": "综合教学楼410",
+        "label": "410",
+        "schoolId": "0000342"
+      },
+      {
+        "key": "0000343",
+        "name": "综合教学楼411",
+        "label": "411",
+        "schoolId": "0000343"
+      },
+      {
+        "key": "0000345",
+        "name": "综合教学楼413",
+        "label": "413",
+        "schoolId": "0000345"
+      },
+      {
+        "key": "0000346",
+        "name": "综合教学楼414",
+        "label": "414",
+        "schoolId": "0000346"
+      },
+      {
+        "key": "0000348",
+        "name": "综合教学楼416",
+        "label": "416",
+        "schoolId": "0000348"
+      },
+      {
+        "key": "0000349",
+        "name": "综合教学楼417",
+        "label": "417",
+        "schoolId": "0000349"
+      },
+      {
+        "key": "0000350",
+        "name": "综合教学楼501",
+        "label": "501",
+        "schoolId": "0000350"
+      },
+      {
+        "key": "0000351",
+        "name": "综合教学楼502",
+        "label": "502",
+        "schoolId": "0000351"
+      },
+      {
+        "key": "0000352",
+        "name": "综合教学楼503",
+        "label": "503",
+        "schoolId": "0000352"
+      },
+      {
+        "key": "0000353",
+        "name": "综合教学楼504",
+        "label": "504",
+        "schoolId": "0000353"
+      },
+      {
+        "key": "0000354",
+        "name": "综合教学楼505",
+        "label": "505",
+        "schoolId": "0000354"
+      },
+      {
+        "key": "0000355",
+        "name": "综合教学楼506",
+        "label": "506",
+        "schoolId": "0000355"
+      },
+      {
+        "key": "0000356",
+        "name": "综合教学楼507",
+        "label": "507",
+        "schoolId": "0000356"
+      },
+      {
+        "key": "0000357",
+        "name": "综合教学楼508",
+        "label": "508",
+        "schoolId": "0000357"
+      },
+      {
+        "key": "0000358",
+        "name": "综合教学楼509",
+        "label": "509",
+        "schoolId": "0000358"
+      },
+      {
+        "key": "0000363",
+        "name": "综合教学楼514",
+        "label": "514",
+        "schoolId": "0000363"
+      },
+      {
+        "key": "0000365",
+        "name": "综合教学楼601",
+        "label": "601",
+        "schoolId": "0000365"
+      },
+      {
+        "key": "0000366",
+        "name": "综合教学楼602",
+        "label": "602",
+        "schoolId": "0000366"
+      },
+      {
+        "key": "0000367",
+        "name": "综合教学楼603",
+        "label": "603",
+        "schoolId": "0000367"
+      },
+      {
+        "key": "0000370",
+        "name": "综合教学楼614",
+        "label": "614",
+        "schoolId": "0000370"
+      },
+      {
+        "key": "photo-comp-F1-101",
+        "name": "综合教学楼101",
+        "label": "101",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F1-102",
+        "name": "综合教学楼102",
+        "label": "102",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F2-214",
+        "name": "综合教学楼214",
+        "label": "214",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F3-314",
+        "name": "综合教学楼314",
+        "label": "314",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F3-319",
+        "name": "综合教学楼319",
+        "label": "319",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F4-412",
+        "name": "综合教学楼412",
+        "label": "412",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F4-418",
+        "name": "综合教学楼418",
+        "label": "418",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F4-415",
+        "name": "综合教学楼415",
+        "label": "415",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-513",
+        "name": "综合教学楼513",
+        "label": "513",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-512",
+        "name": "综合教学楼512",
+        "label": "512",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-511",
+        "name": "综合教学楼511",
+        "label": "511",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-510",
+        "name": "综合教学楼510",
+        "label": "510",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-unlabelled",
+        "name": "综合教学楼5层北侧大间（房号待核）",
+        "label": "房号待核",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F5-315",
+        "name": "综合教学楼5层原图315（编号待核）",
+        "label": "315",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-612",
+        "name": "综合教学楼612",
+        "label": "612",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-611",
+        "name": "综合教学楼611",
+        "label": "611",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-610",
+        "name": "综合教学楼610",
+        "label": "610",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-609",
+        "name": "综合教学楼609",
+        "label": "609",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-509",
+        "name": "综合教学楼6层原图509（编号待核）",
+        "label": "509",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-605",
+        "name": "综合教学楼605",
+        "label": "605",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-604",
+        "name": "综合教学楼604",
+        "label": "604",
+        "schoolId": null
+      },
+      {
+        "key": "photo-comp-F6-613",
+        "name": "综合教学楼613",
+        "label": "613",
+        "schoolId": null
+      }
+    ],
+    "kind": "comprehensive",
+    "floors": [
+      {
+        "floor": 1,
+        "cells": [
+          {
+            "id": "F1-113",
+            "label": "113",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼113",
+            "roomKey": "0000292"
+          },
+          {
+            "id": "F1-112",
+            "label": "112",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼112",
+            "roomKey": "0000291"
+          },
+          {
+            "id": "F1-111",
+            "label": "111",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼111",
+            "roomKey": "0000290"
+          },
+          {
+            "id": "F1-110",
+            "label": "110",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼110",
+            "roomKey": "0000289"
+          },
+          {
+            "id": "F1-109",
+            "label": "109",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "stateKey": "综合教学楼109",
+            "roomKey": "0000288"
+          },
+          {
+            "id": "F1-107",
+            "label": "107",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼107",
+            "roomKey": "0000286"
+          },
+          {
+            "id": "F1-108",
+            "label": "108",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼108",
+            "roomKey": "0000287"
+          },
+          {
+            "id": "F1-105",
+            "label": "105",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼105",
+            "roomKey": "0000284"
+          },
+          {
+            "id": "F1-106",
+            "label": "106",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼106",
+            "roomKey": "0000285"
+          },
+          {
+            "id": "F1-103",
+            "label": "103",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼103",
+            "roomKey": "0000282"
+          },
+          {
+            "id": "F1-104",
+            "label": "104",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼104",
+            "roomKey": "0000283"
+          },
+          {
+            "id": "F1-101",
+            "label": "101",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼101",
+            "roomKey": "photo-comp-F1-101"
+          },
+          {
+            "id": "F1-102",
+            "label": "102",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼102",
+            "roomKey": "photo-comp-F1-102"
+          },
+          {
+            "id": "F1-114",
+            "label": "114",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼114",
+            "roomKey": "0000293"
+          },
+          {
+            "id": "F1-115",
+            "label": "115",
+            "x": 60,
+            "y": 830,
+            "w": 135,
+            "h": 130,
+            "stateKey": "综合教学楼115",
+            "roomKey": "0000294"
+          },
+          {
+            "id": "F1-116",
+            "label": "116",
+            "x": 265,
+            "y": 835,
+            "w": 130,
+            "h": 125,
+            "shape": "arc-left",
+            "stateKey": "综合教学楼116",
+            "roomKey": "0000295"
+          },
+          {
+            "id": "F1-117",
+            "label": "117",
+            "x": 405,
+            "y": 835,
+            "w": 140,
+            "h": 125,
+            "shape": "arc-right",
+            "stateKey": "综合教学楼117",
+            "roomKey": "0000296"
+          }
+        ],
+        "blank": []
+      },
+      {
+        "floor": 2,
+        "cells": [
+          {
+            "id": "F2-213",
+            "label": "213",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼213",
+            "roomKey": "0000309"
+          },
+          {
+            "id": "F2-212",
+            "label": "212",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼212",
+            "roomKey": "0000308"
+          },
+          {
+            "id": "F2-211",
+            "label": "211",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼211",
+            "roomKey": "0000307"
+          },
+          {
+            "id": "F2-210",
+            "label": "210",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼210",
+            "roomKey": "0000306"
+          },
+          {
+            "id": "F2-209",
+            "label": "209",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "stateKey": "综合教学楼209",
+            "roomKey": "0000305"
+          },
+          {
+            "id": "F2-207",
+            "label": "207",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼207",
+            "roomKey": "0000303"
+          },
+          {
+            "id": "F2-208",
+            "label": "208",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼208",
+            "roomKey": "0000304"
+          },
+          {
+            "id": "F2-205",
+            "label": "205",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼205",
+            "roomKey": "0000301"
+          },
+          {
+            "id": "F2-206",
+            "label": "206",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼206",
+            "roomKey": "0000302"
+          },
+          {
+            "id": "F2-203",
+            "label": "203",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼203",
+            "roomKey": "0000299"
+          },
+          {
+            "id": "F2-204",
+            "label": "204",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼204",
+            "roomKey": "0000300"
+          },
+          {
+            "id": "F2-201",
+            "label": "201",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼201",
+            "roomKey": "0000297"
+          },
+          {
+            "id": "F2-202",
+            "label": "202",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼202",
+            "roomKey": "0000298"
+          },
+          {
+            "id": "F2-214",
+            "label": "214",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼214",
+            "roomKey": "photo-comp-F2-214"
+          },
+          {
+            "id": "F2-215",
+            "label": "215",
+            "x": 270,
+            "y": 690,
+            "w": 110,
+            "h": 85,
+            "stateKey": "综合教学楼215",
+            "roomKey": "0000310"
+          },
+          {
+            "id": "F2-216",
+            "label": "216",
+            "x": 60,
+            "y": 785,
+            "w": 140,
+            "h": 85,
+            "stateKey": "综合教学楼216",
+            "roomKey": "0000311"
+          },
+          {
+            "id": "F2-217",
+            "label": "217",
+            "x": 60,
+            "y": 875,
+            "w": 140,
+            "h": 85,
+            "stateKey": "综合教学楼217",
+            "roomKey": "0000312"
+          },
+          {
+            "id": "F2-218",
+            "label": "218",
+            "x": 250,
+            "y": 875,
+            "w": 130,
+            "h": 85,
+            "shape": "arc-left",
+            "stateKey": "综合教学楼218",
+            "roomKey": "0000313"
+          },
+          {
+            "id": "F2-219",
+            "label": "219",
+            "x": 390,
+            "y": 875,
+            "w": 130,
+            "h": 85,
+            "shape": "arc-right",
+            "stateKey": "综合教学楼219",
+            "roomKey": "0000314"
+          }
+        ],
+        "blank": []
+      },
+      {
+        "floor": 3,
+        "cells": [
+          {
+            "id": "F3-313",
+            "label": "313",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼313",
+            "roomKey": "0000327"
+          },
+          {
+            "id": "F3-312",
+            "label": "312",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼312",
+            "roomKey": "0000326"
+          },
+          {
+            "id": "F3-311",
+            "label": "311",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼311",
+            "roomKey": "0000325"
+          },
+          {
+            "id": "F3-310",
+            "label": "310",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼310",
+            "roomKey": "0000324"
+          },
+          {
+            "id": "F3-309",
+            "label": "309",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "stateKey": "综合教学楼309",
+            "roomKey": "0000323"
+          },
+          {
+            "id": "F3-307",
+            "label": "307",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼307",
+            "roomKey": "0000321"
+          },
+          {
+            "id": "F3-308",
+            "label": "308",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼308",
+            "roomKey": "0000322"
+          },
+          {
+            "id": "F3-305",
+            "label": "305",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼305",
+            "roomKey": "0000319"
+          },
+          {
+            "id": "F3-306",
+            "label": "306",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼306",
+            "roomKey": "0000320"
+          },
+          {
+            "id": "F3-303",
+            "label": "303",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼303",
+            "roomKey": "0000317"
+          },
+          {
+            "id": "F3-304",
+            "label": "304",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼304",
+            "roomKey": "0000318"
+          },
+          {
+            "id": "F3-301",
+            "label": "301",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼301",
+            "roomKey": "0000315"
+          },
+          {
+            "id": "F3-302",
+            "label": "302",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼302",
+            "roomKey": "0000316"
+          },
+          {
+            "id": "F3-314",
+            "label": "314",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼314",
+            "roomKey": "photo-comp-F3-314"
+          },
+          {
+            "id": "F3-315",
+            "label": "315",
+            "x": 270,
+            "y": 690,
+            "w": 110,
+            "h": 85,
+            "stateKey": "综合教学楼315",
+            "roomKey": "0000328"
+          },
+          {
+            "id": "F3-316",
+            "label": "316",
+            "x": 60,
+            "y": 785,
+            "w": 140,
+            "h": 85,
+            "stateKey": "综合教学楼316",
+            "roomKey": "0000329"
+          },
+          {
+            "id": "F3-317",
+            "label": "317",
+            "x": 60,
+            "y": 875,
+            "w": 140,
+            "h": 85,
+            "stateKey": "综合教学楼317",
+            "roomKey": "0000330"
+          },
+          {
+            "id": "F3-318",
+            "label": "318",
+            "x": 250,
+            "y": 875,
+            "w": 130,
+            "h": 85,
+            "shape": "arc-left",
+            "stateKey": "综合教学楼318",
+            "roomKey": "0000331"
+          },
+          {
+            "id": "F3-319",
+            "label": "319",
+            "x": 390,
+            "y": 875,
+            "w": 130,
+            "h": 85,
+            "shape": "arc-right",
+            "stateKey": "综合教学楼319",
+            "roomKey": "photo-comp-F3-319"
+          }
+        ],
+        "blank": []
+      },
+      {
+        "floor": 4,
+        "cells": [
+          {
+            "id": "F4-413",
+            "label": "413",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼413",
+            "roomKey": "0000345"
+          },
+          {
+            "id": "F4-412",
+            "label": "412",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼412",
+            "roomKey": "photo-comp-F4-412"
+          },
+          {
+            "id": "F4-411",
+            "label": "411",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼411",
+            "roomKey": "0000343"
+          },
+          {
+            "id": "F4-410",
+            "label": "410",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼410",
+            "roomKey": "0000342"
+          },
+          {
+            "id": "F4-409",
+            "label": "409",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "stateKey": "综合教学楼409",
+            "roomKey": "0000341"
+          },
+          {
+            "id": "F4-407",
+            "label": "407",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼407",
+            "roomKey": "0000339"
+          },
+          {
+            "id": "F4-408",
+            "label": "408",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼408",
+            "roomKey": "0000340"
+          },
+          {
+            "id": "F4-405",
+            "label": "405",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼405",
+            "roomKey": "0000337"
+          },
+          {
+            "id": "F4-406",
+            "label": "406",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼406",
+            "roomKey": "0000338"
+          },
+          {
+            "id": "F4-403",
+            "label": "403",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼403",
+            "roomKey": "0000335"
+          },
+          {
+            "id": "F4-404",
+            "label": "404",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼404",
+            "roomKey": "0000336"
+          },
+          {
+            "id": "F4-401",
+            "label": "401",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼401",
+            "roomKey": "0000333"
+          },
+          {
+            "id": "F4-402",
+            "label": "402",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼402",
+            "roomKey": "0000334"
+          },
+          {
+            "id": "F4-414",
+            "label": "414",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼414",
+            "roomKey": "0000346"
+          },
+          {
+            "id": "F4-418",
+            "label": "418",
+            "x": 100,
+            "y": 265,
+            "w": 100,
+            "h": 75,
+            "stateKey": "综合教学楼418",
+            "roomKey": "photo-comp-F4-418"
+          },
+          {
+            "id": "F4-415",
+            "label": "415",
+            "x": 270,
+            "y": 690,
+            "w": 110,
+            "h": 85,
+            "stateKey": "综合教学楼415",
+            "roomKey": "photo-comp-F4-415"
+          },
+          {
+            "id": "F4-416",
+            "label": "416",
+            "x": 60,
+            "y": 790,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼416",
+            "roomKey": "0000348"
+          },
+          {
+            "id": "F4-417",
+            "label": "417",
+            "x": 60,
+            "y": 885,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼417",
+            "roomKey": "0000349"
+          }
+        ],
+        "blank": []
+      },
+      {
+        "floor": 5,
+        "cells": [
+          {
+            "id": "F5-513",
+            "label": "513",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼513",
+            "roomKey": "photo-comp-F5-513"
+          },
+          {
+            "id": "F5-512",
+            "label": "512",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼512",
+            "roomKey": "photo-comp-F5-512"
+          },
+          {
+            "id": "F5-511",
+            "label": "511",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼511",
+            "roomKey": "photo-comp-F5-511"
+          },
+          {
+            "id": "F5-510",
+            "label": "510",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼510",
+            "roomKey": "photo-comp-F5-510"
+          },
+          {
+            "id": "F5-unlabelled",
+            "label": "房号待核",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "uncertain": true,
+            "stateKey": null,
+            "roomKey": "photo-comp-F5-unlabelled"
+          },
+          {
+            "id": "F5-507",
+            "label": "507",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼507",
+            "roomKey": "0000356"
+          },
+          {
+            "id": "F5-508",
+            "label": "508",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼508",
+            "roomKey": "0000357"
+          },
+          {
+            "id": "F5-505",
+            "label": "505",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼505",
+            "roomKey": "0000354"
+          },
+          {
+            "id": "F5-506",
+            "label": "506",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼506",
+            "roomKey": "0000355"
+          },
+          {
+            "id": "F5-503",
+            "label": "503",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼503",
+            "roomKey": "0000352"
+          },
+          {
+            "id": "F5-504",
+            "label": "504",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼504",
+            "roomKey": "0000353"
+          },
+          {
+            "id": "F5-501",
+            "label": "501",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼501",
+            "roomKey": "0000350"
+          },
+          {
+            "id": "F5-502",
+            "label": "502",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼502",
+            "roomKey": "0000351"
+          },
+          {
+            "id": "F5-514",
+            "label": "514",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼514",
+            "roomKey": "0000363"
+          },
+          {
+            "id": "F5-315",
+            "label": "315",
+            "x": 270,
+            "y": 690,
+            "w": 110,
+            "h": 85,
+            "uncertain": true,
+            "stateKey": null,
+            "roomKey": "photo-comp-F5-315"
+          }
+        ],
+        "blank": []
+      },
+      {
+        "floor": 6,
+        "cells": [
+          {
+            "id": "F6-612",
+            "label": "612",
+            "x": 290,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼612",
+            "roomKey": "photo-comp-F6-612"
+          },
+          {
+            "id": "F6-611",
+            "label": "611",
+            "x": 290,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼611",
+            "roomKey": "photo-comp-F6-611"
+          },
+          {
+            "id": "F6-610",
+            "label": "610",
+            "x": 410,
+            "y": 50,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼610",
+            "roomKey": "photo-comp-F6-610"
+          },
+          {
+            "id": "F6-609",
+            "label": "609",
+            "x": 410,
+            "y": 180,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼609",
+            "roomKey": "photo-comp-F6-609"
+          },
+          {
+            "id": "F6-509",
+            "label": "509",
+            "x": 605,
+            "y": 50,
+            "w": 235,
+            "h": 220,
+            "uncertain": true,
+            "stateKey": null,
+            "roomKey": "photo-comp-F6-509"
+          },
+          {
+            "id": "F6-607",
+            "label": "607",
+            "x": 290,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "管理办公室（综合楼607）",
+            "roomKey": "439"
+          },
+          {
+            "id": "F6-608",
+            "label": "608",
+            "x": 290,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "微课（综合楼608）",
+            "roomKey": "444"
+          },
+          {
+            "id": "F6-605",
+            "label": "605",
+            "x": 410,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼605",
+            "roomKey": "photo-comp-F6-605"
+          },
+          {
+            "id": "F6-606",
+            "label": "606",
+            "x": 410,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "板书室（综合楼606）",
+            "roomKey": "443"
+          },
+          {
+            "id": "F6-603",
+            "label": "603",
+            "x": 530,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼603",
+            "roomKey": "0000367"
+          },
+          {
+            "id": "F6-604",
+            "label": "604",
+            "x": 530,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼604",
+            "roomKey": "photo-comp-F6-604"
+          },
+          {
+            "id": "F6-601",
+            "label": "601",
+            "x": 650,
+            "y": 470,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼601",
+            "roomKey": "0000365"
+          },
+          {
+            "id": "F6-602",
+            "label": "602",
+            "x": 650,
+            "y": 600,
+            "w": 110,
+            "h": 90,
+            "stateKey": "综合教学楼602",
+            "roomKey": "0000366"
+          },
+          {
+            "id": "F6-613",
+            "label": "613",
+            "x": 50,
+            "y": 470,
+            "w": 140,
+            "h": 90,
+            "stateKey": "综合教学楼613",
+            "roomKey": "photo-comp-F6-613"
+          },
+          {
+            "id": "F6-614",
+            "label": "614",
+            "x": 270,
+            "y": 690,
+            "w": 110,
+            "h": 85,
+            "stateKey": "综合教学楼614",
+            "roomKey": "0000370"
+          }
+        ],
+        "blank": []
+      }
+    ]
+  },
+  "02-0007": {
+    "campus": "金明校区",
+    "name": "7号教学楼",
+    "rooms": [
+      {
+        "key": "0000050",
+        "name": "7号教学楼7#402（7#402）",
+        "label": "7#402（7#402）",
+        "schoolId": "0000050"
+      },
+      {
+        "key": "0000036",
+        "name": "7号教学楼7101",
+        "label": "7101",
+        "schoolId": "0000036"
+      },
+      {
+        "key": "0000037",
+        "name": "7号教学楼7102",
+        "label": "7102",
+        "schoolId": "0000037"
+      },
+      {
+        "key": "0000038",
+        "name": "7号教学楼7103",
+        "label": "7103",
+        "schoolId": "0000038"
+      },
+      {
+        "key": "0000039",
+        "name": "7号教学楼7201",
+        "label": "7201",
+        "schoolId": "0000039"
+      },
+      {
+        "key": "0000040",
+        "name": "7号教学楼7202",
+        "label": "7202",
+        "schoolId": "0000040"
+      },
+      {
+        "key": "0000041",
+        "name": "7号教学楼7203",
+        "label": "7203",
+        "schoolId": "0000041"
+      },
+      {
+        "key": "0000042",
+        "name": "7号教学楼7204",
+        "label": "7204",
+        "schoolId": "0000042"
+      },
+      {
+        "key": "0000043",
+        "name": "7号教学楼7205",
+        "label": "7205",
+        "schoolId": "0000043"
+      },
+      {
+        "key": "0000045",
+        "name": "7号教学楼7302",
+        "label": "7302",
+        "schoolId": "0000045"
+      },
+      {
+        "key": "0000046",
+        "name": "7号教学楼7303",
+        "label": "7303",
+        "schoolId": "0000046"
+      },
+      {
+        "key": "0000047",
+        "name": "7号教学楼7304",
+        "label": "7304",
+        "schoolId": "0000047"
+      },
+      {
+        "key": "0000048",
+        "name": "7号教学楼7305",
+        "label": "7305",
+        "schoolId": "0000048"
+      },
+      {
+        "key": "0000055",
+        "name": "7号教学楼7502",
+        "label": "7502",
+        "schoolId": "0000055"
+      },
+      {
+        "key": "397",
+        "name": "板书室（7#403）",
+        "label": "板书室（7#403）",
+        "schoolId": "397"
+      },
+      {
+        "key": "0000049",
+        "name": "教学设计与分析室（7#401）",
+        "label": "教学设计与分析室（7#401）",
+        "schoolId": "0000049"
+      },
+      {
+        "key": "0000053",
+        "name": "名师工作室（7#405）",
+        "label": "名师工作室（7#405）",
+        "schoolId": "0000053"
+      },
+      {
+        "key": "437",
+        "name": "微格教室1（7#404-1）",
+        "label": "微格教室1（7#404-1）",
+        "schoolId": "437"
+      },
+      {
+        "key": "438",
+        "name": "微格教室2（7#404-2）",
+        "label": "微格教室2（7#404-2）",
+        "schoolId": "438"
+      },
+      {
+        "key": "0000052",
+        "name": "微格教室3（7#404-3）",
+        "label": "微格教室3（7#404-3）",
+        "schoolId": "0000052"
+      },
+      {
+        "key": "0000044",
+        "name": "微课（7#301-1）",
+        "label": "微课（7#301-1）",
+        "schoolId": "0000044"
+      },
+      {
+        "key": "436",
+        "name": "音视频（7#301-2）",
+        "label": "音视频（7#301-2）",
+        "schoolId": "436"
+      }
+    ]
+  },
+  "02-0001": {
+    "campus": "金明校区",
+    "name": "曾宪梓楼",
+    "rooms": [
+      {
+        "key": "0000079",
+        "name": "曾宪梓楼501",
+        "label": "501",
+        "schoolId": "0000079"
+      },
+      {
+        "key": "0000080",
+        "name": "曾宪梓楼502",
+        "label": "502",
+        "schoolId": "0000080"
+      },
+      {
+        "key": "0000081",
+        "name": "曾宪梓楼503",
+        "label": "503",
+        "schoolId": "0000081"
+      },
+      {
+        "key": "0000082",
+        "name": "曾宪梓楼504",
+        "label": "504",
+        "schoolId": "0000082"
+      },
+      {
+        "key": "378",
+        "name": "曾宪梓楼601",
+        "label": "601",
+        "schoolId": "378"
+      },
+      {
+        "key": "379",
+        "name": "曾宪梓楼602",
+        "label": "602",
+        "schoolId": "379"
+      },
+      {
+        "key": "380",
+        "name": "曾宪梓楼603",
+        "label": "603",
+        "schoolId": "380"
+      },
+      {
+        "key": "381",
+        "name": "曾宪梓楼604",
+        "label": "604",
+        "schoolId": "381"
+      },
+      {
+        "key": "382",
+        "name": "曾宪梓楼606",
+        "label": "606",
+        "schoolId": "382"
+      },
+      {
+        "key": "383",
+        "name": "曾宪梓楼608",
+        "label": "608",
+        "schoolId": "383"
+      },
+      {
+        "key": "384",
+        "name": "曾宪梓楼609",
+        "label": "609",
+        "schoolId": "384"
+      },
+      {
+        "key": "371",
+        "name": "曾宪梓楼610",
+        "label": "610",
+        "schoolId": "371"
+      }
+    ]
+  },
+  "02-0002": {
+    "campus": "金明校区",
+    "name": "计算机大楼",
+    "rooms": [
+      {
+        "key": "0000083",
+        "name": "计算机大楼101",
+        "label": "101",
+        "schoolId": "0000083"
+      },
+      {
+        "key": "0000084",
+        "name": "计算机大楼102",
+        "label": "102",
+        "schoolId": "0000084"
+      },
+      {
+        "key": "0000085",
+        "name": "计算机大楼103",
+        "label": "103",
+        "schoolId": "0000085"
+      },
+      {
+        "key": "0000086",
+        "name": "计算机大楼104",
+        "label": "104",
+        "schoolId": "0000086"
+      }
+    ]
+  },
+  "02-0006": {
+    "campus": "金明校区",
+    "name": "金明综合楼1",
+    "rooms": [
+      {
+        "key": "0000087",
+        "name": "金明综合楼1201",
+        "label": "1201",
+        "schoolId": "0000087"
+      },
+      {
+        "key": "0000088",
+        "name": "金明综合楼1202",
+        "label": "1202",
+        "schoolId": "0000088"
+      },
+      {
+        "key": "0000089",
+        "name": "金明综合楼1203",
+        "label": "1203",
+        "schoolId": "0000089"
+      },
+      {
+        "key": "0000090",
+        "name": "金明综合楼1301",
+        "label": "1301",
+        "schoolId": "0000090"
+      },
+      {
+        "key": "0000091",
+        "name": "金明综合楼1302",
+        "label": "1302",
+        "schoolId": "0000091"
+      },
+      {
+        "key": "0000092",
+        "name": "金明综合楼1303",
+        "label": "1303",
+        "schoolId": "0000092"
+      }
+    ]
+  },
+  "02-19": {
+    "campus": "金明校区",
+    "name": "金明综合楼4",
+    "rooms": [
+      {
+        "key": "0000163",
+        "name": "金明综合楼4101",
+        "label": "4101",
+        "schoolId": "0000163"
+      },
+      {
+        "key": "0000164",
+        "name": "金明综合楼4102",
+        "label": "4102",
+        "schoolId": "0000164"
+      },
+      {
+        "key": "0000165",
+        "name": "金明综合楼4103",
+        "label": "4103",
+        "schoolId": "0000165"
+      },
+      {
+        "key": "0000166",
+        "name": "金明综合楼4201",
+        "label": "4201",
+        "schoolId": "0000166"
+      },
+      {
+        "key": "0000167",
+        "name": "金明综合楼4202",
+        "label": "4202",
+        "schoolId": "0000167"
+      },
+      {
+        "key": "0000168",
+        "name": "金明综合楼4203",
+        "label": "4203",
+        "schoolId": "0000168"
+      },
+      {
+        "key": "0000169",
+        "name": "金明综合楼4204",
+        "label": "4204",
+        "schoolId": "0000169"
+      }
+    ]
+  },
+  "03-26": {
+    "campus": "郑州校区",
+    "name": "九章学堂北楼B座",
+    "rooms": [
+      {
+        "key": "456",
+        "name": "九章北B座301",
+        "label": "九章北B座301",
+        "schoolId": "456"
+      },
+      {
+        "key": "470",
+        "name": "九章北B座302",
+        "label": "九章北B座302",
+        "schoolId": "470"
+      },
+      {
+        "key": "462",
+        "name": "九章北B座303",
+        "label": "九章北B座303",
+        "schoolId": "462"
+      },
+      {
+        "key": "465",
+        "name": "九章北B座401",
+        "label": "九章北B座401",
+        "schoolId": "465"
+      },
+      {
+        "key": "463",
+        "name": "九章北B座402",
+        "label": "九章北B座402",
+        "schoolId": "463"
+      }
+    ]
+  },
+  "03-24": {
+    "campus": "郑州校区",
+    "name": "九章学堂南楼B座",
+    "rooms": [
+      {
+        "key": "459",
+        "name": "九章南B座101",
+        "label": "九章南B座101",
+        "schoolId": "459"
+      },
+      {
+        "key": "455",
+        "name": "九章南B座201",
+        "label": "九章南B座201",
+        "schoolId": "455"
+      },
+      {
+        "key": "434",
+        "name": "九章南B座301",
+        "label": "九章南B座301",
+        "schoolId": "434"
+      },
+      {
+        "key": "449",
+        "name": "九章南B座302",
+        "label": "九章南B座302",
+        "schoolId": "449"
+      },
+      {
+        "key": "448",
+        "name": "九章南B座303",
+        "label": "九章南B座303",
+        "schoolId": "448"
+      },
+      {
+        "key": "431",
+        "name": "九章南B座401",
+        "label": "九章南B座401",
+        "schoolId": "431"
+      },
+      {
+        "key": "432",
+        "name": "九章南B座402",
+        "label": "九章南B座402",
+        "schoolId": "432"
+      },
+      {
+        "key": "433",
+        "name": "九章南B座403",
+        "label": "九章南B座403",
+        "schoolId": "433"
+      }
+    ]
+  },
+  "03-25": {
+    "campus": "郑州校区",
+    "name": "友兰学堂北楼B座",
+    "rooms": [
+      {
+        "key": "458",
+        "name": "友兰北B座301",
+        "label": "友兰北B座301",
+        "schoolId": "458"
+      },
+      {
+        "key": "457",
+        "name": "友兰北B座302",
+        "label": "友兰北B座302",
+        "schoolId": "457"
+      },
+      {
+        "key": "469",
+        "name": "友兰北B座304",
+        "label": "友兰北B座304",
+        "schoolId": "469"
+      },
+      {
+        "key": "460",
+        "name": "友兰北B座305",
+        "label": "友兰北B座305",
+        "schoolId": "460"
+      },
+      {
+        "key": "450",
+        "name": "友兰北B座306",
+        "label": "友兰北B座306",
+        "schoolId": "450"
+      },
+      {
+        "key": "454",
+        "name": "友兰北B座307",
+        "label": "友兰北B座307",
+        "schoolId": "454"
+      },
+      {
+        "key": "466",
+        "name": "友兰北B座308",
+        "label": "友兰北B座308",
+        "schoolId": "466"
+      },
+      {
+        "key": "464",
+        "name": "友兰北B座309",
+        "label": "友兰北B座309",
+        "schoolId": "464"
+      },
+      {
+        "key": "453",
+        "name": "友兰北B座401",
+        "label": "友兰北B座401",
+        "schoolId": "453"
+      },
+      {
+        "key": "471",
+        "name": "友兰北B座402",
+        "label": "友兰北B座402",
+        "schoolId": "471"
+      },
+      {
+        "key": "446",
+        "name": "友兰北B座404",
+        "label": "友兰北B座404",
+        "schoolId": "446"
+      },
+      {
+        "key": "447",
+        "name": "友兰北B座405",
+        "label": "友兰北B座405",
+        "schoolId": "447"
+      },
+      {
+        "key": "468",
+        "name": "友兰北B座406",
+        "label": "友兰北B座406",
+        "schoolId": "468"
+      },
+      {
+        "key": "452",
+        "name": "友兰北B座407",
+        "label": "友兰北B座407",
+        "schoolId": "452"
+      },
+      {
+        "key": "461",
+        "name": "友兰北B座408",
+        "label": "友兰北B座408",
+        "schoolId": "461"
+      },
+      {
+        "key": "467",
+        "name": "友兰北B座409",
+        "label": "友兰北B座409",
+        "schoolId": "467"
+      }
+    ]
+  },
+  "03-22": {
+    "campus": "郑州校区",
+    "name": "友兰学堂南楼B座",
+    "rooms": [
+      {
+        "key": "435",
+        "name": "友兰南B座204",
+        "label": "友兰南B座204",
+        "schoolId": "435"
+      },
+      {
+        "key": "424",
+        "name": "友兰南B座304",
+        "label": "友兰南B座304",
+        "schoolId": "424"
+      },
+      {
+        "key": "425",
+        "name": "友兰南B座305",
+        "label": "友兰南B座305",
+        "schoolId": "425"
+      },
+      {
+        "key": "426",
+        "name": "友兰南B座306",
+        "label": "友兰南B座306",
+        "schoolId": "426"
+      },
+      {
+        "key": "427",
+        "name": "友兰南B座404",
+        "label": "友兰南B座404",
+        "schoolId": "427"
+      },
+      {
+        "key": "428",
+        "name": "友兰南B座405",
+        "label": "友兰南B座405",
+        "schoolId": "428"
+      },
+      {
+        "key": "429",
+        "name": "友兰南B座406",
+        "label": "友兰南B座406",
+        "schoolId": "429"
+      }
+    ]
+  },
+  "03-23": {
+    "campus": "郑州校区",
+    "name": "友兰学堂南楼C座",
+    "rooms": [
+      {
+        "key": "408",
+        "name": "友兰南C座301",
+        "label": "友兰南C座301",
+        "schoolId": "408"
+      },
+      {
+        "key": "410",
+        "name": "友兰南C座302",
+        "label": "友兰南C座302",
+        "schoolId": "410"
+      },
+      {
+        "key": "420",
+        "name": "友兰南C座303",
+        "label": "友兰南C座303",
+        "schoolId": "420"
+      },
+      {
+        "key": "400",
+        "name": "友兰南C座304",
+        "label": "友兰南C座304",
+        "schoolId": "400"
+      },
+      {
+        "key": "414",
+        "name": "友兰南C座305",
+        "label": "友兰南C座305",
+        "schoolId": "414"
+      },
+      {
+        "key": "402",
+        "name": "友兰南C座306",
+        "label": "友兰南C座306",
+        "schoolId": "402"
+      },
+      {
+        "key": "398",
+        "name": "友兰南C座307",
+        "label": "友兰南C座307",
+        "schoolId": "398"
+      },
+      {
+        "key": "403",
+        "name": "友兰南C座308",
+        "label": "友兰南C座308",
+        "schoolId": "403"
+      },
+      {
+        "key": "422",
+        "name": "友兰南C座309",
+        "label": "友兰南C座309",
+        "schoolId": "422"
+      },
+      {
+        "key": "412",
+        "name": "友兰南C座310",
+        "label": "友兰南C座310",
+        "schoolId": "412"
+      },
+      {
+        "key": "416",
+        "name": "友兰南C座311",
+        "label": "友兰南C座311",
+        "schoolId": "416"
+      },
+      {
+        "key": "418",
+        "name": "友兰南C座315",
+        "label": "友兰南C座315",
+        "schoolId": "418"
+      },
+      {
+        "key": "406",
+        "name": "友兰南C座316",
+        "label": "友兰南C座316",
+        "schoolId": "406"
+      },
+      {
+        "key": "409",
+        "name": "友兰南C座401",
+        "label": "友兰南C座401",
+        "schoolId": "409"
+      },
+      {
+        "key": "411",
+        "name": "友兰南C座402",
+        "label": "友兰南C座402",
+        "schoolId": "411"
+      },
+      {
+        "key": "421",
+        "name": "友兰南C座403",
+        "label": "友兰南C座403",
+        "schoolId": "421"
+      },
+      {
+        "key": "401",
+        "name": "友兰南C座404",
+        "label": "友兰南C座404",
+        "schoolId": "401"
+      },
+      {
+        "key": "415",
+        "name": "友兰南C座405",
+        "label": "友兰南C座405",
+        "schoolId": "415"
+      },
+      {
+        "key": "404",
+        "name": "友兰南C座406",
+        "label": "友兰南C座406",
+        "schoolId": "404"
+      },
+      {
+        "key": "399",
+        "name": "友兰南C座407",
+        "label": "友兰南C座407",
+        "schoolId": "399"
+      },
+      {
+        "key": "405",
+        "name": "友兰南C座408",
+        "label": "友兰南C座408",
+        "schoolId": "405"
+      },
+      {
+        "key": "423",
+        "name": "友兰南C座409",
+        "label": "友兰南C座409",
+        "schoolId": "423"
+      },
+      {
+        "key": "413",
+        "name": "友兰南C座410",
+        "label": "友兰南C座410",
+        "schoolId": "413"
+      },
+      {
+        "key": "417",
+        "name": "友兰南C座411",
+        "label": "友兰南C座411",
+        "schoolId": "417"
+      },
+      {
+        "key": "419",
+        "name": "友兰南C座415",
+        "label": "友兰南C座415",
+        "schoolId": "419"
+      },
+      {
+        "key": "407",
+        "name": "友兰南C座416",
+        "label": "友兰南C座416",
+        "schoolId": "407"
+      }
+    ]
+  }
+}
