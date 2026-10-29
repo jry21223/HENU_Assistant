@@ -315,6 +315,9 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    if tool == 'yunfz_leave_query' and result.get('success') and 'records' in result:
+        from henu_plugin.leave_summary import leave_summary_lines
+        return Card('河宝请假', '查询成功', tuple(escape(line) for line in leave_summary_lines(result)))
     if tool == "library_query" or tool.startswith("empty_classroom"):
         result = _without_query_resource_ids(result)
     if tool == 'library_query' and result.get('success') and isinstance(result.get('seats'), list) and isinstance(result.get('area'), dict):

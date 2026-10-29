@@ -1,6 +1,24 @@
 from henu_plugin.qq_navigation import navigation_config
 
 
+def test_leave_situation_question_routes_existing_readonly_cli_without_model():
+    from henu_plugin.qq_navigation import menu_command
+    from henu_plugin.cli import inspect_cli_command
+    command = menu_command('查询一下请假情况')
+    spec = inspect_cli_command(command)
+    assert spec.resolved_tool == 'yunfz_leave_query' and not spec.is_help
+    assert spec.params['view'] == 'list'
+
+
+def test_leave_queries_accept_clear_personal_reads_without_swallowing_other_intents():
+    from henu_plugin.qq_navigation import menu_command
+    for text in ('我的请假记录', '查询请假情况', '帮我查一下我的请假记录。', '查看请假审批状态？'):
+        assert menu_command(text) == 'yunfz leave list'
+    for text in ('帮我申请请假', '怎么请假', '查询张三的请假记录', '查询其他人的请假情况',
+                 '查询一下请假情况和今天课表', '我的请假情况\n帮我提交申请'):
+        assert not menu_command(text)
+
+
 def test_menu_and_panels_offer_user_tasks_without_executable_writes():
     config = navigation_config()
     items = config['menu']['items']

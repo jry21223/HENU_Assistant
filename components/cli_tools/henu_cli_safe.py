@@ -156,6 +156,10 @@ class HenuCliSafe(HenuCli):
             if msg:
                 return msg
         preferences = result.get("preferences")
+        cli = result.get('cli') if isinstance(result.get('cli'), dict) else {}
+        if (cli.get('resolved_tool') or result.get('_resolved_tool_name')) == 'yunfz_leave_query' and 'records' in result:
+            from henu_plugin.leave_summary import leave_summary_lines
+            return '\n'.join(leave_summary_lines(result))
         if isinstance(preferences, dict):
             return "\n".join((
                 str(result.get("msg") or "当前图书馆偏好"),

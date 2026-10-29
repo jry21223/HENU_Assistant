@@ -138,6 +138,9 @@ def classroom_command(text: str) -> str:
 
 
 def menu_command(text: str, now=None) -> str:
+    import re
+    if re.fullmatch(r'(?:(?:请|帮我)?(?:查询|查看|查)(?:一下)?(?:我的)?|我的)?请假(?:情况|记录|状态|审批情况|审批状态|审批结果)[。！？!?]?', text.strip()):
+        return 'yunfz leave list'
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
     now = now or datetime.now(ZoneInfo('Asia/Shanghai'))
