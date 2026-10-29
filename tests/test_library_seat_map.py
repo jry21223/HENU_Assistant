@@ -302,7 +302,7 @@ def test_old_async_map_response_is_discarded_after_new_library_selection(monkeyp
         )
         release.set()
         await work
-        assert previous.reply.await_count == 1  # Only its already-sent loading note.
+        assert previous.reply.await_count == 0  # Superseded lookup sends no progress or result.
 
     asyncio.run(run())
 
