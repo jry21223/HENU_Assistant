@@ -348,7 +348,10 @@ async def show_map(plugin, ctx, state, window):
         or state["area"] != area
     ):
         return
-    if not image_ok:
+    if image_ok:
+        from henu_plugin.qq_cards import cache
+        cache(plugin).put(key, [])
+    else:
         for page in seat_card(area, window, result, image_ok).pages():
             await ctx.reply(card_chain(page))
 

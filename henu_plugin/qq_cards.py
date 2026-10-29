@@ -598,6 +598,10 @@ class CardCache:
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
         if not pages:
+            # Image-only reads must not erase a confirmation preview or a
+            # committed receipt that was published while the image was sent.
+            if key in self.preview_receipts or key in self.request_results:
+                return
             self.entries.pop(key, None)
             self.preview_receipts.pop(key, None)
             self.request_results.pop(key, None)

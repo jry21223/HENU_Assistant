@@ -417,6 +417,33 @@ def test_seat_image_keeps_other_requested_results_and_notes(harness):
     asyncio.run(run())
 
 
+def test_refresh_seat_image_clears_previous_schedule_paging(harness, monkeypatch):
+    from henu_plugin import library_seat_map as maps
+    async def run():
+        h = harness
+        command = 'library seats --area-id 30 --date 2026-10-21 --time 08:00 --end-time 23:00'
+        h.payloads[command] = seat_payload()
+        seat = await h.tool.call({'command': command}, h.session, 1)
+        await h.presenter.call({'cards': [{'ref': seat['display_ref']}]}, h.session, 1)
+        first = h.context(1)
+        await h.listener.present(first)
+        image = first.reply.call_args.args[0].root[0].base64
+        h.payloads['schedule week'] = week_payload()
+        schedule = await h.tool.call({'command': 'schedule week'}, h.session, 2)
+        await h.presenter.call({'cards': [{'ref': schedule['display_ref']}]}, h.session, 2)
+        await h.listener.present(h.context(2))
+        monkeypatch.setattr(maps, 'query_seats', AsyncMock(return_value={
+            'success': True, 'seats': ['002'], 'image': image}))
+        refresh = h.context(3, '刷新座位')
+        assert await maps.handle_library_text(h.plugin, refresh, '刷新座位')
+        assert len(refresh.reply.call_args_list) == 1
+        paging = h.context(4, '卡片第1页')
+        assert await h.listener.paging(paging)
+        text = paging.reply.call_args.args[0].root[0].text
+        assert '卡片已过期' in text and '数据结构' not in text
+    asyncio.run(run())
+
+
 def test_new_seat_choice_survives_an_older_image_delivery(harness):
     from langbot_plugin.api.entities.builtin.platform.message import Image
     from henu_plugin import library_seat_map as maps
