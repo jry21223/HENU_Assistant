@@ -50,6 +50,62 @@ def week_payload():
             'cli': {'resolved_tool': 'schedule_query'}}
 
 
+def test_leave_situation_queries_show_leave_status_without_sensitive_reasons(harness):
+    from henu_plugin.qq_navigation import handle_menu_query
+    async def run():
+        h = harness
+        h.payloads['yunfz leave list'] = {
+            'success': True, 'page': 1, 'page_size': 20, 'total': 2,
+            'records': [{'status_name': '已通过', 'reason': 'SensitiveLeaveReason', 'studentName': 'PrivateStudentName'},
+                        {'status_name': '审批中', 'reason': 'SensitiveLeaveReason'}],
+            'cli': {'resolved_tool': 'yunfz_leave_query'}}
+        ctx = h.context(1, '查询一下请假情况')
+        assert await handle_menu_query(h.plugin, ctx)
+        text = ctx.reply.call_args.args[0].root[0].text
+        assert '请假' in text and '本页' in text and '2' in text
+        assert '已通过' in text and '审批中' in text
+        assert '预约记录' not in text and 'SensitiveLeaveReason' not in text and 'PrivateStudentName' not in text
+        ctx.prevent_default.assert_called_once()
+        ctx.prevent_postorder.assert_called_once()
+    asyncio.run(run())
+
+
+def test_group_leave_query_is_rejected_before_reading_personal_storage(harness):
+    from henu_plugin.qq_navigation import handle_menu_query
+    async def run():
+        h = harness
+        ctx = h.context(1, '查询一下请假情况')
+        ctx.event.launcher_type = 'group'
+        ctx.event.launcher_id = 'synthetic-group'
+        assert await handle_menu_query(h.plugin, ctx)
+        assert '私聊' in ctx.reply.call_args.args[0].root[0].text
+        h.plugin.get_plugin_storage.assert_not_awaited()
+        h.plugin.service.run_tool.assert_not_called()
+        h.plugin.service.run_tool_async.assert_not_awaited()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('success,msg,expected', [
+    (True, '查询成功', '本次查询未返回请假记录'),
+    (False, '校园登录已失效，请重新验证。', '校园登录已失效'),
+    (False, '河宝服务暂时无法连接。', '河宝服务暂时无法连接'),
+])
+def test_leave_empty_results_and_query_failures_remain_distinct(harness, success, msg, expected):
+    from henu_plugin.qq_navigation import handle_menu_query
+    async def run():
+        h = harness
+        h.payloads['yunfz leave list'] = {'success': success, 'msg': msg, 'records': [],
+                                        'page': 1, 'total': 0, 'cli': {'resolved_tool': 'yunfz_leave_query'}}
+        ctx = h.context(1, '查询一下请假情况')
+        assert await handle_menu_query(h.plugin, ctx)
+        text = ctx.reply.call_args.args[0].root[0].text
+        assert expected in text
+        assert '没有接口' not in text and '班长' not in text
+        if not success:
+            assert '本次查询未返回请假记录' not in text
+    asyncio.run(run())
+
+
 def test_week_schedule_uses_the_same_card_from_menu_and_agent(harness):
     from henu_plugin.qq_navigation import handle_menu_query
     async def run():
