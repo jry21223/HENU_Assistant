@@ -35,6 +35,7 @@ TOOL_TITLES = {
     "henu_cli": "使用帮助", "setup_account": "校园账号绑定",
     "preferences": "图书馆偏好",
     "sync_schedule": "课表更新", "schedule_query": "我的课表",
+    "grade_query": "教务成绩",
     "smart_course_selection": "选课方案", "smart_course_select": "选课提交",
     "course_selection_query": "教务选课", "course_selection_plan": "选课方案",
     "course_selection_submit": "选课提交", "course_monitor_config": "选课监控设置",
@@ -315,6 +316,11 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    if tool == "grade_query" and result.get("success"):
+        title = "学分绩点" if result.get("view") == "gpa" else "教务成绩"
+        subtitle = "入学以来 · 有效 · 主修"
+        lines = tuple(escape(line) for line in str(result.get("reply_text") or "").splitlines() if line.strip())
+        return Card(title, subtitle, lines, "")
     if tool == "library_query" or tool.startswith("empty_classroom"):
         result = _without_query_resource_ids(result)
     if tool == 'library_query' and result.get('success') and isinstance(result.get('seats'), list) and isinstance(result.get('area'), dict):

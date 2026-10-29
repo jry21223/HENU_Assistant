@@ -285,6 +285,11 @@ class BaseHenuTool(Tool):
         # Dropping these fields would make the Agent answer an incomplete paper.
         if isinstance(result.get("quiz"), dict):
             return
+        # Grade pages contain at most eight complete records. QQ displays the
+        # captured card/reply_text; the Agent still needs the full page data.
+        cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+        if cli.get("resolved_tool") == "grade_query":
+            return
 
         # Normalize msg to plain text first, ensure non-empty fallback.
         msg = result.get("msg")
