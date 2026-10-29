@@ -20,6 +20,7 @@ SCOPE = {"time": "since_admission", "grades": "effective", "major": "main"}
 FORM_PATH = "/student/xscj.stuckcj.jsp"
 DATA_PATH = "/student/xscj.stuckcj_data10475.jsp"
 HEADERS = ("序号", "课程/环节", "学分", "总学时", "类别", "修读性质", "考核方式", "成绩", "获得学分", "绩点", "学分绩点", "备注")
+COURSE_CELL = re.compile(r"\[([A-Za-z0-9_-]+)\]\s*(.+)")
 
 
 class GradeError(RuntimeError):
@@ -56,6 +57,13 @@ def parse_transcript(markup: str) -> dict[str, Any]:
                 for row in table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr")]
         headings = next((row for row in rows if "课程/环节" in row), None)
         if headings is None:
+            grade_candidates = any(
+                any(COURSE_CELL.fullmatch(cell) for cell in row)
+                or (len(set(row) & set(HEADERS)) >= 3 and bool({"成绩", "绩点"} & set(row)))
+                for row in rows
+            )
+            if grade_candidates:
+                raise GradeError("grade_page_unrecognized", "部分学期的成绩表结构无法识别，未返回缺失学期的成绩。")
             summary_header = next((row for row in rows if "修读课程环节数" in row and "获得学分绩点" in row), None)
             if summary_header is not None:
                 for row in rows:
@@ -68,13 +76,19 @@ def parse_transcript(markup: str) -> dict[str, Any]:
         recognized = True
         columns = {name: headings.index(name) for name in HEADERS}
         for row in rows:
-            if not row or not row[0].isdigit():
+            if not row:
+                continue
+            sequence = row[columns["序号"]] if columns["序号"] < len(row) else ""
+            course_like = any(COURSE_CELL.fullmatch(cell) for cell in row)
+            if not sequence.isdigit() and not course_like:
                 continue
             if len(row) != len(headings):
                 raise GradeError("grade_page_unrecognized", "成绩明细列数异常，未返回不完整成绩。")
+            if not sequence.isdigit():
+                raise GradeError("grade_page_unrecognized", "成绩序号格式无法识别，未把这些课程当作空成绩。")
             def get(key: str) -> str:
                 return row[columns[key]]
-            course = re.fullmatch(r"\[([A-Za-z0-9_-]+)\]\s*(.+)", get("课程/环节"))
+            course = COURSE_CELL.fullmatch(get("课程/环节"))
             if course is None:
                 raise GradeError("grade_page_unrecognized", "成绩课程标识无法识别。")
             records.append({

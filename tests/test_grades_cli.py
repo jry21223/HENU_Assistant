@@ -300,3 +300,31 @@ def test_no_bound_account_does_not_read_school(grades):
     result = asyncio.run(tool.call({'command': 'grade gpa'}, session, 21))
     assert result['error_code'] == 'grade_account_required'
     assert not school.calls
+
+
+@pytest.mark.parametrize('command', ['grade list', 'grade gpa'])
+def test_one_unrecognized_term_table_rejects_the_entire_transcript(grades, command):
+    school, _, tool, session = grades
+    school.markup = school.markup.replace('课程/环节', '课程名称', 1)
+    result = asyncio.run(tool.call({'command': command}, session, 22))
+    assert result['success'] is False
+    assert result['error_code'] == 'grade_page_unrecognized'
+    assert 'records' not in result and 'average_gpa' not in result
+
+
+def test_unrecognized_sequence_numbers_cannot_be_reported_as_empty_grades(grades):
+    school, _, tool, session = grades
+    school.markup = school.markup.replace('<td>1</td>', '<td>1.</td>', 1).replace('<td>2</td>', '<td>2.</td>', 1)
+    result = asyncio.run(tool.call({'command': 'grade list'}, session, 23))
+    assert result['success'] is False
+    assert result['error_code'] == 'grade_page_unrecognized'
+
+
+def test_reordered_columns_are_read_by_their_header_names(grades):
+    school, _, tool, session = grades
+    headers = list(HEADER)
+    headers[0], headers[1] = headers[1], headers[0]
+    school.markup = '<table>' + row(headers) + row(('[A01]合成数学', '1', '2', '32', '必修', '主修', '考试', '80', '2', '3', '6', '')) + '</table>'
+    result = asyncio.run(tool.call({'command': 'grade list'}, session, 24))
+    assert result['success'], result
+    assert result['total'] == 1 and result['records'][0]['name'] == '合成数学'
