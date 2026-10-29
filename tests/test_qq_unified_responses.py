@@ -325,7 +325,8 @@ def test_seat_queries_send_only_the_hd_map_and_keep_selection_available(harness,
         await h.tool.call({'command': 'library locations'}, h.session, 1)
         result = await h.tool.call({'command': command}, h.session, 1)
         assert '_qq_seat_map' not in result
-        assert (await h.presenter.call({'cards': [{'ref': result['display_ref']}]}, h.session, 1))['success']
+        assert (await h.presenter.call({'cards': [{'ref': result['display_ref']}],
+                                       'note': '无法生成座位图，这是模型的额外说明。'}, h.session, 1))['success']
         ctx = h.context(1); await h.listener.present(ctx)
         images = [node for call in ctx.reply.call_args_list for node in call.args[0].root if isinstance(node, Image)]
         assert len(images) == 1

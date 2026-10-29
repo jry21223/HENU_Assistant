@@ -178,7 +178,10 @@ class Presentations:
                 continuation_at = len(chosen)
             chosen.append(parts[0])
             remaining.extend(parts[1:])
-        if note:
+        # The real seat image is the complete reply. Optional model prose can
+        # contradict media it cannot inspect; keep notes for mixed results or
+        # a failed image's text fallback instead.
+        if note and (chosen or not images):
             parts = Card('补充说明', '', (escape(note, len(note) * 2 + 100),)).pages()
             if len(parts) > 1 and continuation_at is None:
                 continuation_at = len(chosen)
