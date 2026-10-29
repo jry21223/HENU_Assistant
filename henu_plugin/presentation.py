@@ -21,6 +21,7 @@ class ResultCard:
     image: str | None = None
     selection: dict | None = None
     fallback: Card | None = None
+    image_only: bool = False
 
 
 @dataclass
@@ -128,7 +129,8 @@ class Presentations:
             from henu_plugin.library_availability import availability_card
             for campus in {'金明校区', '明伦校区', '龙子湖校区'}:
                 variants[campus] = availability_card(result, campus=campus)
-        entry.cards[ref] = ResultCard(card, variants, image, selection, result_card({**rendered, '_qq_seat_image': False}) if image else card)
+        entry.cards[ref] = ResultCard(card, variants, image, selection, result_card({**rendered, '_qq_seat_image': False}) if image else card,
+                                    image_only=bool(image and (cli.get('resolved_tool') or result.get('_resolved_tool_name')) == 'library_query'))
         self.requests.move_to_end(key)
         while len(entry.cards) > 32:
             del entry.cards[next(iter(entry.cards))]
@@ -169,6 +171,8 @@ class Presentations:
                 images.append(ref)
             if asset.selection:
                 seats.append(ref)
+            if asset.image_only and asset.image and not (failed_images and ref in failed_images):
+                continue
             parts = card.pages()
             if len(parts) > 1 and continuation_at is None:
                 continuation_at = len(chosen)

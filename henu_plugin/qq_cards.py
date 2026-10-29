@@ -574,7 +574,7 @@ def card_chain(text: str) -> MessageChain:
 
 def set_card_reply(event: Any, text: str) -> None:
     """Use the real reply contract of either supported LangBot SDK generation."""
-    chain = card_chain(text)
+    chain = card_chain(text) if text else MessageChain([])
     if hasattr(event, "reply_message_chain"):
         event.reply_message_chain = chain
     else:
@@ -597,6 +597,11 @@ class CardCache:
         self.request_results: dict[tuple, tuple[int, OrderedDict]] = {}
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
+        if not pages:
+            self.entries.pop(key, None)
+            self.preview_receipts.pop(key, None)
+            self.request_results.pop(key, None)
+            return
         self.entries[key] = (time.monotonic() + PAGE_TTL, pages[:MAX_PAGES], current)
         self.preview_receipts.pop(key, None)
         self.request_results.pop(key, None)
@@ -797,6 +802,8 @@ async def _deliver_presentation(ctx, plugin, owner):
                 await ctx.reply(MessageChain([Image(base64=image)]))
             except Exception:
                 failed_images.add(ref)  # Unknown media delivery; never resend.
+        else:
+            failed_images.add(ref)
     if failed_images and store:
         plan = {**plan, **store.render(owner, ctx.query_id, plan['arrangement'], failed_images=failed_images)}
         pages = plan['pages']
@@ -809,7 +816,7 @@ async def _deliver_presentation(ctx, plugin, owner):
     except Exception:
         await _finish_card(ctx, plugin, owner, text_card('发送状态待确认', '部分结果发送状态暂未确认，请重新查询；不会自动重复发送。')[0])
         return
-    protected = await _finish_card(ctx, plugin, owner, pages[-1])
+    protected = await _finish_card(ctx, plugin, owner, pages[-1] if pages else '')
     if not protected and plugin is not None:
         if guard is not None:
             selected = store.asset(owner, ctx.query_id, plan['seat_selection']).selection

@@ -314,7 +314,7 @@ def seat_payload():
                 {'no': '002', 'point_x': 0.20, 'point_y': 77.50, 'width': 1.875, 'height': 3.65, 'status': '1', 'status_name': '空闲'}]}
 
 
-def test_natural_seat_query_keeps_hd_map_and_the_existing_selection_card(harness, monkeypatch):
+def test_seat_queries_send_only_the_hd_map_and_keep_selection_available(harness, monkeypatch):
     from langbot_plugin.api.entities.builtin.platform.message import Image
     async def run():
         h = harness
@@ -332,17 +332,20 @@ def test_natural_seat_query_keeps_hd_map_and_the_existing_selection_card(harness
         import base64, io
         from PIL import Image as PILImage
         assert PILImage.open(io.BytesIO(base64.b64decode(images[0].base64))).size == (4096, 2560)
-        text = ctx.event.reply[0]['text']
-        assert text.startswith('# 河大助手 · 选择座位') and '已预约 1 座' in text and '08:00–23:00' in text
-        assert 'HENU_ACTIONS_V1' not in text
+        assert ctx.event.reply == []
+        assert len(ctx.reply.call_args_list) == 1
         from henu_plugin import library_seat_map as maps
+        unavailable = h.context(3, '999')
+        assert await maps.handle_library_text(h.plugin, unavailable, '999')
+        assert '暂不可选' in unavailable.reply.call_args.args[0].root[0].text
         direct_result = {'success': True, 'seats': ['002'], 'reserved_count': 1, 'image': images[0].base64}
         monkeypatch.setattr(maps, 'query_seats', AsyncMock(return_value=direct_result))
         state = {'area': {'area_id': '30', 'location': '701 七层南自习室', 'campus': '金明校区'}, 'expires': 10**12}
         maps.states(h.plugin)[('bot', 'person', 'alice', 'alice')] = state
         menu = h.context(2)
         await maps.show_map(h.plugin, menu, state, ('2026-10-21', '08:00', '23:00'))
-        assert menu.reply.call_args.args[0].root[0].text == text
+        assert len(menu.reply.call_args_list) == 1
+        assert isinstance(menu.reply.call_args.args[0].root[0], Image)
     asyncio.run(run())
 
 
@@ -370,6 +373,47 @@ def test_ordinary_image_completion_cannot_overwrite_committed_receipt(harness, m
         await read
         ctx = h.context(1); await h.listener.present(ctx)
         assert '不要重复提交' in ctx.event.reply[0]['text']
+    asyncio.run(run())
+
+
+def test_single_time_seat_image_replaces_old_paging_without_listing_seats(harness):
+    async def run():
+        h = harness
+        h.payloads['schedule week'] = week_payload()
+        schedule = await h.tool.call({'command': 'schedule week'}, h.session, 1)
+        await h.presenter.call({'cards': [{'ref': schedule['display_ref']}]}, h.session, 1)
+        await h.listener.present(h.context(1))
+        command = 'library seats --area-id 30 --date 2026-10-21 --time 08:00'
+        h.payloads[command] = {**seat_payload(), 'time_window': '08:00',
+                               'seats': [{'no': str(i).zfill(3), 'status': '1'} for i in range(101)]}
+        result = await h.tool.call({'command': command}, h.session, 2)
+        await h.presenter.call({'cards': [{'ref': result['display_ref']}]}, h.session, 2)
+        ctx = h.context(2)
+        await h.listener.present(ctx)
+        assert len(ctx.reply.call_args_list) == 1 and ctx.event.reply == []
+        paging = h.context(3, '卡片第1页')
+        assert await h.listener.paging(paging)
+        text = paging.reply.call_args.args[0].root[0].text
+        assert '卡片已过期' in text and '数据结构' not in text and '空闲座位' not in text
+    asyncio.run(run())
+
+
+def test_seat_image_keeps_other_requested_results_and_notes(harness):
+    async def run():
+        h = harness
+        command = 'library seats --area-id 30 --date 2026-10-21 --time 08:00 --end-time 23:00'
+        h.payloads[command] = seat_payload()
+        h.payloads['schedule week'] = week_payload()
+        seat = await h.tool.call({'command': command}, h.session, 1)
+        schedule = await h.tool.call({'command': 'schedule week'}, h.session, 1)
+        await h.presenter.call({'cards': [{'ref': seat['display_ref']}, {'ref': schedule['display_ref']}],
+                                'note': '这是你同时查询的课表。'}, h.session, 1)
+        ctx = h.context(1)
+        await h.listener.present(ctx)
+        text = ctx.event.reply[0]['text']
+        assert len(ctx.reply.call_args_list) == 1
+        assert '数据结构' in text and '这是你同时查询的课表' in text
+        assert '空闲座位' not in text and '选择座位' not in text
     asyncio.run(run())
 
 

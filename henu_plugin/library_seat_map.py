@@ -305,7 +305,6 @@ async def show_map(plugin, ctx, state, window):
     area = dict(state["area"])
     generation = secrets.token_urlsafe(12)
     state["version"] = generation
-    await say(ctx, "图书馆选座", ["正在查所选时段的座位。"])
     result = await query_seats(plugin, ctx.event.sender_id, area, *window)
     if (
         states(plugin).get(key) is not state
@@ -349,8 +348,9 @@ async def show_map(plugin, ctx, state, window):
         or state["area"] != area
     ):
         return
-    for page in seat_card(area, window, result, image_ok).pages():
-        await ctx.reply(card_chain(page))
+    if not image_ok:
+        for page in seat_card(area, window, result, image_ok).pages():
+            await ctx.reply(card_chain(page))
 
 
 def seat_card(area, window, result, image_ok=False):
