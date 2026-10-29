@@ -95,6 +95,7 @@ def test_compacted_leave_fallback_labels_partial_statistics(harness):
             'cli': {'resolved_tool': 'yunfz_leave_query'}}
         result = await h.tool.call({'command': 'yunfz leave list'}, h.session, 1)
         assert len(result['records']) < 20
+        assert len(result['reply_text'].splitlines()) > 1
         text = '\n'.join(result_card(result).pages())
         assert '摘要已裁剪' in text and '当前摘要展示' in text
         assert '本页返回 8 条' not in text
