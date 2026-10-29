@@ -1,0 +1,461 @@
+{
+  "schema_version": 1,
+  "source": "https://henu.site/",
+  "review_date": "2026-10-23",
+  "records": [
+    {
+      "id": "K02ff313dd1",
+      "evidence_ids": [
+        "K02ff313dd1-E1",
+        "K02ff313dd1-E4"
+      ],
+      "reviewed_sha256": "8e7ff7b6c90ab1236ee7416f0270ab4b2db2c233b1b67904dc0abc713dc4e605",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K0794dea80b",
+      "evidence_ids": [
+        "K0794dea80b-E1",
+        "K0794dea80b-E7"
+      ],
+      "reviewed_sha256": "c1a19c6bd0548fd18bbfad3939c39b1dcde3935a2eb85804b3f12bf8a527741c",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K050a9b4e8c",
+      "evidence_ids": [
+        "K050a9b4e8c-E1",
+        "K050a9b4e8c-E3"
+      ],
+      "reviewed_sha256": "a8c83d489be8a8a92167f85b3868413203ecd87954d1913834fbe90fd9305b0f",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K06fb1065bc",
+      "evidence_ids": [
+        "K06fb1065bc-E1",
+        "K06fb1065bc-E5"
+      ],
+      "reviewed_sha256": "097ac8b7f89ab0dfcf87cf1bafda51a0cf24bfd816e6d96a41ec4e5706ec9678",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K11183ee04b",
+      "evidence_ids": [
+        "K11183ee04b-E1",
+        "K11183ee04b-E2"
+      ],
+      "reviewed_sha256": "0adc830808ff52c25d90754df43868e7835cc04a96b20deba87903e9558c8909",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2579b82867",
+      "evidence_ids": [
+        "K2579b82867-E1",
+        "K2579b82867-E2"
+      ],
+      "reviewed_sha256": "59a7d34230a7e13714b78be195e8b96ca9d0df6369d569e42438e89da8bf7551",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K26720bed6d",
+      "evidence_ids": [
+        "K26720bed6d-E1",
+        "K26720bed6d-E4"
+      ],
+      "reviewed_sha256": "e5834584d25d75fee2795de132d78e61172a7294a1414bdf7e863fffb19c7729",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2b68aa4fd1",
+      "evidence_ids": [
+        "K2b68aa4fd1-E1",
+        "K2b68aa4fd1-E4",
+        "K2b68aa4fd1-E7"
+      ],
+      "reviewed_sha256": "475043487fbb4e721a3cc6f551b7fd166b3f9572e25e6beab5bfed3a7b6a54da",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2f1e0bec9b",
+      "evidence_ids": [
+        "K2f1e0bec9b-E1",
+        "K2f1e0bec9b-E3",
+        "K2f1e0bec9b-E7"
+      ],
+      "reviewed_sha256": "80d1385f093f264e7da42a28a725d7ba41e2616b1043a4e6e3152c9bdc77f50e",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K31b8faa992",
+      "evidence_ids": [
+        "K31b8faa992-E1",
+        "K31b8faa992-E4"
+      ],
+      "reviewed_sha256": "72eb3db0a5d062b50b04cd271aedc6008daaaf1c8df5ee30f47f1a438b2b3036",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K3ed09cb52b",
+      "evidence_ids": [
+        "K3ed09cb52b-E1",
+        "K3ed09cb52b-E2",
+        "K3ed09cb52b-E3",
+        "K3ed09cb52b-E4"
+      ],
+      "reviewed_sha256": "14605df32990b271c02fb6f993b1266ae818ae0a156b6cdc26301f69759b4c28",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K04d6d24135",
+      "evidence_ids": [
+        "K04d6d24135-E1",
+        "K04d6d24135-E2"
+      ],
+      "reviewed_sha256": "d6323c289f0e2a8ac1106ff1e10669999ab6a65acfdbaff7b8f48607d3216706",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K085a741f8a",
+      "evidence_ids": [
+        "K085a741f8a-E1",
+        "K085a741f8a-E2"
+      ],
+      "reviewed_sha256": "02f0971128b53a6229ad19c44277fae5f4f4ab9ca9f91a19ac0b836ab915e323",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K0c27968a91",
+      "evidence_ids": [
+        "K0c27968a91-E1",
+        "K0c27968a91-E4"
+      ],
+      "reviewed_sha256": "9e5f6b7a1f64d3e388db8f55178841ca93f4278ae2b14914a1a36edeaa365fb0",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K1415e5b5ea",
+      "evidence_ids": [
+        "K1415e5b5ea-E1",
+        "K1415e5b5ea-E4"
+      ],
+      "reviewed_sha256": "88711419c384449439a87dccc33d64f3843e0327003547a88090562d2665d631",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K18c8519481",
+      "evidence_ids": [
+        "K18c8519481-E1",
+        "K18c8519481-E2"
+      ],
+      "reviewed_sha256": "a55888b740751a9b16eb8aca494a3a9402729cffaf357705618b13b20bc74569",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2110645b30",
+      "evidence_ids": [
+        "K2110645b30-E1",
+        "K2110645b30-E3"
+      ],
+      "reviewed_sha256": "7ae6ce8a56f0ed8d53db732e840e21a8b4109c05dfff4fc0784f75b37973739b",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K21de6e3a00",
+      "evidence_ids": [
+        "K21de6e3a00-E1",
+        "K21de6e3a00-E2"
+      ],
+      "reviewed_sha256": "3968a15fd023a1cca712ebcb5431426dab8c1eb5a2e8defafc796cf195210b64",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2ed2dc98de",
+      "evidence_ids": [
+        "K2ed2dc98de-E1",
+        "K2ed2dc98de-E2"
+      ],
+      "reviewed_sha256": "c4e5d70dd59a6d8dde905a8524574f673c536cf3a5a8eb5045826857e0e61736",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K2f5a57e863",
+      "evidence_ids": [
+        "K2f5a57e863-E1",
+        "K2f5a57e863-E2"
+      ],
+      "reviewed_sha256": "b6f2cd6308e36c09af2d951c80a2f59196d361993ce09ec88ba49b93c7693142",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K3aeabf4b61",
+      "evidence_ids": [
+        "K3aeabf4b61-E1",
+        "K3aeabf4b61-E2"
+      ],
+      "reviewed_sha256": "1ae1dc7c397f8b9a95e24729c3282f97aedf40a61652745bf52e631ef2c74229",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K40f9a0b171",
+      "evidence_ids": [
+        "K40f9a0b171-E1",
+        "K40f9a0b171-E2"
+      ],
+      "reviewed_sha256": "4e81484b17ea965f3ccb79a1f618bb9ff882ae4c6853ea1b4a0de074171a6b77",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K42a82ea5fa",
+      "evidence_ids": [
+        "K42a82ea5fa-E1",
+        "K42a82ea5fa-E2"
+      ],
+      "reviewed_sha256": "24f5f20b14605cbb13e310a11d7bd3a1bfac6ac4c838a8d0615999294d1502ff",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K49a8ee09f7",
+      "evidence_ids": [
+        "K49a8ee09f7-E1",
+        "K49a8ee09f7-E3"
+      ],
+      "reviewed_sha256": "eb5bc99e6f1699f46bdbc400f92234b7750f617e45fe4ef269522640026b15ae",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K51ebead4a4",
+      "evidence_ids": [
+        "K51ebead4a4-E1",
+        "K51ebead4a4-E2"
+      ],
+      "reviewed_sha256": "61266ab06f960bdbdf5a1a316e66cbff95edabd14d8bd2ced0be83ef2ddb00bd",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K55755e50e5",
+      "evidence_ids": [
+        "K55755e50e5-E1",
+        "K55755e50e5-E2"
+      ],
+      "reviewed_sha256": "33fb22faed0a66e9d81d5791709cb7b67fa28e963fc33069ae2e9a13719d692f",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K62ea9cb6a6",
+      "evidence_ids": [
+        "K62ea9cb6a6-E1",
+        "K62ea9cb6a6-E2"
+      ],
+      "reviewed_sha256": "522a39e469957d4cc10eee7fe03179e9874192f1a410dea0d2fecebbf5805382",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K68ef21659b",
+      "evidence_ids": [
+        "K68ef21659b-E1",
+        "K68ef21659b-E2"
+      ],
+      "reviewed_sha256": "1f4f6d06a0a562ed015674984c5f51c3b34c69b230668f00e9daff940f1fb8d1",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K6a756b71ad",
+      "evidence_ids": [
+        "K6a756b71ad-E1",
+        "K6a756b71ad-E3"
+      ],
+      "reviewed_sha256": "4e41947fe923e87973f60a35cf2fe9a88fe2e887ff0cb51008878d9547e382b7",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K736a8d979a",
+      "evidence_ids": [
+        "K736a8d979a-E1",
+        "K736a8d979a-E2"
+      ],
+      "reviewed_sha256": "0b61e250bfae2acb1f04b19b1c00b0694daa09095ea537bdfdc69b8008bc2afc",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K77108c86ce",
+      "evidence_ids": [
+        "K77108c86ce-E1",
+        "K77108c86ce-E2"
+      ],
+      "reviewed_sha256": "5d12b6825ab16c4ab630db680e5156a37e20983f6349beb596e2eeb1b582f450",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K7ba037fd45",
+      "evidence_ids": [
+        "K7ba037fd45-E1",
+        "K7ba037fd45-E2"
+      ],
+      "reviewed_sha256": "6683ac6163436f5ccd77852362e162ff3f16f877acf078ea74ed4d1f6927909a",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K8aae8b72e6",
+      "evidence_ids": [
+        "K8aae8b72e6-E1",
+        "K8aae8b72e6-E2"
+      ],
+      "reviewed_sha256": "2249bd39dea9cd300fc2772fb6764447af0d1fa9bf541c61b49cf48b0f9a46fc",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K99d0f4d8fd",
+      "evidence_ids": [
+        "K99d0f4d8fd-E1",
+        "K99d0f4d8fd-E2"
+      ],
+      "reviewed_sha256": "137e27ddd088907f2e90c3c019a02605b5dd2e28f768195ae901ac796f4a10c4",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "K9c94dd3fdf",
+      "evidence_ids": [
+        "K9c94dd3fdf-E1",
+        "K9c94dd3fdf-E2"
+      ],
+      "reviewed_sha256": "7b90a1da7423802f1c931902b8799b7183fb9fef9fce44996571d4af200c73c8",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kaab72884b0",
+      "evidence_ids": [
+        "Kaab72884b0-E1",
+        "Kaab72884b0-E2"
+      ],
+      "reviewed_sha256": "7b88a2c14543b0bb7bb2a16f0a295df3459a0c14bb838309507387977e99cc93",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kb53e917821",
+      "evidence_ids": [
+        "Kb53e917821-E1",
+        "Kb53e917821-E2"
+      ],
+      "reviewed_sha256": "e96779a92d0c332f3034f187f7ce6d001facfb3d1643dc817860f70445087479",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kbd55ddd644",
+      "evidence_ids": [
+        "Kbd55ddd644-E1",
+        "Kbd55ddd644-E2"
+      ],
+      "reviewed_sha256": "47bca7d39dd785d8a3c2bb9e879493c01f1e71f6bf591deca13da7394ea63bfb",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kc3c63b87ce",
+      "evidence_ids": [
+        "Kc3c63b87ce-E1",
+        "Kc3c63b87ce-E2"
+      ],
+      "reviewed_sha256": "0b041177f082a8f471c93b9615eb022d7d4b15a8effc0fdf80b93991f12446c2",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kc5b77c3bbe",
+      "evidence_ids": [
+        "Kc5b77c3bbe-E1",
+        "Kc5b77c3bbe-E2"
+      ],
+      "reviewed_sha256": "454e6b034be6faeb8237f5905d9e4c58627fd9e7bbb4bcc65cb4f483e682abf0",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kd4c33b94e9",
+      "evidence_ids": [
+        "Kd4c33b94e9-E1",
+        "Kd4c33b94e9-E2"
+      ],
+      "reviewed_sha256": "801944d5dc214db1722844d58a3a6e34ab0ce4989bbd46bb9a9757a1b6eefe5f",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kd7225f6d86",
+      "evidence_ids": [
+        "Kd7225f6d86-E1",
+        "Kd7225f6d86-E2"
+      ],
+      "reviewed_sha256": "e677049625713ec179a8b814ad5c5485792c29829b1730e20726c8110de82a0a",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kdb9f83e8c2",
+      "evidence_ids": [
+        "Kdb9f83e8c2-E1",
+        "Kdb9f83e8c2-E2"
+      ],
+      "reviewed_sha256": "68768f7e2996bd9b9e390ba96076fb91dd17833df8814ccf1b66994b13b6807b",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kdfcb0f38d2",
+      "evidence_ids": [
+        "Kdfcb0f38d2-E1",
+        "Kdfcb0f38d2-E2"
+      ],
+      "reviewed_sha256": "c00213e8e76aee26f320282990b989ca8aa598ae5f96b86d9af956c8e30a1fa8",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Ke0029b207e",
+      "evidence_ids": [
+        "Ke0029b207e-E1",
+        "Ke0029b207e-E2"
+      ],
+      "reviewed_sha256": "f2846835ac237449eb355932d0742d6aa9ec1a65e0e51764dbceba2212b50163",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Ke1451f921c",
+      "evidence_ids": [
+        "Ke1451f921c-E1",
+        "Ke1451f921c-E2"
+      ],
+      "reviewed_sha256": "19c5063e52004c5fedc2ce2a5e41201b0d1e7b2d30f3c5dd50a2b0a8fae45237",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Ke24af9b179",
+      "evidence_ids": [
+        "Ke24af9b179-E1",
+        "Ke24af9b179-E2"
+      ],
+      "reviewed_sha256": "cd2ee8b4963ade012a4c8b850b31409cd972a86f577044b004028c5eb76fb880",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Ke63ea5da5f",
+      "evidence_ids": [
+        "Ke63ea5da5f-E1",
+        "Ke63ea5da5f-E2"
+      ],
+      "reviewed_sha256": "b51ae35c094b7bd8cad25a2593e5f9b32b5a43d10bc5911c7dd2982395eac0b1",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Ke647178dd4",
+      "evidence_ids": [
+        "Ke647178dd4-E1",
+        "Ke647178dd4-E2"
+      ],
+      "reviewed_sha256": "154d8ac90a4599fce91837b4190a10f364ec0e718542794f044346bfff5b50ac",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    },
+    {
+      "id": "Kfa2a340d66",
+      "evidence_ids": [
+        "Kfa2a340d66-E1",
+        "Kfa2a340d66-E2"
+      ],
+      "reviewed_sha256": "6dd5043c52b706dbd21036e77b2a76d355d46cca81a4695bfaaf676beadb383b",
+      "review_note": "问题与回复对应；校园办事或生活经验；只作历史参考"
+    }
+  ]
+}
