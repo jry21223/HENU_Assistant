@@ -52,6 +52,8 @@ class HenuCli(BaseHenuTool):
 
         clean_command, inline_token = split_confirm_token(raw_command)
         spec = inspect_cli_command(clean_command)
+        if spec.resolved_tool == "grade_query" and str(getattr(session.launcher_type, "value", session.launcher_type)) != "person":
+            return {"success": False, "error_code": "private_reply_required", "msg": "个人成绩只能在私聊查询。", "reply_text": "个人成绩只能在私聊查询。"}
 
         # Account passwords and calibration cookies are handled directly by the
         # event listener before the model is called. Fail closed if a provider

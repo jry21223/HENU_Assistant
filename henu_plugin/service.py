@@ -154,6 +154,7 @@ class HenuPluginService:
             "smart_course_selection": self._smart_course_selection,
             "smart_course_select": self._smart_course_select,
             "schedule_query": self._schedule_query,
+            "grade_query": self._grade_query,
             "course_selection_query": self._course_selection_query,
             "course_selection_plan": self._course_selection_plan,
             "course_selection_submit": self._course_selection_submit,
@@ -603,6 +604,18 @@ class HenuPluginService:
 
     def _smart_course_select(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._smart_course_selection(params)
+
+    def _grade_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        from henu_plugin.grades import query_grades
+        identity = getattr(_CURRENT_IDENTITY, "value", None)
+        if identity is None or identity.launcher_type != "person":
+            return {"success": False, "error_code": "private_reply_required", "msg": "个人成绩只能在私聊查询。"}
+        profile = server_impl.load_json(server_impl.PROFILE_FILE)
+        student_id = str(profile.get("student_id") or "").strip()
+        if not student_id:
+            return {"success": False, "error_code": "grade_account_required", "msg": "请先在私聊绑定校园账号。"}
+        client = server_impl.HenuXkClient(student_id, "", saved_cookies=server_impl._load_xk_cookies())
+        return query_grades(client, student_id, view=params["view"], page=params.get("page", 1))
 
     def _sync_schedule(self, params: dict[str, Any]) -> dict[str, Any]:
         result = mcp_server.sync_schedule(

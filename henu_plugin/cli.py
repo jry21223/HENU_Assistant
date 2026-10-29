@@ -128,6 +128,8 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_account(raw, argv)
     if head == "schedule":
         return _parse_schedule(raw, argv)
+    if head == "grade":
+        return _parse_grade(raw, argv)
     if head in {"course", "courses", "xk"}:
         return _parse_course(raw, argv)
     if head == "library":
@@ -164,6 +166,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "preferences get",
                 "account set --student-id ... --password ...",
                 "schedule now",
+                "grade list",
+                "grade gpa",
                 "course status",
                 "course plan --candidates-json '<json>'",
                 "schedule day --date 2026-03-30",
@@ -246,6 +250,16 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "默认 `verify_login=true`、`calibrate_period_time=true`。",
                 "可用 `--no-verify-login`、`--no-calibrate-period-time` 关闭默认行为。",
             ],
+        }
+
+    if normalized == "grade":
+        return {
+            "topic": "grade", "summary": "仅私聊查询当前绑定账号的入学以来、有效、主修成绩与绩点。",
+            "commands": ["grade list", "grade list --page 2", "grade gpa"],
+            "tips": ["每页最多8门，所有学期均纳入查询；grade gpa 优先学校全范围汇总。",
+                     "缺失字段保留未知，不按挂科或零绩点处理；明细加权参考不等于学校最终汇总。",
+                     "需要已验证的校园登录会话；会话失效时只提示重新验证，不自动提交密码或修改教务数据。"],
+            "examples": ["grade list", "grade gpa"],
         }
 
     if normalized == "schedule":
@@ -598,6 +612,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
             return ["account status", "help account set"]
         if topic == "schedule":
             return ["schedule now", "schedule sync"]
+        if topic == "grade":
+            return ["grade list", "grade gpa"]
         if topic == "course":
             return [
                 "course status",
@@ -626,6 +642,11 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
 
     resolved_tool = spec.resolved_tool or ""
     success = bool(result.get("success")) if isinstance(result, dict) else False
+    if resolved_tool == "grade_query":
+        commands = ["grade list", "grade gpa"]
+        if isinstance(result, dict) and result.get("has_next"):
+            commands.insert(0, f"grade list --page {result['page'] + 1}")
+        return commands if success else ["account status", "help grade"]
 
     if resolved_tool == "setup_account":
         return ["account status", "schedule sync", "schedule now"]
@@ -810,6 +831,19 @@ def _parse_preferences(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _error_spec(raw, "preferences 仅支持 get/set/clear", help_topic="preferences")
     return CliCommandSpec(raw=raw, argv=argv, resolved_tool="preferences", params=params,
                           action=f"preferences {action}", should_preload_runtime_context=False)
+
+
+def _parse_grade(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
+    if len(argv) < 2 or argv[1] not in {"list", "gpa"}:
+        return _error_spec(raw, "使用 grade list 或 grade gpa。", help_topic="grade")
+    options, extra, error = _parse_options(argv[2:], reject_duplicates=True)
+    if error or extra or set(options) - ({"page"} if argv[1] == "list" else set()):
+        return _error_spec(raw, error or "成绩命令包含不支持的参数。", help_topic="grade")
+    page = options.get("page", "1")
+    if isinstance(page, bool) or not re.fullmatch(r"[1-9]\d{0,3}", str(page)):
+        return _error_spec(raw, "--page 需要 1 到 9999 的整数。", help_topic="grade")
+    return CliCommandSpec(raw, argv, "grade_query", {"view": argv[1], "page": int(page)},
+                          f"grade {argv[1]}", False)
 
 
 def _parse_schedule(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
