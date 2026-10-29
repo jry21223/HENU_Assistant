@@ -305,6 +305,8 @@ async def show_map(plugin, ctx, state, window):
     area = dict(state["area"])
     generation = secrets.token_urlsafe(12)
     state["version"] = generation
+    from henu_plugin.qq_cards import cache
+    previous_pages = cache(plugin).entries.get(key)
     result = await query_seats(plugin, ctx.event.sender_id, area, *window)
     if (
         states(plugin).get(key) is not state
@@ -349,8 +351,8 @@ async def show_map(plugin, ctx, state, window):
     ):
         return
     if image_ok:
-        from henu_plugin.qq_cards import cache
-        cache(plugin).put(key, [])
+        if cache(plugin).entries.get(key) is previous_pages:
+            cache(plugin).put(key, [])
     else:
         for page in seat_card(area, window, result, image_ok).pages():
             await ctx.reply(card_chain(page))

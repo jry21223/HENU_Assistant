@@ -598,10 +598,6 @@ class CardCache:
 
     def put(self, key: tuple, pages: list[str], *, on_read: Any = None, current: int = 0) -> None:
         if not pages:
-            # Image-only reads must not erase a confirmation preview or a
-            # committed receipt that was published while the image was sent.
-            if key in self.preview_receipts or key in self.request_results:
-                return
             self.entries.pop(key, None)
             self.preview_receipts.pop(key, None)
             self.request_results.pop(key, None)
@@ -793,6 +789,7 @@ async def _deliver_presentation(ctx, plugin, owner):
         await _finish_card(ctx, plugin, owner, text_card('查询结果已过期', '请重新查询，避免沿用旧的课程或余座。')[0])
         return
     pages = plan['pages']
+    previous_pages = cache(plugin).entries.get(owner) if plugin is not None else None
     store = presentations(plugin) if plugin is not None else None
     guard = store.guard(owner, ctx.query_id) if store and plan.get('seat_selection') and owner[1] == 'person' else None
     if guard is not None and not store.is_latest(owner, ctx.query_id):
@@ -829,7 +826,10 @@ async def _deliver_presentation(ctx, plugin, owner):
                 set_card_reply(ctx.event, page)
                 cache(plugin).put(owner, [page])
                 return
-        cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1)
+        # A newer request may publish a confirmation while the image is in
+        # flight. Only clear the old paging entry this read actually saw.
+        if pages or plan.get('more') or cache(plugin).entries.get(owner) is previous_pages:
+            cache(plugin).put(owner, pages + plan.get('more', []), current=len(pages)-1)
 
 
 async def present_card(ctx, *, plugin: Any = None):
