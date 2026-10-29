@@ -85,6 +85,22 @@ def test_group_leave_query_is_rejected_before_reading_personal_storage(harness):
     asyncio.run(run())
 
 
+def test_compacted_leave_fallback_labels_partial_statistics(harness):
+    from henu_plugin.qq_cards import result_card
+    async def run():
+        h = harness
+        h.payloads['yunfz leave list'] = {
+            'success': True, 'page': 1, 'total': 50,
+            'records': [{'status_name': '已通过'} for _ in range(20)],
+            'cli': {'resolved_tool': 'yunfz_leave_query'}}
+        result = await h.tool.call({'command': 'yunfz leave list'}, h.session, 1)
+        assert len(result['records']) < 20
+        text = '\n'.join(result_card(result).pages())
+        assert '摘要已裁剪' in text and '当前摘要展示' in text
+        assert '本页返回 8 条' not in text
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('success,msg,expected', [
     (True, '查询成功', '本次查询未返回请假记录'),
     (False, '校园登录已失效，请重新验证。', '校园登录已失效'),

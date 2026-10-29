@@ -8,9 +8,15 @@ def leave_summary_lines(result: dict) -> list[str]:
         return ['请假记录格式无法识别，未将其当成没有记录。']
     page = result.get('page', 1)
     page = page if type(page) is int and page > 0 else 1
-    omitted = result.get('records_truncated', 0)
-    omitted = omitted if type(omitted) is int and omitted >= 0 else 0
-    lines = [f'第 {page} 页 · 本页返回 {len(records) + omitted} 条请假记录。']
+    marker = result.get('records_truncated', 0)
+    omitted = marker if type(marker) is int and marker >= 0 else 0
+    if marker is True:
+        # Safe CLI compaction uses a boolean. Earlier normalization may also
+        # have trimmed rows, so records_total need not be the original page.
+        lines = [f'第 {page} 页 · 当前摘要展示 {len(records)} 条请假记录。',
+                 '摘要已裁剪，未展示记录未纳入以下统计。']
+    else:
+        lines = [f'第 {page} 页 · 本页返回 {len(records) + omitted} 条请假记录。']
     if omitted:
         lines.append(f'当前摘要保留 {len(records)} 条，另有 {omitted} 条未纳入以下统计。')
     total = result.get('total')
