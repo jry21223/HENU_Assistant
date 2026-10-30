@@ -79,6 +79,7 @@ class LibrarySeatAlerts:
             return False
         if getattr(ctx, "is_prevent_postorder", False):
             return True
+        started = time.monotonic()
         now = now or datetime.now(ZONE)
         ctx.prevent_default()
         ctx.prevent_postorder()
@@ -129,7 +130,7 @@ class LibrarySeatAlerts:
                             await self.write(data)
                     message = self.describe(plan)
                 else:
-                    plan = await self.create(bot, sender, text, source, now)
+                    plan = await self.create(bot, sender, text, source, now, started)
                     message = self.describe(plan)
         except ValueError as exc:
             message = str(exc)
@@ -156,7 +157,7 @@ class LibrarySeatAlerts:
             raise ValueError("消息来源无法核验或已过期，请重新发送。")
         return str(sources[0].id)
 
-    async def create(self, bot, sender, text, source, now):
+    async def create(self, bot, sender, text, source, now, started):
         words = shlex.split(text)
         if not 5 <= len(words) <= 7 or words[0] != "设置空位提醒":
             raise ValueError(
@@ -213,10 +214,9 @@ class LibrarySeatAlerts:
             seat_no=seat,
             interval_minutes=interval,
         )
-        started = time.monotonic()
         try:
             async with saved_session(self.plugin, sender) as snapshot:
-                result = await self.query(snapshot, plan, resolve=True)
+                result = await self.query(snapshot, plan, now, started, resolve=True)
                 checked_at = now + timedelta(seconds=time.monotonic() - started)
                 if self.expired(plan, checked_at):
                     raise ValueError("已到使用开始时间，请重新选择未来的使用时段。")
@@ -255,8 +255,17 @@ class LibrarySeatAlerts:
                     data = await self.read()
                     if data.get(key, {}) != preparing:
                         raise ValueError("提醒设置已变化，请查询状态后再设置。")
+                    if self.expired(
+                        plan, now + timedelta(seconds=time.monotonic() - started)
+                    ):
+                        raise ValueError("已到使用开始时间，请重新选择未来的使用时段。")
                     data[key] = plan
                     await self.write(data)
+                    if self.expired(
+                        plan, now + timedelta(seconds=time.monotonic() - started)
+                    ):
+                        plan["state"] = "expired"
+                        await self.write(data)
         except BaseException:
             async with self.lock:
                 data = await self.read()
@@ -351,11 +360,20 @@ class LibrarySeatAlerts:
         if not task.cancelled() and task.exception() is not None:
             logger.warning("Library alert worker failed; next check remains scheduled")
 
-    async def query(self, snapshot, plan, *, resolve=False):
+    async def query(self, snapshot, plan, now, started, *, resolve=False):
+        def expired():
+            return self.expired(
+                plan, now + timedelta(seconds=time.monotonic() - started)
+            )
+
         async with self.query_slots:
+            if expired():
+                raise AlertQueryError("expired", "已到使用开始时间，提醒已停止。")
             worker = create_background_task(
                 self.plugin,
-                asyncio.to_thread(query_snapshot, snapshot, plan, resolve=resolve),
+                asyncio.to_thread(
+                    query_snapshot, snapshot, plan, resolve=resolve, expired=expired
+                ),
             )
             try:
                 return await asyncio.shield(worker)
@@ -377,7 +395,7 @@ class LibrarySeatAlerts:
                     await self.record_result(key, plan, now, started)
                     return
                 try:
-                    result = await self.query(snapshot, plan)
+                    result = await self.query(snapshot, plan, now, started)
                 except AlertQueryError:
                     raise
                 except Exception:

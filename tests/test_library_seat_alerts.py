@@ -161,6 +161,79 @@ class School:
         monkeypatch.setattr(requests.Session, "request", request)
 
 
+def test_expiry_while_waiting_for_query_capacity_does_not_contact_school(monkeypatch):
+    from henu_plugin import library_seat_alerts as lib
+
+    elapsed = [0]
+    monkeypatch.setattr(lib, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    school = School()
+    school.install(monkeypatch)
+
+    async def run():
+        plugin = Plugin()
+        alerts = lib.LibrarySeatAlerts(plugin)
+        await alerts.handle(context(), COMMAND, now=NOW)
+        school.calls.clear()
+        for _ in range(4):
+            await alerts.query_slots.acquire()
+        scan = asyncio.create_task(alerts.tick(NOW.replace(hour=13, minute=59)))
+        while not alerts.workers:
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        elapsed[0] = 120
+        for _ in range(4):
+            alerts.query_slots.release()
+        await scan
+        assert not school.calls and not plugin.messages
+        assert (await alerts.status("bot", "alice"))["state"] == "expired"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("delay_at", ["bot_route", "preparing"])
+def test_creation_accounts_for_time_spent_before_school_queries(monkeypatch, delay_at):
+    from henu_plugin import library_seat_alerts as lib
+
+    elapsed = [0]
+    monkeypatch.setattr(lib, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    school = School()
+    school.install(monkeypatch)
+
+    class SlowPreparing(Plugin):
+        async def set_plugin_storage(self, key, value):
+            if (
+                delay_at == "preparing"
+                and key == lib.KEY
+                and any(
+                    row.get("state") == "preparing"
+                    for row in json.loads(value).values()
+                )
+            ):
+                elapsed[0] = 120
+            await super().set_plugin_storage(key, value)
+
+    async def run():
+        plugin = SlowPreparing()
+        alerts = lib.LibrarySeatAlerts(plugin)
+        now = NOW.replace(hour=13, minute=59)
+        ctx = context()
+        ctx.event.message_chain = MessageChain(
+            [Source(id="late-setting", time=now), Plain(text=COMMAND)]
+        )
+
+        async def route():
+            if delay_at == "bot_route":
+                elapsed[0] = 120
+            return "bot"
+
+        ctx.get_bot_uuid = route
+        await alerts.handle(ctx, COMMAND, now=now)
+        assert not school.calls
+        assert (await alerts.status("bot", "alice"))["state"] != "active"
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("delay_at", ["claim", "registry", "session"])
 def test_slow_storage_cannot_query_or_notify_after_expiry(monkeypatch, delay_at):
     from henu_plugin import library_seat_alerts as lib

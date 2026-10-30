@@ -126,7 +126,7 @@ def _resolve_area(rows, requested):
     return matches[0]
 
 
-def query_snapshot(snapshot, request, *, resolve=False):
+def query_snapshot(snapshot, request, *, resolve=False, expired=lambda: False):
     """Only these three read endpoints are allowed; no login or reservation I/O."""
     import requests
     from urllib3.util import Timeout
@@ -137,6 +137,9 @@ def query_snapshot(snapshot, request, *, resolve=False):
     class BoundedSession(requests.Session):
         def request(self, method, url, **kwargs):
             from urllib.parse import urlsplit
+
+            if expired():
+                raise AlertQueryError("expired", "已到使用开始时间，提醒已停止。")
 
             parsed = urlsplit(url)
             if (
