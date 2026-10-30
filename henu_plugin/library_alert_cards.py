@@ -59,7 +59,7 @@ def _where_when(plan):
         + escape(plan.get("end"), 8)
     )
     seat = plan.get("seat_no")
-    scope = "监控：" + (escape(seat, 16) + "号座位" if seat else "整个区域")
+    scope = "监控：" + (escape(seat, 64) + "号座位" if seat else "整个区域")
     return [place, "", window, scope]
 
 
@@ -128,7 +128,7 @@ def new_seats_card(plan, seats):
     lines = _where_when(plan) + [
         "",
         "**新空位**",
-        escape("、".join(seats[:SEAT_PREVIEW]), 160),
+        "、".join(escape(seat, 64) for seat in seats[:SEAT_PREVIEW]),
     ]
     if len(seats) > SEAT_PREVIEW:
         lines.append(f"本条列出{SEAT_PREVIEW}座，共新增{len(seats)}座。")

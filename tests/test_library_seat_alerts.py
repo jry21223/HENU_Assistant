@@ -107,6 +107,38 @@ def test_concurrent_users_keep_their_own_saved_sessions_and_receivers(monkeypatc
     asyncio.run(run())
 
 
+def test_valid_seat_identifiers_survive_scope_and_six_seat_notification(monkeypatch):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+    from ops.qq_cards_transport import plain_card
+
+    labels = [str(index) + "_" * 15 for index in range(1, 7)]
+    school = School()
+    school.rows = [
+        {"no": seat, "status": "2", "status_name": "已预约"} for seat in labels
+    ]
+    school.install(monkeypatch)
+
+    async def run():
+        plugin = Plugin()
+        alerts = LibrarySeatAlerts(plugin)
+        request = context(COMMAND + " " + labels[0])
+        await alerts.handle(request, COMMAND + " " + labels[0], now=NOW)
+        page = request.reply.call_args.args[0].root[0].text
+        assert labels[0] in plain_card(page)
+        await alerts.handle(
+            context("取消空位提醒", source="cancel-long-seat"), "取消空位提醒", now=NOW
+        )
+        await alerts.handle(context(source="long-seat-area"), COMMAND, now=NOW)
+        school.rows = [
+            {"no": seat, "status": "1", "status_name": "空闲"} for seat in labels
+        ]
+        await alerts.tick(NOW + timedelta(minutes=10, seconds=1))
+        delivered = plain_card(plugin.messages[0][3].root[0].text)
+        assert all(label in delivered for label in labels)
+
+    asyncio.run(run())
+
+
 class School:
     def __init__(self):
         self.rows = [{"no": "001", "status": "2", "status_name": "已预约"}]
