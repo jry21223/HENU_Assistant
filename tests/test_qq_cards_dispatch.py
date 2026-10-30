@@ -150,6 +150,46 @@ def test_sdk_food_primary_delivers_navigation_before_normal_stage(tmp_path, monk
     asyncio.run(run())
 
 
+@pytest.mark.parametrize('attached', [False, True])
+def test_sdk_food_primary_routes_alert_help_without_hiding_attachments(tmp_path, monkeypatch, attached):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+    monkeypatch.chdir(tmp_path)
+    receive = AsyncMock()
+    monkeypatch.setattr(HenuFood, 'receive_message', receive)
+
+    async def run():
+        async def initialize_plugin(_):
+            pass
+        rpc = MemoryRPC(None, initialize_plugin)
+        rpc.variables = {}
+        rpc.sent = []
+        plugin = SimpleNamespace(plugin_runtime_handler=rpc)
+        plugin.library_seat_alerts = LibrarySeatAlerts(plugin)
+        food = FoodCaptureListener()
+        food.plugin = plugin
+        await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[
+            SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        parts = [pm.Plain(text='空位提醒帮助')]
+        if attached:
+            parts.append(pm.Image(url='https://synthetic.invalid/image.png'))
+        chain = pm.MessageChain(parts)
+        incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+        event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice',
+            message_event=incoming, message_chain=chain)
+        response = await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {
+            'query_id': 0, 'eid': 10, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+        if attached:
+            assert not rpc.sent
+            receive.assert_awaited_once()
+        else:
+            assert '设置空位提醒' in str(rpc.sent) and '10分钟' in str(rpc.sent)
+            assert response.data['event_context']['is_prevent_default']
+            receive.assert_not_awaited()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('text', ['开启课前提醒', '关闭课前提醒', '课前提醒', '测试课前提醒'])
 @pytest.mark.parametrize('attached', [False, True])
 def test_sdk_primary_listener_routes_reminder_controls(tmp_path, monkeypatch, text, attached):

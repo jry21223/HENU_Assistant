@@ -27,7 +27,7 @@ def test_shortcut_icons_keep_commands_and_provider_name_limits():
         for command in panel['panel']['items']:
             assert command['name'] in {'我的状态', '今天课表', '明天课表', '下一节课', '同步课表',
                                        '找自习室', '空教室查询', '图书馆座位', '绑定账号',
-                                       '绑定Kit', '使用帮助', '课表推送', '河宝社区', '自动预约帮助'}
+                                       '绑定Kit', '使用帮助', '课表推送', '河宝社区', '自动预约帮助', '空位提醒帮助'}
             assert len(command['desc'].encode('utf-16-le')) // 2 <= 30
 
 

@@ -16,6 +16,7 @@ from langbot_plugin.entities.io.actions.enums import RuntimeToPluginAction
 
 from henu_plugin.schedule_reminders import ScheduleReminders
 from henu_plugin.library_automation import LibraryAutomation
+from henu_plugin.library_seat_alerts import LibrarySeatAlerts
 from henu_plugin.yuketang_login import YuketangLoginCoordinator
 
 invocation = pytest.importorskip("langbot_plugin.api.proxies.invocation")
@@ -34,7 +35,7 @@ def binding():
                                runtime_revision=1, artifact_digest="a" * 64)
 
 
-@pytest.mark.parametrize("feature", [ScheduleReminders, LibraryAutomation])
+@pytest.mark.parametrize("feature", [ScheduleReminders, LibraryAutomation, LibrarySeatAlerts])
 def test_background_registry_remains_accessible_after_initialize_returns(feature):
     async def run():
         scope = binding()
@@ -79,7 +80,7 @@ def test_background_registry_remains_accessible_after_initialize_returns(feature
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("feature", [ScheduleReminders, LibraryAutomation])
+@pytest.mark.parametrize("feature", [ScheduleReminders, LibraryAutomation, LibrarySeatAlerts])
 def test_shared_installation_cannot_start_process_owned_background_features(feature):
     async def run():
         rpc = SimpleNamespace(bound_action_context=None, call_action=AsyncMock())
