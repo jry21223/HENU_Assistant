@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -113,6 +114,9 @@ class School:
         self.error = None
         self.slot_type = "3"
         self.code = 0
+        self.target_date = "2026-10-30"
+        self.start, self.end = "14:00", "16:00"
+        self.fixed_slot = False
 
     def request(self, session, method, url, **kwargs):
         path = urlsplit(url).path
@@ -133,17 +137,22 @@ class School:
                     "reserveType": self.slot_type,
                     "list": [
                         {
-                            "day": "2026-10-30",
+                            "day": self.target_date,
                             "def_start_time": "08:00",
                             "def_end_time": "23:00",
                         }
                     ],
                 },
             }
+            if self.fixed_slot:
+                data["date"]["reserveType"] = "1"
+                data["date"]["list"][0]["times"] = [
+                    {"id": "all-day", "start": "08:00", "end": "23:00", "status": "1"}
+                ]
         elif path == "/v4/Space/seat":
-            assert kwargs["json"]["day"] == "2026-10-30"
-            assert kwargs["json"]["start_time"] == "14:00"
-            assert kwargs["json"]["end_time"] == "16:00"
+            assert kwargs["json"]["day"] == self.target_date
+            assert kwargs["json"]["start_time"] == self.start
+            assert kwargs["json"]["end_time"] == self.end
             data = {"list": self.rows}
         else:
             raise AssertionError("Login or school write forbidden: " + path)
@@ -159,6 +168,46 @@ class School:
             return self.request(session, method, url, **kwargs)
 
         monkeypatch.setattr(requests.Session, "request", request)
+
+
+def test_help_examples_can_be_copied_to_set_both_scopes_for_a_school_full_slot(
+    monkeypatch,
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+
+    school = School()
+    school.target_date = "2026-10-31"
+    school.start, school.end, school.fixed_slot = "08:00", "23:00", True
+    school.install(monkeypatch)
+
+    async def run():
+        alerts = LibrarySeatAlerts(Plugin())
+        help_ctx = context("空位提醒帮助")
+        await alerts.handle(help_ctx, "空位提醒帮助", now=NOW)
+        page = help_ctx.reply.call_args.args[0].root[0].text
+        commands = re.findall(
+            r'(?m)^(?:例如：)?(设置空位提醒 (?:今天|明天)[^\n]*(?:\n"[^"\n]+"[^\n]*)?)$',
+            page,
+        )
+        assert commands, "Help must provide a copyable setting, not just grammar"
+        for index, command in enumerate(commands):
+            await alerts.handle(
+                context(command, source=f"copied-{index}"), command, now=NOW
+            )
+            plan = await alerts.status("bot", "alice")
+            assert plan["state"] == "active"
+            assert (plan["start"], plan["end"]) == ("08:00", "23:00")
+            assert bool(plan["seat_no"]) == bool(index)
+            await alerts.handle(
+                context("取消空位提醒", source=f"cancel-copy-{index}"),
+                "取消空位提醒",
+                now=NOW,
+            )
+        assert len(commands) == 2, (
+            "Region and single-seat settings need separate examples"
+        )
+
+    asyncio.run(run())
 
 
 def test_expiry_while_waiting_for_query_capacity_does_not_contact_school(monkeypatch):
