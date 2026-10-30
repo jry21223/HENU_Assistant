@@ -106,6 +106,8 @@ def status_card(plan, *, offer_booking=False):
     }.get(state, "状态待核对")
     if state == "active":
         status += f" · 每{plan['interval_minutes']}分钟检查"
+    elif state == "booking" and not plan.get("booking_submitting"):
+        status = "正在核对预约条件 · 尚未提交"
     lines = _where_when(plan) if state != "preparing" else []
     next_step = "发送“空位提醒帮助”查看设置方法。"
     if state == "active":
@@ -156,6 +158,8 @@ def status_card(plan, *, offer_booking=False):
             if state != "reserved"
             else "请按学校要求本人到馆签到。"
         )
+        if state == "booking" and not plan.get("booking_submitting"):
+            next_step = "发送“取消空位提醒”可停止；也可发送“保持仅提醒”撤销预约授权。"
         if plan.get("cancel_requested"):
             lines += ["监控已停止；取消提醒不会撤回已发起的学校预约。"]
     else:

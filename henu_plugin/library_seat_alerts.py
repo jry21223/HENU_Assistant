@@ -143,7 +143,12 @@ class LibrarySeatAlerts:
                                 "reservation_unknown",
                                 "reservation_failed",
                             }:
-                                plan["cancel_requested"] = True
+                                if plan["state"] == "booking" and not plan.get(
+                                    "booking_submitting"
+                                ):
+                                    plan["state"] = "cancelled"
+                                else:
+                                    plan["cancel_requested"] = True
                             else:
                                 plan["state"] = "cancelled"
                             # A tombstone also cancels settings whose first
@@ -169,7 +174,11 @@ class LibrarySeatAlerts:
                         plan = data.get(self.scope(bot, sender), {"state": "none"})
                         if expected_version and plan.get("version") != expected_version:
                             raise ValueError("这张设置卡已失效，请重新查询提醒状态。")
-                        if plan.get("state") == "active":
+                        if plan.get("state") == "active" or (
+                            plan.get("state") == "booking"
+                            and not plan.get("booking_submitting")
+                        ):
+                            plan["state"] = "active"
                             plan.pop("booking_pending", None)
                             plan.pop("auto_reserve", None)
                             plan["version"] = secrets.token_hex(8)
@@ -633,12 +642,27 @@ class LibrarySeatAlerts:
                 state="booking",
                 booking_seat=free[0],
                 booking_claim=secrets.token_hex(8),
-                last_result="已发起一次预约，结果待核对。",
+                last_result="正在核对预约条件，尚未提交。",
             )
             claim = current["booking_claim"]
             # A lost/failed durable claim never authorizes a school request.
             await self.write(data)
         try:
+            loop = asyncio.get_running_loop()
+
+            def before_submit():
+                permission = asyncio.run_coroutine_threadsafe(
+                    self.permit_booking_submit(
+                        key, plan, claim, deadline, now, started
+                    ),
+                    loop,
+                )
+                try:
+                    return permission.result(timeout=30)
+                except BaseException:
+                    permission.cancel()
+                    raise
+
             worker = create_background_task(
                 self.plugin,
                 asyncio.to_thread(
@@ -650,6 +674,7 @@ class LibrarySeatAlerts:
                     lambda: (
                         now + timedelta(seconds=time.monotonic() - started) >= deadline
                     ),
+                    before_submit,
                 ),
             )
             try:
@@ -706,6 +731,38 @@ class LibrarySeatAlerts:
             card = status_card(current)
         await self.deliver(key, plan, card, delivery_id)
         return True
+
+    async def permit_booking_submit(self, key, plan, claim, deadline, now, started):
+        # This runs on the owning event loop while the isolated HTTP worker is
+        # paused immediately before its only confirmation POST.
+        async with self.lock:
+            current = (await self.read()).get(key, {})
+            if (
+                current.get("state") != "booking"
+                or current.get("booking_claim") != claim
+            ):
+                return False
+        try:
+            uid = await self.booking_member(plan["bot"], plan["sender"])
+        except Exception:
+            return False
+        async with self.lock:
+            data = await self.read()
+            current = data.get(key, {})
+            if (
+                current.get("state") != "booking"
+                or current.get("booking_claim") != claim
+                or current.get("cancel_requested")
+                or current.get("booking_submitting")
+                or uid != plan["auto_reserve"]["user_id"]
+                or not current.get("auto_reserve")
+                or now + timedelta(seconds=time.monotonic() - started) >= deadline
+            ):
+                return False
+            current["booking_submitting"] = True
+            current["last_result"] = "已开始向学校提交一次预约，结果待核对。"
+            await self.write(data)
+            return True
 
     async def record_result(
         self, key, plan, now, started, *, observed=None, error="", pause=False

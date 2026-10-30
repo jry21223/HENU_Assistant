@@ -1,6 +1,7 @@
 """Single-attempt reservation using the alert's ownership-proven saved session."""
 
-from henu_plugin.library_alert_query import AlertQueryError
+from henu_plugin.library_alert_query import AlertQueryError, seat_identity
+from henu_plugin.seat_map_image import seat_state
 
 
 def require_owned_session(snapshot):
@@ -14,7 +15,7 @@ def require_owned_session(snapshot):
         )
 
 
-def reserve_snapshot(snapshot, plan, seat, deadline, expired):
+def reserve_snapshot(snapshot, plan, seat, deadline, expired, before_submit):
     """Caller owns the user lock and has durably claimed this single attempt."""
     from campus_core.bot import HenuCampusBot
     import requests
@@ -28,9 +29,12 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired):
     }
     bot = HenuCampusBot(snapshot.subject, "", cookies)
     bot._saved_session_only = True
+    submitted = False
+    checked_seat = False
 
     class BookingSession(requests.Session):
         def request(self, method, url, **kwargs):
+            nonlocal submitted, checked_seat
             parsed = urlsplit(url)
             if (
                 method.upper() != "POST"
@@ -48,8 +52,39 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired):
                 raise ValueError("Unexpected alert reservation endpoint")
             if expired():
                 raise TimeoutError("Alert reservation deadline exceeded")
+            if parsed.path == "/v4/space/confirm":
+                if not checked_seat or not before_submit() or expired():
+                    raise ValueError("Reservation authorization was revoked or expired")
+                submitted = True
             kwargs.update(allow_redirects=False, timeout=25)
-            return super().request(method, url, **kwargs)
+            response = super().request(method, url, **kwargs)
+            if parsed.path in {"/v4/space/pick", "/v4/Space/map", "/v4/Space/seat"}:
+                payload = response.json()
+                if (
+                    not isinstance(payload, dict)
+                    or type(payload.get("code")) is not int
+                    or payload["code"] != 0
+                ):
+                    raise ValueError("School preflight response is unknown")
+                if parsed.path == "/v4/Space/seat":
+                    rows = payload["data"]["list"]
+                    if not isinstance(rows, list) or not 1 <= len(rows) <= 2000:
+                        raise ValueError("School seat response is incomplete")
+                    matches = [
+                        row
+                        for row in rows
+                        if isinstance(row, dict)
+                        and seat_identity(row.get("no")) == seat_identity(seat)
+                    ]
+                    if (
+                        len(matches) != 1
+                        or seat_state(matches[0]) != "free"
+                        or type(matches[0].get("id")) not in (str, int)
+                        or not str(matches[0]["id"]).strip()
+                    ):
+                        raise ValueError("Selected seat is not reliably available")
+                    checked_seat = True
+            return response
 
     headers = dict(bot.session.headers)
     bot.session.close()
@@ -60,7 +95,7 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired):
     )
     bot._set_auth_header()
     try:
-        return bot.reserve(
+        result = bot.reserve(
             plan["area"]["area_id"],
             seat,
             plan["target_date"],
@@ -71,5 +106,6 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired):
             retry_until="",
             submit_before=deadline.isoformat(),
         )
+        return {**result, "not_submitted": not submitted}
     finally:
         bot.session.close()

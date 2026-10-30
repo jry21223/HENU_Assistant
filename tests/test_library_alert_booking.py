@@ -25,6 +25,7 @@ class BookingSchool(School):
         self.lose_receipt = False
         self.on_entitlement = lambda: None
         self.on_submit = lambda: None
+        self.on_preflight = lambda: None
         self.rows = [
             {"id": "seat1", "no": "001", "status": "2", "status_name": "已预约"}
         ]
@@ -50,6 +51,8 @@ class BookingSchool(School):
                 {"data": {"user_id": self.uid, "lifetime": self.lifetime}}
             )
         assert parsed.netloc == "zwyy.henu.edu.cn", "No login allowed"
+        if parsed.path == "/v4/space/pick":
+            self.on_preflight()
         if parsed.path == "/v4/space/confirm":
             from Crypto.Cipher import AES
             from Crypto.Util.Padding import unpad
@@ -219,7 +222,9 @@ def test_unconfirmed_durable_claim_never_contacts_school(booking_school, applied
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("stage", ["member_check", "school_submit"])
+@pytest.mark.parametrize(
+    "stage", ["member_check", "school_preflight", "submit_member", "school_submit"]
+)
 def test_cancellation_wins_before_submission_and_does_not_claim_to_revoke_a_started_request(
     booking_school, stage
 ):
@@ -238,6 +243,17 @@ def test_cancellation_wins_before_submission_and_does_not_claim_to_revoke_a_star
         await arm(alerts)
         if stage == "member_check":
             booking_school.on_entitlement = wait
+        elif stage == "school_preflight":
+            booking_school.on_preflight = wait
+        elif stage == "submit_member":
+            calls = [0]
+
+            def final_member():
+                calls[0] += 1
+                if calls[0] == 2:
+                    wait()
+
+            booking_school.on_entitlement = final_member
         else:
             booking_school.on_submit = wait
         booking_school.rows[0].update(status="1", status_name="空闲")
@@ -258,6 +274,36 @@ def test_cancellation_wins_before_submission_and_does_not_claim_to_revoke_a_star
         )
         await LibrarySeatAlerts(plugin).tick(NOW + timedelta(minutes=20))
         assert len(booking_school.writes) == int(stage == "school_submit")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("applied", [False, True])
+def test_lost_submit_permission_receipt_never_starts_the_school_write(
+    booking_school, applied
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts, KEY
+
+    class UncertainPermission(Plugin):
+        async def set_plugin_storage(self, key, value):
+            if key == KEY and any(
+                p.get("state") == "booking" and p.get("booking_submitting")
+                for p in json.loads(value).values()
+            ):
+                if applied:
+                    await super().set_plugin_storage(key, value)
+                raise TimeoutError("synthetic lost permission receipt")
+            await super().set_plugin_storage(key, value)
+
+    async def run():
+        plugin = UncertainPermission()
+        plugin.storage.update(owned_plugin().storage)
+        alerts = LibrarySeatAlerts(plugin)
+        await arm(alerts)
+        booking_school.rows[0].update(status="1", status_name="空闲")
+        await alerts.tick(NOW + timedelta(minutes=10))
+        await LibrarySeatAlerts(plugin).tick(NOW + timedelta(minutes=20))
+        assert not booking_school.writes
 
     asyncio.run(run())
 
@@ -291,6 +337,39 @@ def test_confirmation_cannot_authorize_another_account_or_replayed_message(
         await alerts.handle(request, command, now=stamp)
         assert not (await alerts.status("bot", "alice")).get("auto_reserve")
         booking_school.rows[0].update(status="1", status_name="空闲")
+        await alerts.tick(NOW + timedelta(minutes=10))
+        assert not booking_school.writes
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "changed", ["contradictory", "missing_id", "duplicate_no", "bad_code"]
+)
+def test_final_school_recheck_must_still_be_a_single_reliable_free_seat(
+    booking_school, changed
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+
+    async def run():
+        alerts = LibrarySeatAlerts(owned_plugin())
+        await arm(alerts)
+        booking_school.rows[0].update(status="1", status_name="空闲")
+
+        def alter_response():
+            if changed == "contradictory":
+                booking_school.rows[0]["status_name"] = "已预约"
+            elif changed == "missing_id":
+                booking_school.rows[0].pop("id", None)
+            elif changed == "duplicate_no":
+                booking_school.rows = [
+                    booking_school.rows[0],
+                    dict(booking_school.rows[0]),
+                ]
+            else:
+                booking_school.code = False
+
+        booking_school.on_entitlement = alter_response
         await alerts.tick(NOW + timedelta(minutes=10))
         assert not booking_school.writes
 
