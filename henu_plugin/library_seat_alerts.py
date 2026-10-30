@@ -20,7 +20,14 @@ from henu_plugin.library_alert_query import (
     saved_session,
     seat_identity,
 )
-from henu_plugin.qq_cards import Card, card_chain, escape
+from henu_plugin.qq_cards import card_chain
+from henu_plugin.library_alert_cards import (
+    help_card,
+    status_card,
+    new_seats_card,
+    paused_card,
+    error_card,
+)
 
 ZONE = ZoneInfo("Asia/Shanghai")
 KEY = "library_seat_alerts:v1"
@@ -102,16 +109,9 @@ class LibrarySeatAlerts:
             ):
                 raise ValueError("无法确认当前私聊身份，请重新进入机器人私聊。")
             if text in {"空位提醒", "空位提醒帮助"}:
-                message = (
-                    '设置空位提醒 日期 "区域名称或ID" 开始 结束 [座位号或全部] [5或10]\n'
-                    '例如：设置空位提醒 明天 "701 七层南自习室" 14:00 16:00 全部 10\n'
-                    "只看一个座位时，把“全部”换成座位号，如001。日期也可填今天或YYYY-MM-DD。\n"
-                    "默认每10分钟，可选每5分钟；同一批空位不重复提醒，出现新空位继续提醒。\n"
-                    "每人每个机器人可开一个提醒，到使用开始时停止。发“空位提醒状态”查看，发“取消空位提醒”停止。\n"
-                    "请先手动查询图书馆座位。后台复用已有登录态，失效后暂停；手动查座后重新设置。"
-                )
+                card = help_card()
             elif text == "空位提醒状态":
-                message = self.describe(await self.status(bot, sender))
+                card = status_card(await self.status(bot, sender))
             else:
                 source = self.message_source(ctx, now)
                 if text == "取消空位提醒":
@@ -128,17 +128,15 @@ class LibrarySeatAlerts:
                             # school query is still running and not saved yet.
                             data[key] = plan
                             await self.write(data)
-                    message = self.describe(plan)
+                    card = status_card(plan)
                 else:
                     plan = await self.create(bot, sender, text, source, now, started)
-                    message = self.describe(plan)
+                    card = status_card(plan)
         except ValueError as exc:
-            message = str(exc)
+            card = error_card(str(exc))
         except Exception:
-            message = "暂时无法确认提醒状态，请发送“空位提醒状态”核对后再试。"
-        await ctx.reply(
-            card_chain(Card("图书馆空位提醒", "", (escape(message),)).pages()[0])
-        )
+            card = error_card("暂时无法确认提醒状态，请先核对后再试。", uncertain=True)
+        await ctx.reply(card_chain(card.pages()[0]))
         return True
 
     @staticmethod
@@ -285,36 +283,6 @@ class LibrarySeatAlerts:
             plan["target_date"] + "T" + plan["start"]
         ).replace(tzinfo=ZONE)
 
-    @staticmethod
-    def describe(plan):
-        text = {
-            "none": "暂无空位提醒",
-            "active": "已开启",
-            "cancelled": "已取消",
-            "expired": "已到使用开始时间，提醒已停止",
-            "paused": "已暂停",
-            "preparing": "正在设置，可稍后查询；若已中断请重新设置或取消",
-        }.get(plan.get("state"), "状态未知")
-        if plan.get("area"):
-            text += (
-                f" · 每{plan['interval_minutes']}分钟检查\n"
-                f"{plan['area']['campus']} · {plan['area']['location']}\n"
-                f"范围：{plan['seat_no'] + '号座位' if plan['seat_no'] else '整个区域'}\n"
-                f"{plan['target_date']} {plan['start']}–{plan['end']}\n"
-                "新空位继续提醒，同一批空位不重复提醒；到使用开始时停止。"
-            )
-        if plan.get("last_result"):
-            text += "\n最近检查：" + plan["last_result"]
-        if plan.get("last_delivery"):
-            text += (
-                "\n最近通知："
-                + {
-                    "sent": "接口已受理，请留意QQ通知",
-                    "unknown": "发送结果未确认，该批空位不自动重发",
-                }[plan["last_delivery"]]
-            )
-        return text
-
     async def tick(self, now=None, *, wait=True):
         started = time.monotonic()
         now = now or datetime.now(ZONE)
@@ -437,11 +405,7 @@ class LibrarySeatAlerts:
                 current["state"] = "expired"
             elif pause:
                 current.update(state="paused", last_result=error)
-                card = Card(
-                    "空位提醒已暂停",
-                    "",
-                    (escape(error), "请手动查询图书馆座位后重新设置提醒。"),
-                )
+                card = paused_card(plan, error)
             elif error:
                 current["last_result"] = "状态未知 · " + error
             else:
@@ -464,28 +428,7 @@ class LibrarySeatAlerts:
                     else f"已查询 · 空闲{sum(r['state'] == 'free' for r in observed.values())}座"
                 )
                 if fresh:
-                    card = Card(
-                        "图书馆有新空位",
-                        "持续监控",
-                        (
-                            escape(
-                                plan["area"]["campus"]
-                                + " · "
-                                + plan["area"]["location"]
-                            ),
-                            escape(
-                                plan["target_date"]
-                                + " "
-                                + plan["start"]
-                                + "–"
-                                + plan["end"]
-                            ),
-                            "新空位："
-                            + escape("、".join(fresh[:20]))
-                            + (f" 等{len(fresh)}座" if len(fresh) > 20 else ""),
-                            "请手动查座并预约，空位可能变化。",
-                        ),
-                    )
+                    card = new_seats_card(plan, fresh)
             current["last_checked"] = effective_now.isoformat()
             if current["state"] == "active":
                 current["next_check"] = (
