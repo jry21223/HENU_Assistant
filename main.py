@@ -16,6 +16,9 @@ class HenuAssistantPlugin(BasePlugin):
         from henu_plugin.library_automation import LibraryAutomation
         self.library_automation = LibraryAutomation(self)
         self.library_automation.start()
+        from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+        self.library_seat_alerts = LibrarySeatAlerts(self)
+        self.library_seat_alerts.start()
 
     def __del__(self) -> None:
         pass
