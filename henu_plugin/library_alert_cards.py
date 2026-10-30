@@ -119,8 +119,8 @@ def status_card(plan):
         next_step = "如需停止，发送“取消空位提醒”。"
     else:
         lines = ["请先查询当前提醒状态，再决定是否重新设置。"]
-    if state == "active" and plan.get("last_delivery") == "unknown":
-        lines += ["", "上次通知结果未确认，本批空位不会自动重发。"]
+    if plan.get("last_delivery") == "unknown":
+        lines += ["", "上次通知的发送结果未确认，不自动重发。"]
     return Card(TITLE, status, tuple(lines), next_step)
 
 
