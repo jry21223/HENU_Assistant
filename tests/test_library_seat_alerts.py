@@ -20,6 +20,15 @@ NOW = datetime(2026, 10, 30, 8, tzinfo=ZoneInfo("Asia/Shanghai"))
 COMMAND = '设置空位提醒 今天 "701 七层南自习室" 14:00 16:00'
 
 
+@pytest.fixture(autouse=True)
+def stable_elapsed_clock(monkeypatch):
+    from henu_plugin import library_seat_alerts as lib
+
+    # Explicit tick times drive ordinary scenarios. Slow-storage cases replace
+    # this clock themselves, without changing asyncio's real monotonic clock.
+    monkeypatch.setattr(lib, "time", SimpleNamespace(monotonic=lambda: 0))
+
+
 class Plugin:
     def __init__(self):
         self.storage = {}
@@ -150,6 +159,79 @@ class School:
             return self.request(session, method, url, **kwargs)
 
         monkeypatch.setattr(requests.Session, "request", request)
+
+
+@pytest.mark.parametrize("delay_at", ["claim", "registry", "session"])
+def test_slow_storage_cannot_query_or_notify_after_expiry(monkeypatch, delay_at):
+    from henu_plugin import library_seat_alerts as lib
+
+    elapsed = [0]
+    monkeypatch.setattr(lib, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    school = School()
+    school.install(monkeypatch)
+
+    class SlowStorage(Plugin):
+        slow = False
+
+        async def get_plugin_storage(self, key):
+            if self.slow and (
+                (delay_at == "registry" and key == lib.KEY)
+                or (delay_at == "session" and key == "user:alice:profile")
+            ):
+                elapsed[0] = 120
+            return await super().get_plugin_storage(key)
+
+        async def set_plugin_storage(self, key, value):
+            if (
+                self.slow
+                and delay_at == "claim"
+                and key == lib.KEY
+                and any(
+                    row.get("last_delivery") == "unknown"
+                    for row in json.loads(value).values()
+                )
+            ):
+                elapsed[0] = 120
+            await super().set_plugin_storage(key, value)
+
+    async def run():
+        plugin = SlowStorage()
+        alerts = lib.LibrarySeatAlerts(plugin)
+        await alerts.handle(context(), COMMAND, now=NOW)
+        plugin.slow = True
+        school.calls.clear()
+        school.rows = [{"no": "001", "status": "1", "status_name": "空闲"}]
+        await alerts.tick(NOW.replace(hour=13, minute=59))
+        assert not plugin.messages
+        assert (await alerts.status("bot", "alice"))["state"] == "expired"
+        if delay_at != "claim":
+            assert not school.calls
+
+    asyncio.run(run())
+
+
+def test_serialized_sdk_source_can_set_and_cancel_alerts(monkeypatch):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+
+    school = School()
+    school.install(monkeypatch)
+
+    async def run():
+        plugin = Plugin()
+        alerts = LibrarySeatAlerts(plugin)
+        for text, source, expected in [
+            (COMMAND, "set-serialized", "active"),
+            ("取消空位提醒", "cancel-serialized", "cancelled"),
+        ]:
+            ctx = context(text, source=source)
+            ctx.event.message_chain = MessageChain.model_validate(
+                [item.model_dump(mode="json") for item in ctx.event.message_chain.root]
+            )
+            assert ctx.event.message_chain.root[0].time.tzinfo is None
+            assert await alerts.handle(ctx, text, now=NOW)
+            assert (await alerts.status("bot", "alice"))["state"] == expected
+
+    asyncio.run(run())
 
 
 def test_region_alert_continues_without_duplicate_checks_or_notifications(monkeypatch):
@@ -326,6 +408,8 @@ def test_cancellation_during_slow_school_query_wins(monkeypatch, during_creation
         await job
         assert (await alerts.status("bot", "alice"))["state"] == "cancelled"
         assert not plugin.messages
+        await alerts.handle(context(), COMMAND, now=NOW)
+        assert (await alerts.status("bot", "alice"))["state"] == "cancelled"
 
     asyncio.run(run())
 

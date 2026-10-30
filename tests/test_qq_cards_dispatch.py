@@ -226,6 +226,51 @@ def test_sdk_primary_listener_routes_reminder_controls(tmp_path, monkeypatch, te
     asyncio.run(run())
 
 
+def test_sdk_primary_listener_sets_and_cancels_alert_from_serialized_source(tmp_path, monkeypatch):
+    from datetime import datetime
+    from henu_plugin import library_seat_alerts as lib
+    from tests.test_library_seat_alerts import Plugin, School, context, NOW, COMMAND
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+
+    monkeypatch.setattr(lib, 'datetime', Clock)
+    monkeypatch.chdir(tmp_path)
+    school = School()
+    school.install(monkeypatch)
+    receive = AsyncMock()
+    monkeypatch.setattr(HenuFood, 'receive_message', receive)
+
+    async def run():
+        async def initialize_plugin(_):
+            pass
+        rpc = MemoryRPC(None, initialize_plugin)
+        rpc.variables, rpc.sent = {}, []
+        plugin = Plugin()
+        plugin.plugin_runtime_handler = rpc
+        plugin.library_seat_alerts = lib.LibrarySeatAlerts(plugin)
+        food = FoodCaptureListener()
+        food.plugin = plugin
+        await food.initialize()
+        rpc.plugin_container = SimpleNamespace(components=[
+            SimpleNamespace(manifest=SimpleNamespace(kind='EventListener'), component_instance=food)])
+        for index, (text, expected) in enumerate([(COMMAND, 'active'), ('取消空位提醒', 'cancelled')]):
+            chain = context(text, source=f'sdk-source-{index}').event.message_chain
+            incoming = pe.FriendMessage(sender=entities.Friend(id='alice', nickname='合成', remark=''), message_chain=chain)
+            event = events.PersonMessageReceived(launcher_type='person', launcher_id='alice', sender_id='alice',
+                message_event=incoming, message_chain=chain)
+            result = await rpc.actions[RuntimeToPluginAction.EMIT_EVENT.value]({'event_context': {
+                'query_id': index, 'eid': index+20, 'event_name': 'PersonMessageReceived', 'event': event.model_dump(mode='json')}})
+            assert result.data['event_context']['is_prevent_default']
+            assert (await plugin.library_seat_alerts.status('synthetic-bot', 'alice'))['state'] == expected
+        receive.assert_not_awaited()
+        assert '已开启' in str(rpc.sent) and '已取消' in str(rpc.sent)
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('attached', [False, True])
 def test_sdk_classroom_question_is_one_read_only_query_not_help(tmp_path, monkeypatch, attached):
     from components.cli_tools.henu_cli_safe import HenuCliSafe

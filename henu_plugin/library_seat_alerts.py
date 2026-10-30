@@ -150,7 +150,8 @@ class LibrarySeatAlerts:
         if (
             len(sources) != 1
             or not sources[0].id
-            or not 0 <= (now - sources[0].time).total_seconds() < 120
+            # The SDK rebuilds Source.time from epoch as a naive local datetime.
+            or not 0 <= now.timestamp() - sources[0].time.timestamp() < 120
         ):
             raise ValueError("消息来源无法核验或已过期，请重新发送。")
         return str(sources[0].id)
@@ -186,13 +187,24 @@ class LibrarySeatAlerts:
             raise ValueError("检查间隔仅支持5或10分钟。")
         key = self.scope(bot, sender)
         async with self.lock:
-            previous = (await self.read()).get(key, {})
+            data = await self.read()
+            previous = data.get(key, {})
             if source in previous.get("sources", []):
                 return previous
             if previous.get("state") == "active" and not self.expired(previous, now):
                 raise ValueError(
                     "已有空位提醒，请先发送“取消空位提醒”，再设置新的提醒。"
                 )
+            # Claim the setting's Source before I/O. Cancellation keeps this
+            # receipt, including across restarts, so a replay cannot reactivate it.
+            preparing = dict(
+                previous,
+                state="preparing",
+                version=secrets.token_hex(8),
+                sources=(previous.get("sources", []) + [source])[-16:],
+            )
+            data[key] = preparing
+            await self.write(data)
         plan = dict(
             target_date=target,
             location=location,
@@ -202,46 +214,60 @@ class LibrarySeatAlerts:
             interval_minutes=interval,
         )
         started = time.monotonic()
-        async with saved_session(self.plugin, sender) as snapshot:
-            result = await self.query(snapshot, plan, resolve=True)
-            checked_at = now + timedelta(seconds=time.monotonic() - started)
-            if self.expired(plan, checked_at):
-                raise ValueError("已到使用开始时间，请重新选择未来的使用时段。")
-            if seat:
-                plan["seat_no"] = next(iter(result["observed"].values()))["no"]
-            plan.update(
-                bot=bot,
-                sender=sender,
-                area=result["area"],
-                session_pin=snapshot.pin,
-                state="active",
-                version=secrets.token_hex(8),
-                observed={
-                    identity: row["state"]
-                    for identity, row in result["observed"].items()
-                },
-                sources=(previous.get("sources", []) + [source])[-16:],
-                next_check=(checked_at + timedelta(minutes=interval)).isoformat(),
-                last_checked=checked_at.isoformat(),
-            )
-            free = [
-                row["no"]
-                for row in result["observed"].values()
-                if row["state"] == "free"
-            ]
-            plan["last_result"] = (
-                "当前空闲：" + "、".join(free[:20])
-                if free
-                else "部分座位状态未知"
-                if any(row["state"] == "unknown" for row in result["observed"].values())
-                else "当前没有空位"
-            )
+        try:
+            async with saved_session(self.plugin, sender) as snapshot:
+                result = await self.query(snapshot, plan, resolve=True)
+                checked_at = now + timedelta(seconds=time.monotonic() - started)
+                if self.expired(plan, checked_at):
+                    raise ValueError("已到使用开始时间，请重新选择未来的使用时段。")
+                if seat:
+                    plan["seat_no"] = next(iter(result["observed"].values()))["no"]
+                plan.update(
+                    bot=bot,
+                    sender=sender,
+                    area=result["area"],
+                    session_pin=snapshot.pin,
+                    state="active",
+                    version=secrets.token_hex(8),
+                    observed={
+                        identity: row["state"]
+                        for identity, row in result["observed"].items()
+                    },
+                    sources=(previous.get("sources", []) + [source])[-16:],
+                    next_check=(checked_at + timedelta(minutes=interval)).isoformat(),
+                    last_checked=checked_at.isoformat(),
+                )
+                free = [
+                    row["no"]
+                    for row in result["observed"].values()
+                    if row["state"] == "free"
+                ]
+                plan["last_result"] = (
+                    "当前空闲：" + "、".join(free[:20])
+                    if free
+                    else "部分座位状态未知"
+                    if any(
+                        row["state"] == "unknown" for row in result["observed"].values()
+                    )
+                    else "当前没有空位"
+                )
+                async with self.lock:
+                    data = await self.read()
+                    if data.get(key, {}) != preparing:
+                        raise ValueError("提醒设置已变化，请查询状态后再设置。")
+                    data[key] = plan
+                    await self.write(data)
+        except BaseException:
             async with self.lock:
                 data = await self.read()
-                if data.get(key, {}) != previous:
-                    raise ValueError("提醒设置已变化，请查询状态后再设置。")
-                data[key] = plan
-                await self.write(data)
+                if data.get(key, {}) == preparing:
+                    data[key] = dict(
+                        previous,
+                        state=previous.get("state", "none"),
+                        sources=preparing["sources"],
+                    )
+                    await self.write(data)
+            raise
         return plan
 
     @staticmethod
@@ -258,6 +284,7 @@ class LibrarySeatAlerts:
             "cancelled": "已取消",
             "expired": "已到使用开始时间，提醒已停止",
             "paused": "已暂停",
+            "preparing": "正在设置，可稍后查询；若已中断请重新设置或取消",
         }.get(plan.get("state"), "状态未知")
         if plan.get("area"):
             text += (
@@ -280,32 +307,36 @@ class LibrarySeatAlerts:
         return text
 
     async def tick(self, now=None, *, wait=True):
+        started = time.monotonic()
         now = now or datetime.now(ZONE)
         async with self.lock:
             data = await self.read()
+            checked_at = now + timedelta(seconds=time.monotonic() - started)
             due = []
             changed = False
             for key, plan in sorted(
                 data.items(), key=lambda item: item[1].get("next_check", "")
             ):
-                if plan.get("state") == "active" and self.expired(plan, now):
+                if plan.get("state") == "active" and self.expired(plan, checked_at):
                     plan["state"] = "expired"
                     changed = True
                 if (
                     plan.get("state") == "active"
                     and key not in self.workers
                     and len(self.workers) + len(due) < 4
-                    and now >= datetime.fromisoformat(plan["next_check"])
+                    and checked_at >= datetime.fromisoformat(plan["next_check"])
                 ):
                     plan["next_check"] = (
-                        now + timedelta(minutes=plan["interval_minutes"])
+                        checked_at + timedelta(minutes=plan["interval_minutes"])
                     ).isoformat()
                     due.append((key, dict(plan)))
             if due or changed:
                 await self.write(data)
             tasks = []
             for key, plan in due:
-                task = create_background_task(self.plugin, self.check(key, plan, now))
+                task = create_background_task(
+                    self.plugin, self.check(key, plan, now, started)
+                )
                 self.workers[key] = task
                 task.add_done_callback(
                     lambda done, key=key: self.worker_done(key, done)
@@ -332,12 +363,19 @@ class LibrarySeatAlerts:
                 await worker
                 raise
 
-    async def check(self, key, plan, now):
-        started = time.monotonic()
+    async def check(self, key, plan, now, started):
         try:
+            if self.expired(plan, now + timedelta(seconds=time.monotonic() - started)):
+                await self.record_result(key, plan, now, started)
+                return
             async with saved_session(
                 self.plugin, plan["sender"], plan["session_pin"]
             ) as snapshot:
+                if self.expired(
+                    plan, now + timedelta(seconds=time.monotonic() - started)
+                ):
+                    await self.record_result(key, plan, now, started)
+                    return
                 try:
                     result = await self.query(snapshot, plan)
                 except AlertQueryError:
@@ -367,10 +405,10 @@ class LibrarySeatAlerts:
     async def record_result(
         self, key, plan, now, started, *, observed=None, error="", pause=False
     ):
-        effective_now = now + timedelta(seconds=time.monotonic() - started)
         card = None
         async with self.lock:
             data = await self.read()
+            effective_now = now + timedelta(seconds=time.monotonic() - started)
             current = data.get(key, {})
             if (
                 current.get("state") != "active"
@@ -431,6 +469,10 @@ class LibrarySeatAlerts:
                         ),
                     )
             current["last_checked"] = effective_now.isoformat()
+            if current["state"] == "active":
+                current["next_check"] = (
+                    effective_now + timedelta(minutes=current["interval_minutes"])
+                ).isoformat()
             if card:
                 # Persist observations and the delivery claim before any send.
                 # A lost receipt is never replayed for the same observed batch.
@@ -440,6 +482,19 @@ class LibrarySeatAlerts:
                 delivery_id = current["delivery_id"]
             await self.write(data)
         if card:
+            # Storage can take longer than the remaining watch window. A claim
+            # does not authorize initiating a notification after that window.
+            if self.expired(plan, now + timedelta(seconds=time.monotonic() - started)):
+                async with self.lock:
+                    data = await self.read()
+                    current = data.get(key, {})
+                    if current.get("delivery_id") == delivery_id and current.get(
+                        "state"
+                    ) in {"active", "paused"}:
+                        current["state"] = "expired"
+                        current.pop("last_delivery", None)
+                        await self.write(data)
+                return
             try:
                 await asyncio.wait_for(
                     self.plugin.send_message(
