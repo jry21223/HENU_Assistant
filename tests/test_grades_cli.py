@@ -260,7 +260,7 @@ def test_network_errors_are_redacted_and_never_retried(grades, monkeypatch):
 def test_two_private_users_have_separate_school_sessions_and_results(grades, monkeypatch):
     _, storage, tool, first = grades
     storage.data['user:second-user:profile'] = b'{"student_id":"20230002"}'
-    storage.data['user:second-user:xk_cookie'] = b'{"JSESSIONID":"second-private-session"}'
+    storage.data['user:second-user:xk_cookie'] = b'{"JSESSIONID":"second-private-session","_subject_student_id":"20230002"}'
     original = dict(storage.data)
     def school_boundary(session, method, url, **kwargs):
         school = School()

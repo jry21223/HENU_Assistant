@@ -171,6 +171,11 @@ async def handle(plugin, ctx, text=None):
 
 
 async def dispatch(plugin, ctx, payload):
+    if payload["kind"].startswith("alert_booking_"):
+        alerts = getattr(plugin, "library_seat_alerts", None)
+        if alerts is not None:
+            return await alerts.handle_action(ctx, payload)
+        return
     if payload["kind"].startswith("library_"):
         from henu_plugin.library_seat_map import dispatch_library
 
