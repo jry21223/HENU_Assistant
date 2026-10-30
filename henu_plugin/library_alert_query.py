@@ -22,6 +22,7 @@ class AlertQueryError(ValueError):
 class SavedSession:
     pin: str
     cookies: dict = field(repr=False)
+    subject: str = field(default="", repr=False)
 
 
 @asynccontextmanager
@@ -64,7 +65,7 @@ async def saved_session(plugin, sender, expected_pin=""):
             raise AlertQueryError(
                 "session_changed", "校园账号或登录态已变化，请手动查座后重新设置提醒。"
             )
-        yield SavedSession(pin, cookies)
+        yield SavedSession(pin, cookies, subject)
     finally:
         await adapter.abort()
 

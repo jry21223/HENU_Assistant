@@ -27,6 +27,7 @@ def help_card():
             "替换区域、日期和时段；时段以学校开放时间为准。",
             "有新空位会继续提醒；每人1项，使用开始时结束。",
             "登录失效会暂停，手动查座后重新设置。",
+            "设置后可选有位自动预约，仅限 HENU-Kit 终身会员。",
         ),
         CONTROLS,
     )
@@ -88,7 +89,7 @@ def _last_check(plan):
     return ["", "**" + heading + "**", escape(result, 240)]
 
 
-def status_card(plan):
+def status_card(plan, *, offer_booking=False):
     state = plan.get("state")
     status = {
         "none": "暂无空位提醒",
@@ -97,14 +98,34 @@ def status_card(plan):
         "expired": "已结束 · 已到使用时间",
         "paused": "已暂停",
         "preparing": "正在设置",
+        "booking": "预约已发起 · 结果待核对",
+        "reserved": "预约成功 · 本次任务已结束",
+        "submitted_unverified": "已提交 · 预约记录待核对",
+        "reservation_unknown": "预约结果未确认 · 已停止",
+        "reservation_failed": "预约未完成 · 已停止",
     }.get(state, "状态待核对")
     if state == "active":
         status += f" · 每{plan['interval_minutes']}分钟检查"
     lines = _where_when(plan) if state != "preparing" else []
     next_step = "发送“空位提醒帮助”查看设置方法。"
     if state == "active":
+        lines += [
+            "",
+            "模式：有位自动预约（终身会员）"
+            if plan.get("auto_reserve")
+            else "模式：仅提醒",
+        ]
         lines += _last_check(plan)
         next_step = CONTROLS
+        if offer_booking and not plan.get("auto_reserve"):
+            lines += [
+                "",
+                "有空位后要直接预约吗？",
+                "仅提醒：不用操作。",
+                "自动预约：发送“有位自动预约”，核对后授权。",
+            ]
+        elif plan.get("auto_reserve"):
+            lines += ["成功后结束；结果不确定时停止，不自动重试。"]
     elif state == "none":
         lines = ["可以监控整个区域，也可以只看一个座位。"]
     elif state == "paused":
@@ -117,11 +138,52 @@ def status_card(plan):
     elif state == "preparing":
         lines = ["稍后发送“空位提醒状态”查看结果。"]
         next_step = "如需停止，发送“取消空位提醒”。"
+    elif state in {
+        "booking",
+        "reserved",
+        "submitted_unverified",
+        "reservation_unknown",
+        "reservation_failed",
+    }:
+        if plan.get("booking_seat"):
+            lines += ["", "本次座位：" + escape(plan["booking_seat"], 64)]
+        lines += [
+            "",
+            escape(plan.get("last_result") or "请先核对学校当前预约记录。", 240),
+        ]
+        next_step = (
+            "请先查询学校预约记录，不要重复预约。"
+            if state != "reserved"
+            else "请按学校要求本人到馆签到。"
+        )
+        if plan.get("cancel_requested"):
+            lines += ["监控已停止；取消提醒不会撤回已发起的学校预约。"]
     else:
         lines = ["请先查询当前提醒状态，再决定是否重新设置。"]
     if plan.get("last_delivery") == "unknown":
         lines += ["", "上次通知的发送结果未确认，不自动重发。"]
     return Card(TITLE, status, tuple(lines), next_step)
+
+
+def booking_confirmation_card(plan):
+    pending = plan["booking_pending"]
+    lines = _where_when(plan) + [
+        "",
+        "模式：有位后自动预约（终身会员）",
+        "只预约上述区域内一个可用座位。"
+        if not plan.get("seat_no")
+        else "只预约这个座位，不替换其他座位。",
+        "确认后，后台按原间隔检查；有位时直接提交一次，不再询问。",
+        "成功后结束；失败或结果不确定时停止，不重试。",
+    ]
+    return Card(
+        "确认有位自动预约",
+        "当前仍仅提醒 · 尚未授权预约",
+        tuple(lines),
+        "确认：确认有位自动预约 "
+        + pending["token"]
+        + "\n取消：保持仅提醒\n5分钟内有效。",
+    )
 
 
 def new_seats_card(plan, seats):

@@ -93,7 +93,8 @@ def test_kingo_persistence_does_not_write_cas_jar(monkeypatch) -> None:
             "route": "xk-route",
             "CASTGC": "must-not-persist",
             "_auth_mode": "xk_kingo",
-        }
+        },
+        "student",
     )
 
     assert saved == [
@@ -101,6 +102,7 @@ def test_kingo_persistence_does_not_write_cas_jar(monkeypatch) -> None:
             "JSESSIONID": "xk-session",
             "route": "xk-route",
             "_auth_mode": "xk_kingo",
+            "_subject_student_id": "student",
         }
     ]
     assert cas_saved == []

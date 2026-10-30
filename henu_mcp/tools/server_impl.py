@@ -1547,47 +1547,67 @@ def _target_library_date(target_date: str | None = None) -> str:
 
 
 def _load_library_cookies() -> dict[str, Any]:
-    return load_json(LIBRARY_COOKIE_FILE)
+    data = load_json(LIBRARY_COOKIE_FILE)
+    if not _artifact_matches_bound_student(data):
+        return {}
+    return {key: value for key, value in data.items()
+            if key == "_v4_token" or not str(key).startswith("_")}
 
 
 def _save_library_cookies(cookies: dict[str, Any]) -> None:
-    save_json(LIBRARY_COOKIE_FILE, cookies)
+    save_json(LIBRARY_COOKIE_FILE, {**cookies, "_subject_student_id": _bound_student_id()})
+
+
+def _bound_student_id() -> str:
+    return str(_effective_profile().get("student_id") or "").strip()
+
+
+def _artifact_matches_bound_student(data: dict[str, Any]) -> bool:
+    subject = _bound_student_id()
+    return bool(subject and isinstance(data, dict)
+                and str(data.get("_subject_student_id") or "").strip() == subject)
 
 
 def _load_cas_cookies() -> dict[str, Any]:
     """Load this user's IDS CAS cookie jar for cross-service login reuse."""
+    cas_data = load_json(CAS_COOKIE_FILE)
+    xk_data = load_json(COOKIE_FILE)
     return _merge_cas_cookies(
-        load_json(CAS_COOKIE_FILE),
-        load_json(COOKIE_FILE),
+        xk_data if _artifact_matches_bound_student(xk_data) else {},
+        cas_data if _artifact_matches_bound_student(cas_data) else {},
     )
 
 
-def _save_cas_cookies(cookies: dict[str, Any]) -> None:
+def _save_cas_cookies(cookies: dict[str, Any], subject_student_id: str = "") -> None:
     """Save this user's IDS CAS cookie jar for reuse across campus services."""
     clean = _extract_ids_cas_cookies(cookies)
     if clean:
+        clean["_subject_student_id"] = str(subject_student_id or "").strip() or _bound_student_id()
         save_json(CAS_COOKIE_FILE, clean)
 
 
 def _load_xk_cookies() -> dict[str, Any]:
+    data = load_json(COOKIE_FILE)
     return {
-        **load_json(COOKIE_FILE),
+        **(data if _artifact_matches_bound_student(data) else {}),
         **_load_cas_cookies(),
     }
 
 
-def _save_xk_cookies(cookies: dict[str, Any]) -> None:
+def _save_xk_cookies(cookies: dict[str, Any], subject_student_id: str = "") -> None:
     mode = str(cookies.get("_auth_mode") or "")
-    persisted = cookies
+    subject = str(subject_student_id or "").strip() or _bound_student_id()
+    persisted = {**cookies, "_subject_student_id": subject}
     if mode == "xk_kingo":
         persisted = {
             key: value
             for key, value in cookies.items()
             if key not in _extract_ids_cas_cookies(cookies)
         }
+        persisted["_subject_student_id"] = subject
     save_json(COOKIE_FILE, persisted)
     if mode == "ids_cas":
-        _save_cas_cookies(cookies)
+        _save_cas_cookies(cookies, subject)
 
 
 def _saved_xk_auth_info() -> dict[str, Any]:
@@ -1902,7 +1922,7 @@ def _persist_account_binding(
             profile.update(fields)
             save_encrypted_profile(PROFILE_FILE, profile)
             if cookies is not None:
-                _save_xk_cookies(cookies)
+                _save_xk_cookies(cookies, fields["student_id"])
         except Exception:
             for path, content in snapshot.items():
                 if content is None:
