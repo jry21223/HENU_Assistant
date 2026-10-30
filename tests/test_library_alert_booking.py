@@ -23,6 +23,8 @@ class BookingSchool(School):
         self.uid = UID
         self.writes = []
         self.lose_receipt = False
+        self.confirm_code = 0
+        self.confirm_status = 200
         self.on_entitlement = lambda: None
         self.on_submit = lambda: None
         self.on_preflight = lambda: None
@@ -72,7 +74,9 @@ class BookingSchool(School):
             self.on_submit()
             if self.lose_receipt:
                 raise requests.Timeout("synthetic lost school receipt")
-            return self.response({"code": 0, "data": {}})
+            response = self.response({"code": self.confirm_code, "data": {}})
+            response.status_code = self.confirm_status
+            return response
         if parsed.path == "/v4/index/subscribe":
             return self.response(
                 {
@@ -372,6 +376,56 @@ def test_final_school_recheck_must_still_be_a_single_reliable_free_seat(
         booking_school.on_entitlement = alter_response
         await alerts.tick(NOW + timedelta(minutes=10))
         assert not booking_school.writes
+
+    asyncio.run(run())
+
+
+def test_single_seat_submission_uses_canonical_number_even_when_another_seat_has_its_name_alias(
+    booking_school,
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+
+    async def run():
+        alerts = LibrarySeatAlerts(owned_plugin())
+        await arm(alerts, seat="001")
+        booking_school.rows[0].update(status="1", status_name="空闲")
+
+        def aliases():
+            booking_school.rows = [
+                {
+                    "id": "wrong-seat",
+                    "no": "002",
+                    "name": "001",
+                    "status": "1",
+                    "status_name": "空闲",
+                },
+                {"id": "right-seat", "no": "001", "status": "1", "status_name": "空闲"},
+            ]
+
+        booking_school.on_entitlement = aliases
+        await alerts.tick(NOW + timedelta(minutes=10))
+        assert len(booking_school.writes) == 1
+        assert booking_school.writes[0]["seat_id"] == "right-seat"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("code,http", [(False, 200), (None, 200), ("0", 200), (0, 500)])
+def test_malformed_school_submission_result_stays_unknown_without_replay(
+    booking_school, code, http
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+
+    async def run():
+        plugin = owned_plugin()
+        alerts = LibrarySeatAlerts(plugin)
+        await arm(alerts)
+        booking_school.confirm_code, booking_school.confirm_status = code, http
+        booking_school.rows[0].update(status="1", status_name="空闲")
+        await alerts.tick(NOW + timedelta(minutes=10))
+        assert (await alerts.status("bot", "alice"))["state"] == "reservation_unknown"
+        await LibrarySeatAlerts(plugin).tick(NOW + timedelta(minutes=20))
+        assert len(booking_school.writes) == 1
 
     asyncio.run(run())
 

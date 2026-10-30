@@ -4,6 +4,35 @@ from henu_plugin.library_alert_query import AlertQueryError, seat_identity
 from henu_plugin.seat_map_image import seat_state
 
 
+def _selected_free_seat(rows, wanted):
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 2000:
+        raise ValueError("School seat response is incomplete")
+    matches = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and seat_identity(row.get("no")) == seat_identity(wanted)
+    ]
+    if (
+        len(matches) != 1
+        or seat_state(matches[0]) != "free"
+        or type(matches[0].get("id")) not in (str, int)
+        or not str(matches[0]["id"]).strip()
+    ):
+        raise ValueError("Selected seat is not reliably available")
+    selected = matches[0]
+    if (
+        sum(
+            str(row.get("id")) == str(selected["id"])
+            for row in rows
+            if isinstance(row, dict)
+        )
+        != 1
+    ):
+        raise ValueError("Selected seat identifier is ambiguous")
+    return selected
+
+
 def require_owned_session(snapshot):
     if (
         not snapshot.subject
@@ -27,7 +56,14 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired, before_submit):
         for key, value in snapshot.cookies.items()
         if key == "_v4_token" or not key.startswith("_")
     }
-    bot = HenuCampusBot(snapshot.subject, "", cookies)
+
+    class AlertSeatBot(HenuCampusBot):
+        def _find_target_seat(self, seats, seat_no):
+            # The legacy selector also accepts names/aliases. This authorization
+            # is for a canonical seat number, so an alias cannot change its ID.
+            return _selected_free_seat(seats, seat_no)
+
+    bot = AlertSeatBot(snapshot.subject, "", cookies)
     bot._saved_session_only = True
     submitted = False
     checked_seat = False
@@ -58,31 +94,16 @@ def reserve_snapshot(snapshot, plan, seat, deadline, expired, before_submit):
                 submitted = True
             kwargs.update(allow_redirects=False, timeout=25)
             response = super().request(method, url, **kwargs)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or type(payload.get("code")) is not int:
+                raise ValueError("School response code is unknown")
             if parsed.path in {"/v4/space/pick", "/v4/Space/map", "/v4/Space/seat"}:
-                payload = response.json()
-                if (
-                    not isinstance(payload, dict)
-                    or type(payload.get("code")) is not int
-                    or payload["code"] != 0
-                ):
+                if payload["code"] != 0:
                     raise ValueError("School preflight response is unknown")
                 if parsed.path == "/v4/Space/seat":
                     rows = payload["data"]["list"]
-                    if not isinstance(rows, list) or not 1 <= len(rows) <= 2000:
-                        raise ValueError("School seat response is incomplete")
-                    matches = [
-                        row
-                        for row in rows
-                        if isinstance(row, dict)
-                        and seat_identity(row.get("no")) == seat_identity(seat)
-                    ]
-                    if (
-                        len(matches) != 1
-                        or seat_state(matches[0]) != "free"
-                        or type(matches[0].get("id")) not in (str, int)
-                        or not str(matches[0]["id"]).strip()
-                    ):
-                        raise ValueError("Selected seat is not reliably available")
+                    _selected_free_seat(rows, seat)
                     checked_seat = True
             return response
 
