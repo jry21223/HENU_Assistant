@@ -82,7 +82,7 @@ class LibrarySeatAlerts:
             return (await self.read()).get(self.scope(bot, sender), {"state": "none"})
 
     async def handle(
-        self, ctx, text, *, now=None, expected_version="", from_button=False
+        self, ctx, text, *, now=None, expected_version="", button_action=None
     ):
         controls = {
             "空位提醒",
@@ -96,7 +96,7 @@ class LibrarySeatAlerts:
             ("设置空位提醒", "确认有位自动预约")
         ):
             return False
-        if getattr(ctx, "is_prevent_postorder", False) and not from_button:
+        if getattr(ctx, "is_prevent_postorder", False) and button_action is None:
             return True
         started = time.monotonic()
         now = now or datetime.now(ZONE)
@@ -126,7 +126,17 @@ class LibrarySeatAlerts:
             elif text == "空位提醒状态":
                 card = status_card(await self.status(bot, sender))
             else:
-                source = self.message_source(ctx, now)
+                if button_action is not None:
+                    from henu_plugin.qq_buttons import VerifiedButtonAction
+
+                    receipt, payload = button_action
+                    if not isinstance(
+                        receipt, VerifiedButtonAction
+                    ) or not receipt.matches(ctx, bot, payload):
+                        raise ValueError("按钮来源无法核验或已过期，请重新查询。")
+                    source = receipt.source_id
+                else:
+                    source = self.message_source(ctx, now)
                 if text == "取消空位提醒":
                     async with self.lock:
                         data = await self.read()
@@ -218,7 +228,12 @@ class LibrarySeatAlerts:
             ("仅提醒", {"kind": "alert_booking_off", "version": plan["version"]}),
         ]
 
-    async def handle_action(self, ctx, payload):
+    async def handle_action(self, ctx, payload, *, receipt=None):
+        from henu_plugin.qq_buttons import VerifiedButtonAction, tell
+
+        if not isinstance(receipt, VerifiedButtonAction):
+            await tell(ctx, "按钮来源无法核验，请重新查询。")
+            return
         command = {
             "alert_booking_prepare": "有位自动预约",
             "alert_booking_off": "保持仅提醒",
@@ -230,7 +245,7 @@ class LibrarySeatAlerts:
                 ctx,
                 command,
                 expected_version=payload.get("version", ""),
-                from_button=True,
+                button_action=(receipt, dict(payload)),
             )
 
     async def booking_member(self, bot, sender):
