@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import re
 import secrets
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from functools import wraps
 
 from henu_plugin.confirmation import (
@@ -22,6 +24,35 @@ from henu_plugin.qq_cards import scope, card_chain, Card
 MARKER = "\n[HENU_ACTIONS_V1:"
 COMMAND = re.compile(r"HENU_BUTTON ([A-Za-z0-9_-]{24})")
 _preview_command = ContextVar("henu_preview_command", default="")
+
+
+def _action_fingerprint(payload):
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class VerifiedButtonAction:
+    """Internal receipt minted only after consuming a valid scoped action."""
+
+    handle: str = field(repr=False)
+    owner: tuple = field(repr=False)
+    query_id: int | str
+    expires: float
+    payload_fingerprint: str = field(repr=False)
+
+    def matches(self, ctx, bot, payload):
+        return (
+            scope(bot, ctx.event) == self.owner
+            and ctx.query_id == self.query_id
+            and time.monotonic() < self.expires
+            and _action_fingerprint(payload) == self.payload_fingerprint
+        )
+
+    @property
+    def source_id(self):
+        return "button:" + self.handle
 
 
 def confirmation_context(call):
@@ -163,18 +194,25 @@ async def handle(plugin, ctx, text=None):
         if sibling["group"] == item["group"]:
             state.pop(handle, None)
     try:
-        await dispatch(plugin, ctx, item["payload"])
+        receipt = VerifiedButtonAction(
+            match[1],
+            owner,
+            ctx.query_id,
+            item["expires"],
+            _action_fingerprint(item["payload"]),
+        )
+        await dispatch(plugin, ctx, item["payload"], receipt=receipt)
     except Exception as exc:
         print("[henu.buttons] " + type(exc).__name__, flush=True)
         await tell(ctx, "本次操作结果未确认，请先查询状态，不要重复提交。")
     return True
 
 
-async def dispatch(plugin, ctx, payload):
+async def dispatch(plugin, ctx, payload, *, receipt=None):
     if payload["kind"].startswith("alert_booking_"):
         alerts = getattr(plugin, "library_seat_alerts", None)
         if alerts is not None:
-            return await alerts.handle_action(ctx, payload)
+            return await alerts.handle_action(ctx, payload, receipt=receipt)
         return
     if payload["kind"].startswith("library_"):
         from henu_plugin.library_seat_map import dispatch_library

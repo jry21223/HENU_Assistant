@@ -468,8 +468,9 @@ def test_automatic_booking_requires_current_membership_and_independent_authoriza
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("native_callback", [False, True])
 def test_sdk_buttons_authorize_at_setup_and_replays_cannot_reauthorize(
-    tmp_path, monkeypatch, booking_school
+    tmp_path, monkeypatch, booking_school, native_callback
 ):
     from datetime import datetime
     from types import SimpleNamespace
@@ -523,6 +524,15 @@ def test_sdk_buttons_authorize_at_setup_and_replays_cannot_reauthorize(
 
         async def emit(text, index):
             chain = context(text, source=f"booking-sdk-{index}").event.message_chain
+            if native_callback and text.startswith("HENU_BUTTON "):
+                from langbot_plugin.api.entities.builtin.platform.message import (
+                    MessageChain,
+                    Plain,
+                )
+
+                # Actual QQ handle_click enqueues Plain only; its FriendMessage
+                # has a timestamp, but there is deliberately no message Source.
+                chain = MessageChain([Plain(text=text)])
             incoming = pe.FriendMessage(
                 sender=entities.Friend(id="alice", nickname="合成", remark=""),
                 message_chain=chain,
@@ -564,5 +574,75 @@ def test_sdk_buttons_authorize_at_setup_and_replays_cannot_reauthorize(
         ] == "cancelled"
         assert not booking_school.writes
         receive.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_plain_confirmation_without_verified_message_source_is_still_rejected(
+    booking_school,
+):
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+    from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+
+    async def run():
+        alerts = LibrarySeatAlerts(owned_plugin())
+        token = await arm(alerts, confirm=False)
+        command = "确认有位自动预约 " + token
+        request = context(command, source="no-source")
+        request.event.message_chain = MessageChain([Plain(text=command)])
+        await alerts.handle(request, command, now=NOW)
+        assert "消息来源无法核验" in str(request.reply.call_args)
+        assert not (await alerts.status("bot", "alice")).get("auto_reserve")
+        assert not booking_school.writes
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("change", ["bot", "sender", "query", "expiry"])
+def test_native_action_is_revalidated_after_callback_context_await(
+    booking_school, monkeypatch, change
+):
+    from types import SimpleNamespace
+    from henu_plugin import qq_buttons as buttons
+    from henu_plugin.library_seat_alerts import LibrarySeatAlerts
+    from langbot_plugin.api.entities.builtin.platform.message import MessageChain, Plain
+
+    elapsed = [0]
+    monkeypatch.setattr(buttons, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+
+    async def run():
+        plugin = owned_plugin()
+        plugin.library_seat_alerts = alerts = LibrarySeatAlerts(plugin)
+        request = context(source="native-setup")
+        request.query_id = 1
+        await alerts.handle(request, COMMAND, now=NOW)
+        page = request.reply.call_args.args[0].root[0].text
+        wire = json.loads(
+            base64.urlsafe_b64decode(page.split("\n[HENU_ACTIONS_V1:")[1][:-1])
+        )
+        command = "HENU_BUTTON " + wire["actions"][0]["id"]
+        click = context(command)
+        click.query_id = 2
+        click.event.message_chain = MessageChain([Plain(text=command)])
+        calls = [0]
+
+        async def route():
+            calls[0] += 1
+            if calls[0] == 2:
+                if change == "bot":
+                    return "other"
+                if change == "sender":
+                    click.event.sender_id = click.event.launcher_id = "bob"
+                elif change == "query":
+                    click.query_id = 3
+                elif change == "expiry":
+                    elapsed[0] = 301
+            return "bot"
+
+        click.get_bot_uuid = route
+        assert await buttons.handle(plugin, click)
+        assert "按钮来源无法核验" in str(click.reply.call_args)
+        assert not (await alerts.status("bot", "alice")).get("booking_pending")
+        assert not booking_school.writes
 
     asyncio.run(run())
