@@ -170,6 +170,9 @@ def ensure_classroom_resource(
 
     用于空教室查询时增量写入 registry。
     """
+    if not all(isinstance(value, str) and value.strip()
+               for value in (campus_code, building_code, room_id, room_name)):
+        raise ValueError('classroom identity requires campus, building, school room ID and name')
     resource_id = build_resource_id(
         "classroom",
         campus_code=campus_code,
@@ -179,15 +182,22 @@ def ensure_classroom_resource(
 
     existing = get_resource(resource_id)
     if existing:
+        if (existing.resource_type != 'classroom'
+                or existing.location.get('campusCode') != campus_code
+                or existing.location.get('buildingCode') != building_code
+                or existing.location.get('roomName') != room_name):
+            raise ValueError('school classroom ID conflicts with stored identity')
         return existing
 
     from .alias import generate_aliases, normalize_building_name, normalize_room_name
 
     cn_building = normalize_building_name(building_name)
     cn_room = normalize_room_name(room_name)
+    if cn_building and cn_room.startswith(cn_building):
+        cn_room = cn_room[len(cn_building):]
     display_name = f"{campus_name} {cn_building}{cn_room}"
-    aliases_list = generate_aliases(campus_name, building_name, room_name)
-    aliases_list.append(f"{cn_building}{cn_room}")
+    aliases_list = generate_aliases(campus_name, building_name, cn_room)
+    aliases_list.extend([room_name, cn_room, f"{cn_building}{cn_room}"])
 
     record = ResourceRecord(
         resource_id=resource_id,
@@ -197,6 +207,7 @@ def ensure_classroom_resource(
         aliases=list(set(aliases_list)),
         source={
             "system": "xk",
+            "source_id": room_id,
             "source_room_code": room_name,
             "source_building_code": building_code,
         },
