@@ -424,6 +424,10 @@ def query_free_classrooms(
     if building_code and building_code in building_map:
         query_summary["buildingName"] = building_map[building_code]
 
+    # Only an exact, unambiguous school-directory match supplies identity.
+    # Directory membership never adds a room to the timetable's free list.
+    _attach_catalog_room_ids(free_rooms, room_catalog)
+
     # 补充每个 room 的 campusName/buildingName + resource_id
     _enrich_rooms_with_resource_id(
         free_rooms,
@@ -613,7 +617,20 @@ def _build_result_from_cache(
         freshness_dict["stale"] = True
         freshness_dict["_needsRefresh"] = True
 
-    rooms = cached.get("rooms", [])
+    rooms = [dict(room) for room in cached.get("rooms", [])]
+    # Older query caches may contain a building-wide empty-ID collision.
+    # Keep their course evidence, but never replay another room's identity.
+    for room in rooms:
+        rid = room.get('resourceId')
+        expected = (f"henu:classroom:xk:{room.get('campusCode', '')}:"
+                    f"{room.get('buildingCode', '')}:{room.get('roomId', '')}")
+        location = room.get('location') if isinstance(room.get('location'), dict) else {}
+        if rid and (not room.get('roomId') or rid != expected
+                or location.get('roomName') != room.get('roomName')
+                or location.get('campusCode') != room.get('campusCode')
+                or location.get('buildingCode') != room.get('buildingCode')):
+            for key in ('resourceId', 'canonicalName', 'aliases', 'location', 'sourceMapping'):
+                room.pop(key, None)
     query = cached.get("query", {})
     invalid_scope = any(query.get(key) != value for key, value in expected_query.items())
     invalid_scope = invalid_scope or any(
@@ -684,6 +701,25 @@ def _period_name(period: int) -> str:
     return names.get(period, "")
 
 
+def _attach_catalog_room_ids(rooms: list[dict[str, Any]], catalog: list[dict[str, Any]]) -> None:
+    by_name: dict[tuple[str, str, str], set[str]] = {}
+    by_id: dict[tuple[str, str, str], set[str]] = {}
+    for entry in catalog:
+        campus, building = entry.get('campusCode'), entry.get('buildingCode')
+        name, rid = entry.get('roomName'), entry.get('roomId')
+        if not all(isinstance(value, str) and value.strip() for value in (campus, building, name, rid)):
+            continue
+        by_name.setdefault((campus, building, name), set()).add(rid)
+        by_id.setdefault((campus, building, rid), set()).add(name)
+    for room in rooms:
+        campus, building, name = room.get('campusCode'), room.get('buildingCode'), room.get('roomName')
+        ids = by_name.get((campus, building, name), set())
+        if len(ids) == 1:
+            rid = next(iter(ids))
+            if by_id[(campus, building, rid)] == {name}:
+                room['roomId'] = rid
+
+
 def _enrich_rooms_with_resource_id(
     rooms: list[dict[str, Any]],
     campus_map: dict[str, str],
@@ -697,7 +733,7 @@ def _enrich_rooms_with_resource_id(
     通过 resource_registry.ensure_classroom_resource 自动创建/获取 resource_id。
     """
     try:
-        from ..resource_registry import ensure_classroom_resource, build_resource_id
+        from ..resource_registry import ensure_classroom_resource
     except ImportError:
         # resource_registry 不可用时不报错
         for room in rooms:
@@ -721,14 +757,14 @@ def _enrich_rooms_with_resource_id(
             room["buildingName"] = building_map[rb]
 
         # 获取或创建 resource_id
-        if rc and rb and room_name:
+        if rc and rb and room_name and room.get('roomId'):
             try:
                 record = ensure_classroom_resource(
                     campus_code=rc,
                     campus_name=campus_map.get(rc, rc),
                     building_code=rb,
                     building_name=building_map.get(rb, rb),
-                    room_id=room.get("roomId", room_name),
+                    room_id=room['roomId'],
                     room_name=room_name,
                     capacity=room.get("capacity", 0),
                     type_name=room.get("typeName", ""),
