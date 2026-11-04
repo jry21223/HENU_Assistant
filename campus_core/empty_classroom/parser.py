@@ -285,8 +285,15 @@ def parse_schedule_html(
         )
         full_html = raw_html + children_html
 
-        # 用 <br> 或换行拆分多门课
-        lines = re.split(r"<br\s*/?>|\n", full_html)
+        # Printed reports shorten overflowing cells and put the full courses
+        # in that same cell's tooltip. Parse the complete source, never the
+        # visible "...详细内容见备注N" summary (or another room's remarks).
+        cell = div.getparent()
+        detail = cell.get("title", "") if cell is not None and cell.tag == "td" else ""
+        if "详细内容见备注" in div.text_content() and detail.strip():
+            lines = re.split(r"[\r\n]+", detail)
+        else:
+            lines = re.split(r"<br\s*/?>|\n", full_html)
         for line in lines:
             # 去除 HTML 标签，只保留文本
             clean_line = re.sub(r"<[^>]+>", "", line)
