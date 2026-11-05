@@ -126,6 +126,10 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_preferences(raw, argv)
     if head == "account":
         return _parse_account(raw, argv)
+    if head == "event":
+        # Custom events use plugin Storage directly; no school account preflight.
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="custom_event",
+            params={}, action="event", should_preload_runtime_context=False)
     if head == "schedule":
         return _parse_schedule(raw, argv)
     if head == "grade":
@@ -157,6 +161,9 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
 def build_help_payload(topic: str) -> dict[str, Any]:
     normalized = _normalize_topic(topic.split())
 
+    if normalized == "event":
+        from henu_plugin.custom_events import HELP
+        return {"topic": "event", "summary": HELP, "commands": ["event help", "event list"]}
     if not normalized:
         return {
             "topic": "root",
@@ -166,6 +173,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "preferences get",
                 "account set --student-id ... --password ...",
                 "schedule now",
+                "event help",
                 "grade list",
                 "grade gpa",
                 "course status",

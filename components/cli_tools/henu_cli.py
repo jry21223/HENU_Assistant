@@ -50,6 +50,24 @@ class HenuCli(BaseHenuTool):
                 query_id=query_id,
             )
 
+        from henu_plugin.custom_events import is_event_command
+        if is_event_command(raw_command):
+            events = getattr(self.plugin, 'custom_events', None)
+            if events is None:
+                return {"success": False, "reply_text": "日程服务未初始化，请稍后重试。"}
+            from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+            kind = str(getattr(session.launcher_type, 'value', session.launcher_type))
+            if kind != 'person':
+                return events.result(False, '请在机器人私聊中管理个人日程。', 'private_reply_required')
+            try:
+                proxy = QueryBasedAPIProxy(query_id=query_id, plugin_runtime_handler=self.plugin.plugin_runtime_handler)
+                bot = str(await proxy.get_bot_uuid() or '')
+            except Exception:
+                return events.result(False, '无法确认当前机器人通道，请稍后重试。', 'event_route_unavailable')
+            return await events.execute(raw_command,
+                sender=str(identity_hint.get('sender_id') or session.sender_id or ''),
+                bot=bot, kind=kind, request_id='query:' + str(query_id))
+
         clean_command, inline_token = split_confirm_token(raw_command)
         spec = inspect_cli_command(clean_command)
         if spec.resolved_tool == "grade_query" and str(getattr(session.launcher_type, "value", session.launcher_type)) != "person":
