@@ -316,6 +316,9 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    if tool == "custom_event":
+        return Card("自定义日程", "已完成" if result.get("success") else "未完成",
+            tuple(escape(line) for line in str(result.get("reply_text") or result.get("msg") or "").splitlines() if line.strip()))
     if tool == "grade_query" and result.get("success"):
         title = "学分绩点" if result.get("view") == "gpa" else "教务成绩"
         subtitle = "入学以来 · 有效 · 主修"

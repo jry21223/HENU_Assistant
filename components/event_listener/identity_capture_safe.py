@@ -62,6 +62,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.PersonMessageReceived)
         async def on_private_yuketang(ctx: context.EventContext):
+            if getattr(self.plugin, "custom_events", None) is not None and await self.plugin.custom_events.handle(ctx, is_group=False):
+                return
             if await handle_navigation(self.plugin, ctx, listener=self):
                 return
             if await handle_card_page(self.plugin, ctx):
@@ -76,6 +78,8 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.GroupMessageReceived)
         async def on_group_yuketang(ctx: context.EventContext):
+            if getattr(self.plugin, "custom_events", None) is not None and await self.plugin.custom_events.handle(ctx, is_group=True):
+                return
             if await handle_navigation(self.plugin, ctx, listener=self):
                 return
             if await handle_card_page(self.plugin, ctx):
@@ -267,6 +271,9 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
         *,
         is_group: bool,
     ) -> None:
+        custom_events = getattr(self.plugin, 'custom_events', None)
+        if custom_events is not None and await custom_events.handle(ctx, is_group=is_group):
+            return
         automation = getattr(self.plugin, 'library_automation', None)
         if automation is not None and await automation.handle(ctx, is_group=is_group):
             return
