@@ -1,0 +1,18 @@
+[Unit]
+Description=Synchronize reviewed HenuSite history into the dedicated LangBot knowledge base
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=henusite-sync
+Group=henusite-sync
+ExecStart=/usr/bin/python3 /opt/henusite-sync/henusite_sync.py --config /etc/henusite-sync/config.json
+UMask=0077
+TimeoutStartSec=45min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/henusite-sync
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
