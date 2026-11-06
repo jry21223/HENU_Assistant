@@ -224,8 +224,15 @@ class CustomEvents:
     async def tick(self, now=None):
         async with self.lock:
             data = await self.read()
-            candidates = [(owner, event_id) for owner, user in data.items()
-                          for event_id in user['events']]
+            snapshot_time = (now or datetime.now(ZONE)).astimezone(ZONE)
+            candidates = []
+            for owner, user in data.items():
+                for event_id, row in user['events'].items():
+                    if row.get('cancelled') or row.get('delivery') or row['remind_minutes'] is None:
+                        continue
+                    due = datetime.fromisoformat(row['start']) - timedelta(minutes=row['remind_minutes'])
+                    if snapshot_time >= due:
+                        candidates.append((owner, event_id))
         for owner, event_id in candidates:
             # Re-read before each claim: pending cancellations and changes must
             # win over the scan's old snapshot while earlier sends are blocked.

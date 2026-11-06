@@ -353,3 +353,27 @@ def test_old_event_and_cancellation_history_is_retained():
         events = next(iter(json.loads(p.data[KEY]).values()))['events']
         assert len(events) == 2 and events[event_id]['cancelled'] is True
     asyncio.run(run())
+
+
+def test_idle_history_scan_reads_storage_once():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        rows = {}
+        for i in range(1000):
+            row = dict(id=str(i), start='2026-11-06T19:00:00+08:00', remind_minutes=30)
+            if i % 4 == 0:
+                row['cancelled'] = True
+            elif i % 4 == 1:
+                row['delivery'] = 'sent'
+            elif i % 4 == 2:
+                row['remind_minutes'] = None
+            else:
+                row['start'] = '2026-11-07T19:00:00+08:00'
+            rows[str(i)] = row
+        p.data[KEY] = json.dumps({'owner': dict(events=rows, requests={}, sender='alice', bot='bot')}).encode()
+        p.get_plugin_storage = AsyncMock(wraps=p.get_plugin_storage)
+        before = p.data[KEY]
+        await m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE))
+        assert p.get_plugin_storage.await_count == 1
+        assert not p.sent and p.data[KEY] == before
+    asyncio.run(run())
