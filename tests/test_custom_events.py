@@ -213,3 +213,143 @@ def test_real_cli_tool_routes_without_school_preflight(monkeypatch):
         group = Session(launcher_type=LauncherTypes.GROUP, launcher_id='group', sender_id='alice')
         assert not (await tool.call({'command': 'event list'}, group, 9))['success']
     asyncio.run(run())
+
+
+def test_slow_send_does_not_block_other_users_or_pending_cancellation():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m, sender='alice')
+        await command(m, sender='bob')
+        bob_id = (await command(m, 'event list', sender='bob'))['events'][0]['id']
+        sending, release = asyncio.Event(), asyncio.Event()
+        async def send(*args):
+            p.sent.append(args)
+            sending.set()
+            await release.wait()
+        p.send_message = send
+        task = asyncio.create_task(m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE)))
+        try:
+            await asyncio.wait_for(sending.wait(), 2)
+            assert (await asyncio.wait_for(command(m, 'event list', sender='bob'), 2))['total'] == 1
+            result = await asyncio.wait_for(command(m, f'event cancel --id {bob_id}', sender='bob'), 2)
+            assert result['success']
+            release.set()
+            await asyncio.wait_for(task, 2)
+            assert len(p.sent) == 1 and p.sent[0][2] == 'alice'
+            assert not (await command(m, 'event list', sender='bob'))['events']
+        finally:
+            release.set()
+            await task
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('send_fails', [False, True])
+@pytest.mark.parametrize('options', ['--start "2026-11-06T19:00"', '--remind-minutes 030',
+    '--start "2026-11-06 19:00" --remind-minutes 30'])
+def test_repeated_normalized_timing_preserves_sent_or_uncertain_claim(send_fails, options):
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        p.fail_send = send_fails
+        await m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE))
+        before = (await command(m, 'event list'))['events'][0]
+        result = await command(m, f"event update --id {before['id']} --title 改名 {options}")
+        assert result['success']
+        after = (await command(m, 'event list'))['events'][0]
+        assert after['delivery'] == before['delivery']
+        assert after['claim_id'] == before['claim_id'] and after['claimed_at'] == before['claimed_at']
+        await CustomEvents(p).tick(datetime(2026, 11, 6, 18, 31, tzinfo=ZONE))
+        assert len(p.sent) == 1
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('options', ['--location 新地点', '--end "2026-11-06 20:30"',
+    '--title 改名 --start "2026-11-06T19:00"'])
+def test_ongoing_event_can_be_edited_without_moving_start(options):
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        event_id = (await command(m, 'event list'))['events'][0]['id']
+        now = datetime(2026, 11, 6, 19, 10, tzinfo=ZONE)
+        result = await m.execute(f'event update --id {event_id} {options}', sender='alice', bot='bot', now=now)
+        assert result['success']
+        assert not (await m.execute(f'event update --id {event_id} --start "2026-11-06 19:05"',
+                                   sender='alice', bot='bot', now=now))['success']
+    asyncio.run(run())
+
+
+def test_inflight_receipt_does_not_overwrite_reschedule_or_unrelated_updates():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        event_id = (await command(m, 'event list'))['events'][0]['id']
+        sending, release = asyncio.Event(), asyncio.Event()
+        async def send(*args):
+            p.sent.append(args)
+            sending.set()
+            await release.wait()
+        p.send_message = send
+        task = asyncio.create_task(m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE)))
+        try:
+            await asyncio.wait_for(sending.wait(), 2)
+            result = await asyncio.wait_for(command(m, f'event update --id {event_id} --title 改期 '
+                '--start "2026-11-07 19:00" --end "2026-11-07 20:00"'), 2)
+            assert result['success']
+            # An overlapping scan cannot send the already-claimed original timing.
+            await m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE))
+            release.set()
+            await asyncio.wait_for(task, 2)
+            row = (await command(m, 'event list'))['events'][0]
+            assert row['title'] == '改期' and not row.get('delivery') and not row.get('claim_id')
+            await m.tick(datetime(2026, 11, 7, 18, 30, tzinfo=ZONE))
+            assert len(p.sent) == 2
+        finally:
+            release.set()
+            await task
+    asyncio.run(run())
+
+
+def test_successful_receipt_preserves_edits_made_during_send():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        event_id = (await command(m, 'event list'))['events'][0]['id']
+        async def send(*args):
+            p.sent.append(args)
+            assert (await command(m, f'event update --id {event_id} --title 新标题 --note 新备注'))['success']
+        p.send_message = send
+        await asyncio.wait_for(m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE)), 2)
+        row = (await command(m, 'event list'))['events'][0]
+        assert (row['title'], row['note'], row['delivery']) == ('新标题', '新备注', 'sent')
+    asyncio.run(run())
+
+
+def test_unconfirmed_receipt_write_does_not_allow_resend_after_restart():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        async def send(*args):
+            p.sent.append(args)
+            p.fail_write = True
+        p.send_message = send
+        with pytest.raises(OSError):
+            await m.tick(datetime(2026, 11, 6, 18, 30, tzinfo=ZONE))
+        p.fail_write = False
+        await CustomEvents(p).tick(datetime(2026, 11, 6, 18, 31, tzinfo=ZONE))
+        assert len(p.sent) == 1
+        assert (await command(m, 'event list'))['events'][0]['delivery'] == 'unknown'
+    asyncio.run(run())
+
+
+def test_old_event_and_cancellation_history_is_retained():
+    async def run():
+        p = Plugin(); m = CustomEvents(p)
+        await command(m)
+        event_id = (await command(m, 'event list'))['events'][0]['id']
+        await command(m, f'event cancel --id {event_id}')
+        result = await m.execute('event add --title 后续会 --start "2027-01-06 19:00"',
+            sender='alice', bot='bot', now=datetime(2027, 1, 5, 12, tzinfo=ZONE))
+        assert result['success']
+        events = next(iter(json.loads(p.data[KEY]).values()))['events']
+        assert len(events) == 2 and events[event_id]['cancelled'] is True
+    asyncio.run(run())
