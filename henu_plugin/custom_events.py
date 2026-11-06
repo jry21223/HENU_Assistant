@@ -160,7 +160,9 @@ class CustomEvents:
                     if not row['title'] or not row['start']:
                         raise ValueError('请提供日程名称和具体开始日期、时间。')
                     start = datetime.fromisoformat(row['start'])
-                    if start <= now:
+                    timing_changed = (action == 'add' or
+                        start != datetime.fromisoformat(rows[event_id]['start']))
+                    if timing_changed and start <= now:
                         raise ValueError('开始时间必须晚于当前北京时间。')
                     if row['end'] and datetime.fromisoformat(row['end']) <= start:
                         raise ValueError('结束时间必须晚于开始时间。')
@@ -172,17 +174,18 @@ class CustomEvents:
                             raise ValueError('提前提醒分钟数须为0至10080的整数，或 off 不提醒。')
                         else:
                             row['remind_minutes'] = int(value)
-                    if action == 'add' or any(k in options for k in ('start', 'remind-minutes')):
+                    timing_changed = (timing_changed or
+                        row['remind_minutes'] != rows[event_id]['remind_minutes'])
+                    if timing_changed:
                         row.pop('delivery', None)
                         row.pop('claimed_at', None)
+                        row.pop('claim_id', None)
                     row['updated_at'] = now.isoformat()
                     rows[row['id']] = row
                     message = ('已添加自定义日程：\n' if action == 'add' else '已修改自定义日程：\n') + describe(row)
                     if row['remind_minutes'] is not None and start - timedelta(minutes=row['remind_minutes']) < now:
                         message += '\n提前提醒时刻已过，将在下一次扫描提醒（约30秒内）。'
-                # Bound receipt/history size without touching future events.
-                cutoff = now - timedelta(days=30)
-                user['events'] = {k: r for k, r in rows.items() if datetime.fromisoformat(r.get('end') or r['start']) >= cutoff}
+                # Keep event and cancellation history; only retry receipts expire.
                 user['requests'] = {k: r for k, r in user['requests'].items() if datetime.fromisoformat(r['at']) >= now - timedelta(days=1)}
                 if request_id:
                     user['requests'][receipt] = {'message': message, 'at': now.isoformat()}
@@ -219,32 +222,53 @@ class CustomEvents:
         return True
 
     async def tick(self, now=None):
-        now = (now or datetime.now(ZONE)).astimezone(ZONE)
         async with self.lock:
             data = await self.read()
-            for user in data.values():
-                for row in user['events'].values():
+            snapshot_time = (now or datetime.now(ZONE)).astimezone(ZONE)
+            candidates = []
+            for owner, user in data.items():
+                for event_id, row in user['events'].items():
                     if row.get('cancelled') or row.get('delivery') or row['remind_minutes'] is None:
                         continue
-                    start = datetime.fromisoformat(row['start'])
-                    due = start - timedelta(minutes=row['remind_minutes'])
-                    if now < due:
-                        continue
-                    # After downtime, still remind before the meeting; never send stale meetings.
-                    if now > start + timedelta(seconds=60):
-                        row['delivery'] = 'missed'
-                        await self.write(data)
-                        continue
-                    reminder_text = describe(row)
-                    row['delivery'] = 'unknown'
-                    row['claimed_at'] = now.isoformat()
-                    await self.write(data)  # Durable claim BEFORE external send.
-                    try:
-                        pages = text_card('日程提醒', reminder_text)
-                        await asyncio.wait_for(self.plugin.send_message(user['bot'], 'person', user['sender'], card_chain(pages[0])), 15)
-                    except Exception:
-                        logger.warning('Custom event delivery unconfirmed; automatic resend disabled')
-                        continue
+                    due = datetime.fromisoformat(row['start']) - timedelta(minutes=row['remind_minutes'])
+                    if snapshot_time >= due:
+                        candidates.append((owner, event_id))
+        for owner, event_id in candidates:
+            # Re-read before each claim: pending cancellations and changes must
+            # win over the scan's old snapshot while earlier sends are blocked.
+            async with self.lock:
+                data = await self.read()
+                user = data.get(owner)
+                row = user['events'].get(event_id) if user else None
+                if not row or row.get('cancelled') or row.get('delivery') or row['remind_minutes'] is None:
+                    continue
+                current = (now or datetime.now(ZONE)).astimezone(ZONE)
+                start = datetime.fromisoformat(row['start'])
+                due = start - timedelta(minutes=row['remind_minutes'])
+                if current < due:
+                    continue
+                if current > start + timedelta(seconds=60):
+                    row['delivery'] = 'missed'
+                    await self.write(data)
+                    continue
+                reminder_text = describe(row)
+                claim_id = uuid.uuid4().hex
+                row.update(delivery='unknown', claimed_at=current.isoformat(), claim_id=claim_id)
+                await self.write(data)  # Durable claim BEFORE external send.
+                bot, sender = user['bot'], user['sender']
+            try:
+                pages = text_card('日程提醒', reminder_text)
+                await asyncio.wait_for(self.plugin.send_message(bot, 'person', sender, card_chain(pages[0])), 15)
+            except Exception:
+                logger.warning('Custom event delivery unconfirmed; automatic resend disabled')
+                continue
+            async with self.lock:
+                data = await self.read()
+                user = data.get(owner)
+                row = user['events'].get(event_id) if user else None
+                # A new timing configuration owns its own delivery lifecycle.
+                # A late receipt must not overwrite edits or another claim.
+                if row and row.get('claim_id') == claim_id and row.get('delivery') == 'unknown':
                     row['delivery'] = 'sent'
                     await self.write(data)
 
