@@ -143,6 +143,30 @@ async def confirm(storage, tool, session, query_id):
     return await tool.call({"command": "confirm " + pending["token"]}, session, query_id)
 
 
+def test_start_preview_reaches_qq_with_scoped_confirmation(workflow, monkeypatch):
+    from unittest.mock import AsyncMock
+    import langbot_plugin.api.proxies.query_based_api as api
+    from henu_plugin.qq_buttons import MARKER
+
+    async def run():
+        server, storage, tool, session = workflow
+        server.status = 0
+        storage.plugin_runtime_handler = object()
+        proxy = SimpleNamespace(get_bot_uuid=AsyncMock(return_value="bot"),
+                                set_query_var=AsyncMock(), get_query_vars=AsyncMock(return_value={}))
+        monkeypatch.setattr(api, "QueryBasedAPIProxy", lambda **kwargs: proxy)
+        result = await tool.call({"command": f"yuketang quiz start {TARGET}"}, session, 1)
+        assert result["confirmation_required"]
+        cards = [call.args[1] for call in proxy.set_query_var.call_args_list
+                 if call.args[0] == "_henu_card"]
+        assert cards
+        assert "预览已更新" not in cards[-1]["page"]
+        assert MARKER in cards[-1]["page"]
+        assert not server.posts
+
+    asyncio.run(run())
+
+
 def test_start_needs_its_own_confirmation_and_does_not_submit(workflow):
     async def run():
         server, storage, tool, session = workflow
