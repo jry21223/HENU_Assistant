@@ -100,10 +100,14 @@ class QuizFlow:
                 summary += f"；限时 {quiz.get('limit_seconds', '未提供')} 秒（0 为不限时）"
             elif operation["operation"] == "save":
                 summary += f"；本次拟保存 {preview['planned_count']} 题，不交卷"
-            return await self.tool._request_confirmation(
+            result = await self.tool._request_confirmation(
                 storage_key=self.owner, canonical_command=command, action=action,
                 parameter_summary=summary, query_id=self.query_id,
                 conversation=conversation_context(self.session), extra_pending={"quiz_operation": operation})
+            if result.get("confirmation_required"):
+                from henu_plugin.qq_buttons import bind_preview_command
+                bind_preview_command(command)
+            return result
 
     async def confirmed(self, spec: Any, pending: dict[str, Any]) -> dict[str, Any]:
         from henu_plugin.confirmation import conversation_context, validate_pending_operation

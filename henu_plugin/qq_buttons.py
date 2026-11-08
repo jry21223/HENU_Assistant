@@ -26,6 +26,11 @@ COMMAND = re.compile(r"HENU_BUTTON ([A-Za-z0-9_-]{24})")
 _preview_command = ContextVar("henu_preview_command", default="")
 
 
+def bind_preview_command(command: str) -> None:
+    """Bind the server-enriched command within the current CLI invocation."""
+    _preview_command.set(split_confirm_token(command)[0])
+
+
 def _action_fingerprint(payload):
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
