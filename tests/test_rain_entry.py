@@ -338,12 +338,13 @@ def test_pending_detail_read_cannot_restore_replaced_selection(workflow, monkeyp
             return server.get(url, **kwargs)
         monkeypatch.setattr(requests, 'get', get)
         old = context('选择第1项', 2)
-        await handle_navigation(plugin, old)
+        old_request = asyncio.create_task(handle_navigation(plugin, old))
         assert await asyncio.to_thread(entered.wait, 3)
         replacement = context('选择第1项', 3)
-        await handle_navigation(plugin, replacement)
+        replacement_request = asyncio.create_task(handle_navigation(plugin, replacement))
+        await asyncio.sleep(0)
         release.set()
-        await asyncio.gather(*plugin._rain_entry.tasks.values())
+        await asyncio.gather(old_request, replacement_request)
         with pytest.raises(AssertionError, match='missing button'):
             button(old, '查看开始预览')
         assert button(replacement, '查看开始预览').startswith('HENU_BUTTON ')
@@ -365,14 +366,57 @@ def test_preview_delivery_race_cannot_arm_stale_confirmation(workflow):
                 delivered.set()
                 await release.wait()
         preview.reply.side_effect = reply
-        await handle_navigation(plugin, preview)
+        preview_request = asyncio.create_task(handle_navigation(plugin, preview))
         await asyncio.wait_for(delivered.wait(), 3)
         pending = json.loads(plugin.data['user:quiz-user:pending_operation'])
         replacement = context('选择第1项', 4)
         await handle_navigation(plugin, replacement)
         release.set()
-        await asyncio.gather(*plugin._rain_entry.tasks.values())
+        await preview_request
         result = await tool.call({'command': 'confirm ' + pending['token']}, session, 5)
         assert result.get('error_code') == 'rain_selection_changed'
+        assert not server.posts
+    asyncio.run(run())
+
+
+def test_sdk_query_route_remains_alive_until_final_rain_reply(workflow):
+    async def run():
+        from langbot_plugin.runtime.io.handler import Handler
+        from langbot_plugin.api.proxies.query_based_api import QueryBasedAPIProxy
+        from henu_plugin.qq_navigation import handle_navigation
+        server, plugin, _, _ = workflow
+        alive, calls, messages = [True], [], []
+        class QueryHost(Handler):
+            def __init__(self):
+                self.variables = {}
+            async def call_action(self, action, data, **kwargs):
+                await asyncio.sleep(0)
+                calls.append((str(action), alive[0]))
+                if not alive[0]:
+                    raise RuntimeError('Query route removed after listener returned')
+                name = str(getattr(action, 'value', action)).lower()
+                if 'get_bot_uuid' in name:
+                    return {'bot_uuid': 'synthetic-bot'}
+                if 'get_query_vars' in name:
+                    return {'vars': self.variables}
+                if 'set_query_var' in name:
+                    self.variables[data['key']] = data['value']
+                    return {}
+                if 'reply' in name:
+                    messages.append(data['message_chain'])
+                    return {}
+                raise AssertionError(name)
+        plugin.plugin_runtime_handler = QueryHost()
+        proxy = QueryBasedAPIProxy(query_id=1, plugin_runtime_handler=plugin.plugin_runtime_handler)
+        ctx = context('开始考试')
+        ctx.get_bot_uuid = proxy.get_bot_uuid
+        ctx.reply = proxy.reply
+        assert await handle_navigation(plugin, ctx)
+        # Mirrors Host's pipeline finally: ordinary natural-language queries are
+        # removed as soon as the listener has returned.
+        alive[0] = False
+        await asyncio.gather(*plugin._rain_entry.tasks.values())
+        assert calls and all(was_alive for _, was_alive in calls)
+        assert '合成测验' in str(messages)
         assert not server.posts
     asyncio.run(run())
