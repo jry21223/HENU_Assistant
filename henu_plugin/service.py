@@ -1172,13 +1172,17 @@ class HenuPluginService:
 
     def _yuketang_courses(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            courses = self._yuketang_catalog().courses()
+            catalog = self._yuketang_catalog()
+            courses = catalog.courses()
         except CatalogError as exc:
             return self._yuketang_catalog_failure(exc)
-        lines = [f"雨课堂课程与班级：共 {len(courses)} 个。"]
+        lines = [f"本次雨课堂接口返回 {len(courses)} 个课程班级。"]
         lines.extend(f"{course['course_name']} → {course['classroom_label']}（ID {course['classroom_id']}）" for course in courses)
         lines.append('考试白名单新增可用课程名或班级标签；后台保存班级标签，含空格需加引号。')
-        return {"success": True, "courses": courses, "total": len(courses), "source": "live_rain_api",
+        coverage = {'total': len(courses), 'scanned': len(courses), 'failed': [], **catalog.course_coverage}
+        if not coverage['complete']:
+            lines.append('官方未提供穷尽标记，不能据此确认已覆盖所有课程。')
+        return {"success": True, "courses": courses, "total": len(courses), "source": "live_rain_api", "coverage": coverage,
                 "msg": "雨课堂课程查询成功", "reply_text": "\n".join(lines)}
 
     def _yuketang_exam_list(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -1195,7 +1199,8 @@ class HenuPluginService:
                 line += "；封面关联未核实，时间来自活动列表"
             lines.append(line)
         lines.append("以上为只读查询；未开始考试、获取试卷或提交答案。")
-        return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams),
+        coverage = {'total': 1, 'scanned': 1, 'failed': [], **catalog.activity_coverage.get(classroom['classroom_id'], {})}
+        return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams), "coverage": coverage,
                 "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}
 
     def _yuketang_browse(self, params: dict[str, Any]) -> dict[str, Any]:
