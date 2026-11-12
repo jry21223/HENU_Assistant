@@ -232,11 +232,16 @@ class RainCatalog:
             'complete': batch_complete and provider_complete, 'batch_complete': batch_complete,
             'provider_completeness': 'verified' if provider_complete else 'unknown',
             'reason': '' if batch_complete and provider_complete else '仅覆盖本次官方响应；未核验官方课程或活动是否还有其它分页。'}
-        return dict(success=True, activities=activities[start:start + 5], page=page, page_size=5,
+        result = dict(success=True, activities=activities[start:start + 5], page=page, page_size=5,
             total=len(activities), has_more=start + 5 < len(activities), coverage=coverage,
             account_revision=account, source='live_rain_api', view=view, course=course, query=query,
             msg='雨课堂测评列表已读取', reply_text=f'本次已查 {scanned}/{len(courses)} 个班级；找到 {len(activities)} 项，当前第 {page} 页。' +
                 (' 查询范围尚未完整核验。' if not coverage['complete'] else ''))
+        if failures and scanned == 0:
+            result.update(success=False, error_code='rain_activity_queries_failed',
+                msg='未能读取任何班级的测评列表，请稍后重试。',
+                reply_text='本次测评查询失败；不能据此判断没有可参加的测评。')
+        return result
 
     def activity_detail(self, classroom_id: str, kind: str, identifier: str) -> dict[str, Any]:
         from henu_plugin.yuketang_quiz import RainQuiz
