@@ -158,6 +158,9 @@ async def confirmation_actions(
         if str(pending.get("command") or "").startswith("library reserve ")
         else "确认操作"
     )
+    for action, caption in [('start', '确认开始'), ('save', '确认保存'), ('submit', '确认交卷')]:
+        if expected.startswith('yuketang quiz ' + action + ' '):
+            label = caption
     return _actions(
         plugin,
         owner,
@@ -214,6 +217,9 @@ async def handle(plugin, ctx, text=None):
 
 
 async def dispatch(plugin, ctx, payload, *, receipt=None):
+    if payload['kind'].startswith('rain_'):
+        from henu_plugin.rain_entry import dispatch_rain
+        return await dispatch_rain(plugin, ctx, payload, receipt=receipt)
     if payload["kind"].startswith("alert_booking_"):
         alerts = getattr(plugin, "library_seat_alerts", None)
         if alerts is not None:

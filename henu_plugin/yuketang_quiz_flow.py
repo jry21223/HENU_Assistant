@@ -58,7 +58,7 @@ class QuizFlow:
     @staticmethod
     def preview_command(spec: Any) -> str:
         argv = ["yuketang", "quiz", "preview", "--operation", spec.params["operation"]]
-        for key in ("course", "quiz_id", "revision", "answers_json"):
+        for key in ("course", "classroom_id", "quiz_id", "revision", "answers_json"):
             if key in spec.params:
                 argv.extend(["--" + key.replace("_", "-"), str(spec.params[key])])
         return shlex.join(argv)
@@ -100,18 +100,32 @@ class QuizFlow:
                 summary += f"；限时 {quiz.get('limit_seconds', '未提供')} 秒（0 为不限时）"
             elif operation["operation"] == "save":
                 summary += f"；本次拟保存 {preview['planned_count']} 题，不交卷"
+            from henu_plugin.rain_entry import active_selection
+            selection = active_selection.get()
             result = await self.tool._request_confirmation(
                 storage_key=self.owner, canonical_command=command, action=action,
                 parameter_summary=summary, query_id=self.query_id,
-                conversation=conversation_context(self.session), extra_pending={"quiz_operation": operation})
+                conversation=conversation_context(self.session), extra_pending={"quiz_operation": operation,
+                    **({'rain_entry_selection': selection} if selection else {})})
             if result.get("confirmation_required"):
                 from henu_plugin.qq_buttons import bind_preview_command
                 bind_preview_command(command)
+                result['quiz'] = quiz
+                result['canonical_command'] = command
+                result['operation'] = operation['operation']
             return result
 
     async def confirmed(self, spec: Any, pending: dict[str, Any]) -> dict[str, Any]:
         from henu_plugin.confirmation import conversation_context, validate_pending_operation
         async with self.lock:
+            selection = pending.get('rain_entry_selection')
+            if selection:
+                from henu_plugin.rain_entry import entry
+                owner = tuple(selection.get('owner') or [])
+                state = entry(self.plugin).valid(owner)
+                if (state is None or state.version != selection.get('version')
+                        or state.preview_command != pending.get('command')):
+                    return self.failure('rain_selection_changed', '列表或开始预览已更新、过期或未成功展示，请重新选择测评。')
             # Another request may have consumed or replaced this confirmation
             # while this request was waiting for the per-user lock.
             current = await self.tool._load_pending(self.owner)
