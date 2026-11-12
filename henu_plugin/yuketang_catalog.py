@@ -84,11 +84,30 @@ class RainCatalog:
         if payload.get("errcode") != 0 or not isinstance(activities, list):
             raise CatalogError("rain_query_failed", "考试列表查询失败，不能判断是否有考试。")
         declared_total = data.get("total")
+        envelopes = [(payload, data)]
+        page, pages = 0, {0}
+        while data.get('next_page') is not None and data.get('next_page') is not False:
+            next_page = data['next_page']
+            if type(next_page) is not int or next_page <= page or next_page in pages or len(pages) >= 32:
+                raise CatalogError('rain_response_invalid', '测评分页标识重复或无效，无法核对完整范围。')
+            page = next_page
+            pages.add(page)
+            next_payload = self._read(f'/v2/api/web/logs/learn/{identifier}?actype=5&page={page}&offset=100&sort=-1')
+            data = next_payload.get('data')
+            next_rows = data.get('activities') if isinstance(data, dict) else None
+            if next_payload.get('errcode') != 0 or not isinstance(next_rows, list):
+                raise CatalogError('rain_query_failed', '测评分页查询失败，不能将部分结果当作完整列表。')
+            if type(data.get('total')) is int:
+                if type(declared_total) is int and declared_total != data['total']:
+                    raise CatalogError('rain_response_invalid', '测评分页总数已变化，请重新查询。')
+                declared_total = data['total']
+            activities = [*activities, *next_rows]
+            envelopes.append((next_payload, data))
         self.activity_coverage[identifier] = {"returned": len(activities),
             "complete": type(declared_total) is int and declared_total == len(activities) and not data.get("has_more"),
             "declared_total": declared_total if type(declared_total) is int else None,
             "reason": "活动列表未提供可核验的总数或穷尽标记"}
-        for envelope in (payload, data):
+        for envelope in (value for pair in envelopes for value in pair):
             if (isinstance(envelope, dict) and "classroom_id" in envelope
                     and str(envelope["classroom_id"]) != identifier):
                 raise CatalogError("rain_response_invalid", "测评列表所属班级无效，未继续读取。")
@@ -171,7 +190,7 @@ class RainCatalog:
             raise CatalogError('rain_identity_unverified', '无法核实当前雨课堂登录主体，请重新登录后查询。')
         return hashlib.sha256(json.dumps([self.domain, user], separators=(',', ':')).encode()).hexdigest()
 
-    def browse(self, *, course: str = '', page: int = 1, view: str = 'available') -> dict[str, Any]:
+    def browse(self, *, course: str = '', page: int = 1, view: str = 'available', query: str = '') -> dict[str, Any]:
         if type(page) is not int or not 1 <= page <= 9999 or view not in {'available', 'all'}:
             raise CatalogError('rain_page_invalid', '测评列表页码或筛选条件无效。')
         account = self.account_revision()
@@ -200,6 +219,8 @@ class RainCatalog:
             row.get('deadline_china') or '9999', row['course_name'], row['classroom_id'], row['assessment_type'], row['assessment_id']))
         if view == 'available':
             activities = [row for row in activities if row['can_start'] or row['can_continue']]
+        if query:
+            activities = [row for row in activities if any(query in row[field] for field in ('course_name', 'classroom_label', 'title'))]
         start = (page - 1) * 5
         if page > 1 and start >= len(activities):
             raise CatalogError('rain_page_invalid', '页码超出当前测评列表，请返回第一页重新查询。')
@@ -213,7 +234,7 @@ class RainCatalog:
             'reason': '' if batch_complete and provider_complete else '仅覆盖本次官方响应；未核验官方课程或活动是否还有其它分页。'}
         return dict(success=True, activities=activities[start:start + 5], page=page, page_size=5,
             total=len(activities), has_more=start + 5 < len(activities), coverage=coverage,
-            account_revision=account, source='live_rain_api', view=view, course=course,
+            account_revision=account, source='live_rain_api', view=view, course=course, query=query,
             msg='雨课堂测评列表已读取', reply_text=f'本次已查 {scanned}/{len(courses)} 个班级；找到 {len(activities)} 项，当前第 {page} 页。' +
                 (' 查询范围尚未完整核验。' if not coverage['complete'] else ''))
 
@@ -237,12 +258,22 @@ class RainCatalog:
             client = RainQuiz(self.domain, self._headers['Cookie'], classroom, activity)
             snapshot = client.snapshot()
             activity.update({key: snapshot.quiz[key] for key in ('question_count', 'limit_seconds', 'saved_count', 'status', 'status_label')})
+            if snapshot.quiz.get('deadline_china'):
+                activity['deadline_china'] = snapshot.quiz['deadline_china']
+                activity['expired'] = snapshot.quiz['expired']
             activity['metadata_revision'] = snapshot.quiz['metadata_revision']
             activity['can_start'] = snapshot.quiz['status'] == 0 and not activity['expired']
             activity['can_continue'] = snapshot.quiz['status'] == 1 and not activity['expired']
             if snapshot.quiz['status'] == 2:
                 backend['submission'] = 'submitted'
                 activity['availability'] = 'submitted'
+            elif activity['expired'] or snapshot.quiz['status'] == 3:
+                activity['availability'] = 'expired'
+                if snapshot.quiz['status'] in (0, 1):
+                    activity['status_label'] = '已截止'
+            else:
+                activity['availability'] = {0: 'not_started', 1: 'in_progress'}.get(snapshot.quiz['status'], 'unknown')
+            activity['display_status'] = activity['status_label']
             if snapshot.quiz['status'] == 1:
                 backend['saved'] = 'verified' if snapshot.quiz['saved_count'] == snapshot.quiz['question_count'] else 'partial'
         elif activity['status_label'] == '已交卷':

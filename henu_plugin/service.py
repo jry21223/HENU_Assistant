@@ -1199,13 +1199,19 @@ class HenuPluginService:
                 "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}
 
     def _yuketang_browse(self, params: dict[str, Any]) -> dict[str, Any]:
+        identity = getattr(_CURRENT_IDENTITY, 'value', None)
+        if identity is None or identity.launcher_type != 'person':
+            return {'success': False, 'error_code': 'private_reply_required', 'msg': '个人测评只能在本人私聊中查询。'}
         try:
             return self._yuketang_catalog().browse(course=_text(params.get("course")),
-                page=int(params.get("page") or 1), view=_text(params.get("view")) or "available")
+                page=int(params.get("page") or 1), view=_text(params.get("view")) or "available", query=_text(params.get('query')))
         except CatalogError as exc:
             return self._yuketang_catalog_failure(exc)
 
     def _yuketang_activity_show(self, params: dict[str, Any]) -> dict[str, Any]:
+        identity = getattr(_CURRENT_IDENTITY, 'value', None)
+        if identity is None or identity.launcher_type != 'person':
+            return {'success': False, 'error_code': 'private_reply_required', 'msg': '个人测评只能在本人私聊中查询。'}
         try:
             return self._yuketang_catalog().activity_detail(_text(params.get("classroom_id")),
                 _text(params.get("type")), _text(params.get("id")))
