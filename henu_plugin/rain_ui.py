@@ -13,7 +13,7 @@ UNKNOWN = '未提供'
 CHINA = ZoneInfo('Asia/Shanghai')
 
 
-def china_time(value: Any) -> str:
+def _china_moment(value: Any) -> datetime | None:
     try:
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
             moment = datetime.fromtimestamp(value / 1000 if value > 1e12 else value, CHINA)
@@ -21,10 +21,15 @@ def china_time(value: Any) -> str:
             moment = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
             moment = moment.replace(tzinfo=CHINA) if moment.tzinfo is None else moment.astimezone(CHINA)
         else:
-            return UNKNOWN
-        return moment.strftime('%Y-%m-%d %H:%M')
+            return None
+        return moment
     except (ValueError, TypeError, OverflowError, OSError):
-        return UNKNOWN
+        return None
+
+
+def china_time(value: Any) -> str:
+    moment = _china_moment(value)
+    return moment.strftime('%Y-%m-%d %H:%M') if moment is not None else UNKNOWN
 
 
 def duration(value: Any) -> str:
@@ -45,8 +50,8 @@ def assessment_state(row: dict) -> str:
     labels = {0: '未开始', 1: '进行中', 2: '已交卷', 3: '已截止'} if kind == 'quiz' else {
         0: '未开始', 1: '进行中', 2: '已截止', 3: '已交卷'}
     if state in (0, 1):
-        deadline = china_time(_value(row, 'deadline_china', 'deadline', default=None))
-        if deadline != UNKNOWN and deadline < datetime.now(CHINA).strftime('%Y-%m-%d %H:%M'):
+        deadline = _china_moment(_value(row, 'deadline', 'deadline_china', default=None))
+        if row.get('expired') is True or deadline is not None and datetime.now(CHINA) >= deadline:
             return '已截止'
     return labels.get(state, str(_value(row, 'status_label', default='状态未核验')))
 
@@ -79,7 +84,7 @@ def _backend_lines(result: dict) -> list[str]:
     labels = (
         ('target', '目标发现', {'found': '已发现', 'discovered': '已发现'}),
         ('model', '模型处理', {'processing': '处理中', 'started': '处理中', 'returned': '已返回结果'}),
-        ('saved', '答案保存', {'verified': '已由官方缓存核验'}),
+        ('saved', '答案保存', {'verified': '已由官方缓存核验', 'partial': '尚未全部保存'}),
         ('submission', '正式交卷', {'submitted': '已由官方状态核验', 'not_submitted': '未交卷'}),
     )
     lines = []
@@ -93,7 +98,8 @@ def _backend_lines(result: dict) -> list[str]:
         if key == 'submission' and result.get('submission_state') == 'not_submitted':
             state = 'not_submitted'
         if key == 'saved' and result.get('submission_state') == 'not_submitted' and row and type(row.get('saved_count')) is int:
-            state = 'verified'
+            count = row.get('question_count')
+            state = 'verified' if type(count) is int and count > 0 and row['saved_count'] == count else 'partial'
         lines.append(label + '：' + known.get(str(state), '未核验'))
     return lines
 
@@ -218,7 +224,11 @@ def result_card(result: dict, tool: str = 'henu_cli') -> Card | None:
             next_step = '未开始时选择“开始预览”；已开始时先核对后台与官方草稿。'
         title = {'yuketang_quiz_start': '开始结果', 'yuketang_quiz_save': '答案保存',
                  'yuketang_quiz_submit': '提交结果'}.get(tool, '测评详情')
-        receipt = '已保存 · 未交卷' if tool == 'yuketang_quiz_save' and result.get('submission_state') == 'not_submitted' else state
+        receipt = state
+        if tool == 'yuketang_quiz_save' and result.get('submission_state') == 'not_submitted':
+            count, total = row.get('saved_count'), row.get('question_count')
+            complete = type(count) is int and type(total) is int and total > 0 and count == total
+            receipt = '已保存 · 未交卷' if complete else '尚未全部保存 · 未交卷'
         return Card('雨课堂 · ' + title, receipt, tuple(lines), next_step)
     if tool in {'yuketang_login', 'yuketang_logout', 'yuketang_account_set', 'yuketang_set_token'}:
         return Card('雨课堂 · 登录' if tool != 'yuketang_logout' else '雨课堂 · 退出登录', '',
