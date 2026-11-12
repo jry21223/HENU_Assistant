@@ -13,7 +13,7 @@ import time
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from henu_plugin.qq_cards import Card, card_chain, scope, escape, result_card
+from henu_plugin.qq_cards import Card, card_chain, scope, result_card
 from henu_plugin.qq_buttons import actions, envelope, confirmation_actions
 
 active_selection = ContextVar('rain_entry_selection', default=None)
@@ -172,11 +172,14 @@ class RainEntry:
                 result = await self.call(ctx, 'yuketang status')
                 if self.selections.get(owner) is not state:
                     return
+                status_card = result_card(result, 'yuketang_status')
+                summary = tuple(next((line for line in status_card.lines if line.startswith(label)),
+                    label + '未核验') for label in ('登录状态：', '监听设置：', '监听运行：', '桥端配置：'))
                 await self.tell(ctx, Card('雨课堂', '选择你要办理的事', (
                     '考试与测验：先选目标、核对限制，再开始。',
                     '默认仅保存答案；正式交卷需要独立本人授权。',
                     '配置或监听成功不代表后台已答题，保存和交卷以官方核验为准。',
-                    escape(result.get('reply_text') or result.get('msg') or '登录状态未核验', 650),
+                    *summary,
                 ), '发送“开始考试”或点击下方按钮。'), [
                     ('开始考试', {'kind': 'rain_nav', 'action': 'browse'}),
                     ('课程班级', {'kind': 'rain_nav', 'action': 'courses'}),
