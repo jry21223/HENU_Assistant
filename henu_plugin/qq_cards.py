@@ -316,6 +316,10 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
         return Card("请转到私聊", "保护个人信息", (PRIVATE_NOTICE,), "私聊机器人后重新发送需求。")
     cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
     tool = str(cli.get("resolved_tool") or result.get("_resolved_tool_name") or tool)
+    from henu_plugin.rain_ui import result_card as rain_result_card
+    rain_card = rain_result_card(result, tool)
+    if rain_card is not None:
+        return rain_card
     if tool == "custom_event":
         return Card("自定义日程", "已完成" if result.get("success") else "未完成",
             tuple(escape(line) for line in str(result.get("reply_text") or result.get("msg") or "").splitlines() if line.strip()))
@@ -743,6 +747,8 @@ async def stage_card(plugin: Any, session: Any, query_id: int, result: dict) -> 
 
 async def reply_card(ctx: Any, title: str, text: str, *, private: bool = True, plugin: Any = None):
     kind = str(getattr(getattr(ctx.event, "launcher_type", ""), "value", getattr(ctx.event, "launcher_type", "")))
+    if title.startswith('雨课堂') and title != '雨课堂' and ' · ' not in title:
+        title = '雨课堂 · ' + title.removeprefix('雨课堂').strip()
     pages = text_card(title, text, private=private and kind != "person")
     if plugin is not None and callable(getattr(ctx, "get_bot_uuid", None)):
         try:
