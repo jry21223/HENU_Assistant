@@ -420,3 +420,19 @@ def test_sdk_query_route_remains_alive_until_final_rain_reply(workflow):
         assert '合成测验' in str(messages)
         assert not server.posts
     asyncio.run(run())
+
+
+def test_home_summarizes_verbose_status_without_internal_configuration(workflow):
+    async def run():
+        server, plugin, tool, session = workflow
+        raw = await tool.call({'command': 'yuketang status'}, session, 8)
+        assert '邀请码：' in raw['reply_text'] and '域名：' in raw['reply_text']
+        _, home = await invoke(plugin, '雨课堂', 9)
+        text = str(home.reply.call_args_list)
+        assert '登录状态：' in text and '监听设置：未启用' in text
+        assert '监听运行：' in text and '桥端配置：' in text
+        assert '邀请码：' not in text and '白名单' not in text and '域名：' not in text
+        assert '守护进程：' not in text and 'xuetang' not in text
+        assert button(home, '开始考试').startswith('HENU_BUTTON ')
+        assert not server.posts
+    asyncio.run(run())
