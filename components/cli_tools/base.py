@@ -285,6 +285,10 @@ class BaseHenuTool(Tool):
         # Dropping these fields would make the Agent answer an incomplete paper.
         if isinstance(result.get("quiz"), dict):
             return
+        # These bounded Rain pages are model input, not QQ message bodies.
+        # Removing composite identities prevents list -> detail -> preview.
+        if result.get("source") == "live_rain_api" and any(key in result for key in ("activities", "activity", "exams", "courses")):
+            return
         # Grade pages contain at most eight complete records. QQ displays the
         # captured card/reply_text; the Agent still needs the full page data.
         cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
