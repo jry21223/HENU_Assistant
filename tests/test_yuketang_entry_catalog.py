@@ -132,10 +132,12 @@ def test_old_courses_and_exam_list_keep_all_machine_target_identifiers(workflow,
         courses = await tool.call({'command': 'yuketang courses'}, session, 1)
         assert len(courses['courses']) == 24
         assert courses['courses'][-1]['classroom_id'] == '123'
+        assert courses['coverage']['complete'] is False
         monkeypatch.setattr(requests, 'get', original)
         server.other_activities = [dict(type=4, courseware_id=9002 + n, status=0, title='长标题' * 60 + str(n)) for n in range(10)]
         exams = await tool.call({'command': 'yuketang exam list --course 合成班'}, session, 2)
         assert len(exams['exams']) == 11
+        assert exams['coverage']['complete'] is False
         assert all(row['classroom_id'] == '123' and row['quiz_id'] for row in exams['exams'])
         assert not server.posts
     asyncio.run(run())
