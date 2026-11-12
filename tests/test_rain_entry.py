@@ -222,3 +222,157 @@ def test_preview_expiry_and_failed_delivery_never_allow_confirmation(workflow, m
         assert result.get('error_code') == 'rain_selection_changed'
         assert not server.posts
     asyncio.run(run())
+
+
+def test_switching_same_list_target_invalidates_old_start_confirmation(workflow):
+    async def run():
+        server, plugin, tool, session = workflow
+        server.status = 0
+        await invoke(plugin, '开始考试')
+        await invoke(plugin, '选择第1项', 2)
+        await invoke(plugin, '开始这份测评', 3)
+        pending = json.loads(plugin.data['user:quiz-user:pending_operation'])
+        # Even reselecting the same target must retire the displayed preview.
+        await invoke(plugin, '选择第1项', 4)
+        result = await tool.call({'command': 'confirm ' + pending['token']}, session, 5)
+        assert result.get('error_code') == 'rain_selection_changed'
+        assert not server.posts
+    asyncio.run(run())
+
+
+def test_switching_to_exam_retires_previous_quiz_confirmation(workflow, monkeypatch):
+    async def run():
+        import requests
+        server, plugin, tool, session = workflow
+        server.status = 0
+        server.other_activities = [dict(type=5, courseware_id=9002, status=0,
+            title='合成考试', deadline=4102444800, problem_count=40, limit=5400)]
+        def get(url, **kwargs):
+            if '/v/exam/cover?' in url:
+                return server.response({'status': 200, 'data': dict(title='合成考试',
+                    classroom_id=123, exam_id=9002, deadline=4102444800, problem_count=40,
+                    limit=5400, max_retry=1)})
+            return server.get(url, **kwargs)
+        monkeypatch.setattr(requests, 'get', get)
+        await invoke(plugin, '开始考试')
+        await invoke(plugin, '合成测验', 2)
+        await invoke(plugin, '开始这份测评', 3)
+        pending = json.loads(plugin.data['user:quiz-user:pending_operation'])
+        _, detail = await invoke(plugin, '合成考试', 4)
+        assert '/v2/web/exam/123/9002' in str(detail.reply.call_args_list)
+        result = await tool.call({'command': 'confirm ' + pending['token']}, session, 5)
+        assert result.get('error_code') == 'rain_selection_changed'
+        assert not server.posts
+    asyncio.run(run())
+
+
+def test_selection_change_during_final_http_read_blocks_write(workflow, monkeypatch):
+    async def run():
+        import requests
+        server, plugin, tool, session = workflow
+        server.status = 0
+        await invoke(plugin, '开始考试')
+        await invoke(plugin, '选择第1项', 2)
+        await invoke(plugin, '开始这份测评', 3)
+        pending = json.loads(plugin.data['user:quiz-user:pending_operation'])
+        reads = [0]
+        def get(url, **kwargs):
+            result = server.get(url, **kwargs)
+            if url.endswith('/quiz/quiz_info'):
+                reads[0] += 1
+                if reads[0] == 2:
+                    next(iter(plugin._rain_entry.selections.values())).version = 'replaced'
+            return result
+        monkeypatch.setattr(requests, 'get', get)
+        result = await tool.call({'command': 'confirm ' + pending['token']}, session, 5)
+        assert reads[0] == 2
+        assert result.get('error_code') == 'rain_selection_changed'
+        assert not server.posts
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('use_button', [False, True])
+def test_second_page_displayed_global_number_selects_correct_target(workflow, monkeypatch, use_button):
+    async def run():
+        import requests
+        server, plugin, _, _ = workflow
+        server.status = 0
+        server.other_activities = [dict(type=4, courseware_id=9001+n, status=0,
+            title=f'分页测验{n+1}', deadline=4102444800, problem_count=3, limit=0) for n in range(1, 11)]
+        def get(url, **kwargs):
+            result = server.get(url, **kwargs)
+            if url.endswith('/quiz/quiz_info'):
+                identifier = int(kwargs['params']['quiz_id'])
+                data = result.json()['data']
+                data.update(id=identifier, title=f'分页测验{identifier-9000}')
+                return server.response({'errcode': 0, 'data': data})
+            return result
+        monkeypatch.setattr(requests, 'get', get)
+        _, first = await invoke(plugin, '开始考试')
+        _, second = await invoke(plugin, button(first, '下一页测评'), 2)
+        assert '6. 分页测验6' in str(second.reply.call_args_list)
+        command = button(second, '查看第6项') if use_button else '选择第6项'
+        _, detail = await invoke(plugin, command, 3)
+        assert '分页测验6' in str(detail.reply.call_args_list)
+        assert '序号不在本页' not in str(detail.reply.call_args_list)
+        assert not server.posts
+    asyncio.run(run())
+
+
+def test_pending_detail_read_cannot_restore_replaced_selection(workflow, monkeypatch):
+    async def run():
+        import threading
+        import requests
+        from henu_plugin.qq_navigation import handle_navigation
+        server, plugin, _, _ = workflow
+        server.status = 0
+        await invoke(plugin, '开始考试')
+        entered, release = threading.Event(), threading.Event()
+        calls = [0]
+        def get(url, **kwargs):
+            if url.endswith('/quiz/quiz_info'):
+                calls[0] += 1
+                if calls[0] == 1:
+                    entered.set()
+                    assert release.wait(5)
+            return server.get(url, **kwargs)
+        monkeypatch.setattr(requests, 'get', get)
+        old = context('选择第1项', 2)
+        await handle_navigation(plugin, old)
+        assert await asyncio.to_thread(entered.wait, 3)
+        replacement = context('选择第1项', 3)
+        await handle_navigation(plugin, replacement)
+        release.set()
+        await asyncio.gather(*plugin._rain_entry.tasks.values())
+        with pytest.raises(AssertionError, match='missing button'):
+            button(old, '查看开始预览')
+        assert button(replacement, '查看开始预览').startswith('HENU_BUTTON ')
+        assert not server.posts
+    asyncio.run(run())
+
+
+def test_preview_delivery_race_cannot_arm_stale_confirmation(workflow):
+    async def run():
+        from henu_plugin.qq_navigation import handle_navigation
+        server, plugin, tool, session = workflow
+        server.status = 0
+        await invoke(plugin, '开始考试')
+        await invoke(plugin, '选择第1项', 2)
+        delivered, release = asyncio.Event(), asyncio.Event()
+        preview = context('开始这份测评', 3)
+        async def reply(chain):
+            if '待本人确认' in str(chain):
+                delivered.set()
+                await release.wait()
+        preview.reply.side_effect = reply
+        await handle_navigation(plugin, preview)
+        await asyncio.wait_for(delivered.wait(), 3)
+        pending = json.loads(plugin.data['user:quiz-user:pending_operation'])
+        replacement = context('选择第1项', 4)
+        await handle_navigation(plugin, replacement)
+        release.set()
+        await asyncio.gather(*plugin._rain_entry.tasks.values())
+        result = await tool.call({'command': 'confirm ' + pending['token']}, session, 5)
+        assert result.get('error_code') == 'rain_selection_changed'
+        assert not server.posts
+    asyncio.run(run())
