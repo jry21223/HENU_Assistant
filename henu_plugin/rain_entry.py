@@ -13,7 +13,6 @@ import time
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from henu_plugin.background import create_background_task
 from henu_plugin.qq_cards import Card, card_chain, scope, escape, result_card
 from henu_plugin.qq_buttons import actions, envelope, confirmation_actions
 
@@ -151,10 +150,20 @@ class RainEntry:
             return True
         # ACK before starting the read; no operation can outlive an undelivered ACK.
         await self.tell(ctx, Card('雨课堂', '正在核对', ('正在读取当前账号的测评信息，请稍候。',)))
-        task = create_background_task(self.plugin, self.run(ctx, owner, state, operation, value, generation, previous))
+        # Query RPCs and replies require the originating Host query route. The
+        # Host removes ordinary natural-language queries when this handler
+        # returns, so this work must finish within the listener invocation.
+        task = asyncio.create_task(self.run(ctx, owner, state, operation, value, generation, previous))
         self.tasks[key] = task
         if len(self.tasks) > 512:
             self.tasks = {k: v for k, v in self.tasks.items() if not v.done()}
+        try:
+            await asyncio.wait_for(task, timeout=120)
+        except asyncio.TimeoutError:
+            if self.selections.get(owner) is state:
+                self.selections.pop(owner, None)
+            await self.tell(ctx, Card('雨课堂', '查询超时',
+                ('本次查询未完成，请重新查询测评列表；没有自动开始、保存或交卷。',)))
         return True
 
     async def run(self, ctx, owner, state, operation, value, generation, previous):
