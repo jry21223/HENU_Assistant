@@ -1,7 +1,8 @@
-"""Student quiz workflow. Question solving belongs to the calling Agent."""
+"""Student quiz transport and confirmations; no question solving is performed here."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import contextvars
 import hashlib
 import json
@@ -11,6 +12,7 @@ import time
 from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -19,6 +21,7 @@ from henu_plugin.yuketang_config import VALID_DOMAINS
 
 QUIZ_WRITE_AUTH: contextvars.ContextVar[tuple[str, str, str, str] | None] = contextvars.ContextVar(
     "quiz_write_authorization", default=None)
+QUIZ_SELECTION_GUARD: contextvars.ContextVar[Any] = contextvars.ContextVar("quiz_selection_guard", default=None)
 QUIZ_INTERNAL_PREVIEW: contextvars.ContextVar[bool] = contextvars.ContextVar("quiz_internal_preview", default=False)
 
 def digest(value: Any) -> str:
@@ -64,6 +67,9 @@ class RainQuiz:
             raise QuizError("quiz_route_invalid", "测验写入接口无效。")
         if not self.headers.get("X-CSRFToken"):
             raise QuizError("rain_login_required", "测验登录校验信息缺失，请重新核对登录状态。")
+        guard = QUIZ_SELECTION_GUARD.get()
+        if guard is not None and not guard():
+            raise QuizError('rain_selection_changed', '列表或开始预览已更新、过期或未成功展示，请重新选择测评。')
         self.attempted = True
         try:
             response = requests.post(f"https://{self.domain}/v2/api/web/quiz/{route}", json=payload,
@@ -164,6 +170,15 @@ class RainQuiz:
                 "status_label": {0: "尚未开始作答", 1: "正在作答", 2: "已交卷", 3: "已结束", 4: "状态处理中"}[status],
                 "limit_seconds": info.get("limit"), "metadata_revision": metadata_revision,
                 "binding_revision": digest(binding), "cache_revision": digest({})}
+        deadline = info.get('deadline')
+        quiz['deadline_china'], quiz['expired'] = None, False
+        if type(deadline) in {int, float} and math.isfinite(deadline) and deadline > 0:
+            try:
+                deadline_at = datetime.fromtimestamp(deadline / 1000 if deadline > 1e12 else deadline, ZoneInfo('Asia/Shanghai'))
+            except (ValueError, OverflowError, OSError):
+                raise QuizError('quiz_response_invalid', '测验截止时间格式无效，请重新查询。') from None
+            quiz['deadline_china'] = deadline_at.isoformat()
+            quiz['expired'] = deadline_at <= datetime.now(ZoneInfo('Asia/Shanghai'))
         questions, cache = [], {}
         if status == 1:
             shapes = self._get("shapes")
@@ -195,6 +210,8 @@ class RainQuiz:
             raise QuizError("quiz_operation_invalid", "该测验操作尚不受支持。")
         if operation == "start" and quiz["status"] not in {0, 1}:
             raise QuizError("quiz_not_startable", "测验已结束或当前不能开始；请查询成绩。")
+        if operation == 'start' and quiz['expired']:
+            raise QuizError('quiz_expired', '测验已截止，不能重新开始；请查询当前状态。')
         current = (quiz["metadata_revision"] if operation == "start" else
                    quiz.get("paper_revision", "") if operation == "save" else
                    quiz.get("submission_revision", digest({"metadata": quiz["metadata_revision"], "status": quiz["status"]})))

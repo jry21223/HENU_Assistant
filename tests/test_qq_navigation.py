@@ -27,7 +27,7 @@ def test_shortcut_icons_keep_commands_and_provider_name_limits():
         for command in panel['panel']['items']:
             assert command['name'] in {'我的状态', '今天课表', '明天课表', '下一节课', '同步课表',
                                        '找自习室', '空教室查询', '图书馆座位', '绑定账号',
-                                       '绑定Kit', '使用帮助', '课表推送', '河宝社区', '自动预约帮助', '空位提醒帮助'}
+                                       '绑定Kit', '使用帮助', '课表推送', '河宝社区', '自动预约帮助', '空位提醒帮助', '雨课堂', '开始考试'}
             assert len(command['desc'].encode('utf-16-le')) // 2 <= 30
 
 
@@ -256,3 +256,14 @@ def test_hebao_queries_use_read_only_cli_commands():
     for text, command in expected.items():
         assert menu_command(text) == command
         assert inspect_cli_command(command).resolved_tool.startswith('yunfz_')
+
+
+def test_native_menu_keeps_original_fifteen_and_private_panel_adds_rain():
+    config = navigation_config()
+    labels = [sub['send_message'] for item in config['menu']['items'] for sub in item['sub_menu_items']]
+    assert labels == ['我的状态', '今天课表', '明天课表', '下一节课', '同步课表',
+        '找自习室', '空教室查询', '图书馆座位', '自动预约帮助', '空位提醒帮助',
+        '绑定账号', '绑定Kit', '使用帮助', '课表推送', '河宝社区']
+    panel = config['panels']['c2c']['panel']['items']
+    assert len(panel) == 17
+    assert {'雨课堂', '开始考试'} <= {row['name'] for row in panel}

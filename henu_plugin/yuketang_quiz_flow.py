@@ -6,7 +6,7 @@ import json
 import shlex
 from typing import Any
 
-from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH
+from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QUIZ_SELECTION_GUARD
 
 
 class QuizFlow:
@@ -58,7 +58,7 @@ class QuizFlow:
     @staticmethod
     def preview_command(spec: Any) -> str:
         argv = ["yuketang", "quiz", "preview", "--operation", spec.params["operation"]]
-        for key in ("course", "quiz_id", "revision", "answers_json"):
+        for key in ("course", "classroom_id", "quiz_id", "revision", "answers_json"):
             if key in spec.params:
                 argv.extend(["--" + key.replace("_", "-"), str(spec.params[key])])
         return shlex.join(argv)
@@ -100,18 +100,37 @@ class QuizFlow:
                 summary += f"；限时 {quiz.get('limit_seconds', '未提供')} 秒（0 为不限时）"
             elif operation["operation"] == "save":
                 summary += f"；本次拟保存 {preview['planned_count']} 题，不交卷"
+            from henu_plugin.rain_entry import active_selection
+            selection = active_selection.get()
             result = await self.tool._request_confirmation(
                 storage_key=self.owner, canonical_command=command, action=action,
                 parameter_summary=summary, query_id=self.query_id,
-                conversation=conversation_context(self.session), extra_pending={"quiz_operation": operation})
+                conversation=conversation_context(self.session), extra_pending={"quiz_operation": operation,
+                    **({'rain_entry_selection': selection} if selection else {})})
             if result.get("confirmation_required"):
                 from henu_plugin.qq_buttons import bind_preview_command
                 bind_preview_command(command)
+                result['quiz'] = quiz
+                result['canonical_command'] = command
+                result['operation'] = operation['operation']
             return result
 
     async def confirmed(self, spec: Any, pending: dict[str, Any]) -> dict[str, Any]:
         from henu_plugin.confirmation import conversation_context, validate_pending_operation
         async with self.lock:
+            selection = pending.get('rain_entry_selection')
+            def selection_valid():
+                if not selection:
+                    return True
+                from henu_plugin.rain_entry import entry
+                coordinator = entry(self.plugin)
+                state = coordinator.valid(tuple(selection.get('owner') or []))
+                return (state is not None and state.version == selection.get('version')
+                    and state.generation == selection.get('generation')
+                    and state.preview_command == pending.get('command')
+                    and coordinator.target((state.detail or {}).get('activity') or {}) == selection.get('target'))
+            if not selection_valid():
+                return self.failure('rain_selection_changed', '列表或开始预览已更新、过期或未成功展示，请重新选择测评。')
             # Another request may have consumed or replaced this confirmation
             # while this request was waiting for the per-user lock.
             current = await self.tool._load_pending(self.owner)
@@ -133,16 +152,20 @@ class QuizFlow:
             try:
                 if not await self.reconcile(preview["quiz"]):
                     return self.failure("quiz_write_pending", "此前测验写入尚未核对，已拒绝重复执行。")
+                if not selection_valid():
+                    return self.failure('rain_selection_changed', '测评选择已变化，请重新查看开始预览。')
                 # Persist the fence and consume this confirmation BEFORE any POST.
                 await self.store(operation)
                 await self.plugin.set_plugin_storage(f"user:{self.owner}:pending_operation", b"{}")
             except Exception:
                 return self.failure("quiz_journal_unavailable", "确认或写入记录无法持久保存，本次未进行写操作。")
             token = QUIZ_WRITE_AUTH.set((self.owner, operation["operation"], operation["quiz_id"], operation["revision"]))
+            guard_token = QUIZ_SELECTION_GUARD.set(selection_valid)
             try:
                 result = await self.execute(spec.raw)
             finally:
                 QUIZ_WRITE_AUTH.reset(token)
+                QUIZ_SELECTION_GUARD.reset(guard_token)
             actual = result.get("tool_result", result)
             try:
                 if actual.get("success") or actual.get("external_attempted") is False:

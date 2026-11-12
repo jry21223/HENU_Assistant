@@ -1749,6 +1749,26 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_courses", params={},
                               action="yuketang courses", should_preload_runtime_context=False)
 
+    if sub == "browse":
+        options, _, error = _parse_yuketang_options(argv[2:], {"course", "page", "view", "query"})
+        page = _string_option(options, "page") or "1"
+        view = _string_option(options, "view") or "available"
+        query = _string_option(options, 'query')
+        if error or len(query) > 128 or any(ord(c) < 32 for c in query) or not re.fullmatch(r"[1-9][0-9]{0,3}", page) or view not in {"available", "all"}:
+            return _error_spec(raw, error or "用法: yuketang browse [--course 名称] [--page 正整数] [--view available|all]。", help_topic="yuketang")
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_browse",
+                              params={"course": _string_option(options, "course"), "page": int(page), "view": view, "query": query},
+                              action="yuketang browse", should_preload_runtime_context=False)
+
+    if sub == "activity":
+        options, _, error = _parse_yuketang_options(argv[3:], {"classroom_id", "type", "id"})
+        if (len(argv) < 3 or argv[2] != "show" or error or set(options) != {"classroom_id", "type", "id"}
+                or options.get("type") not in {"quiz", "exam"}
+                or any(not re.fullmatch(r"[1-9][0-9]{0,17}", _string_option(options, key)) for key in ("classroom_id", "id"))):
+            return _error_spec(raw, error or "活动详情需要准确班级、quiz/exam类型及活动编号；可先发送“开始考试”选择。", help_topic="yuketang")
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_activity_show", params=options,
+                              action="yuketang activity show", should_preload_runtime_context=False)
+
     if sub in {"login", "登录"}:
         options, _, error = _parse_yuketang_options(argv[2:], {"force"}, flags=frozenset({"force"}))
         if error:
@@ -1908,7 +1928,7 @@ def _parse_yuketang_quiz(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     if len(argv) < 3 or argv[2] not in {"show", "question", "start", "save", "submit", "result", "preview"}:
         return _error_spec(raw, "请用 help yuketang quiz 查看测验查询、保存与独立确认交卷用法。", help_topic="yuketang quiz")
     verb = argv[2]
-    allowed = {"course", "quiz_id"} | ({"index"} if verb in {"question", "result"} else set())
+    allowed = {"course", "quiz_id", "classroom_id"} | ({"index"} if verb in {"question", "result"} else set())
     if verb in {"start", "save", "submit", "preview"}:
         allowed.add("revision")
     if verb == "preview":
@@ -1921,7 +1941,7 @@ def _parse_yuketang_quiz(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
     options, _, error = _parse_yuketang_options(argv[3:], allowed)
     if len(str(options.get("answers_json", ""))) > 100000:
         return _error_spec(raw, "答案对象过大，未进行查询或保存。", help_topic="yuketang quiz")
-    required = allowed - {"revision"}
+    required = allowed - {"revision", "classroom_id"}
     if verb == "result":
         required.discard("index")
     if verb == "save" or verb == "preview" and options.get("operation") == "save":
@@ -1930,6 +1950,8 @@ def _parse_yuketang_quiz(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
         return _error_spec(raw, error or "请提供准确课程、数字 quiz 编号及所需题号。", help_topic="yuketang")
     if "revision" in options and not re.fullmatch(r"[0-9a-f]{64}", _string_option(options, "revision")):
         return _error_spec(raw, "测验版本标识无效，请重新查询。", help_topic="yuketang")
+    if "classroom_id" in options and not re.fullmatch(r"[1-9][0-9]{0,17}", _string_option(options, "classroom_id")):
+        return _error_spec(raw, "班级标识无效，请重新选择测评。", help_topic="yuketang")
     if verb == "preview" and options["operation"] not in {"start", "save", "submit"}:
         return _error_spec(raw, "测验预览操作无效。", help_topic="yuketang")
     if "index" in options and not re.fullmatch(r"[1-9][0-9]{0,2}", _string_option(options, "index")):

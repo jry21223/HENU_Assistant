@@ -4,13 +4,14 @@ from __future__ import annotations
 
 
 TASKS = (
-    ('我的校园', (('我的状态', '查看绑定与服务状态'), ('今天课表', '查看今天的课程安排'), ('明天课表', '提前查看明天课程'), ('下一节课', '查看接下来上的课'), ('同步课表', '从教务更新课表'))),
+    ('我的校园', (('我的状态', '查看绑定与服务状态'), ('今天课表', '查看今天的课程安排'), ('明天课表', '提前查看明天课程'), ('下一节课', '查看接下来上的课'), ('雨课堂', '选择测评并进入开始流程'), ('开始考试', '选择测评并核对开始限制'), ('同步课表', '从教务更新课表'))),
     ('找自习室', (('找自习室', '查询当前时段空教室'), ('空教室查询', '按校区楼栋时段查询'), ('图书馆座位', '查看各区域剩余座位'), ('自动预约帮助', '设置终身会员定时预约'), ('空位提醒帮助', '监控图书馆区域或单座位'))),
     ('账号与帮助', (('绑定账号', '校园账号与网站绑定'), ('绑定Kit', '关联 HENU KIT 网站'), ('使用帮助', '查看常用说法与流程'), ('课表推送', '查看课表提醒支持情况'), ('河宝社区', '查询状态和个人记录'))),
 )
 
 MENU_LABELS = {'我的校园': '🎓我的校园', '找自习室': '📍找自习室', '账号与帮助': '⚙️账号帮助'}
 TASK_ICONS = {
+    '雨课堂': '🌧️', '开始考试': '📝',
     '我的状态': '👤', '今天课表': '📅', '明天课表': '🗓️', '下一节课': '⏰',
     '同步课表': '🔄', '找自习室': '📍', '空教室查询': '🏫', '图书馆座位': '📚',
     '自动预约帮助': '⏱️', '空位提醒帮助': '🔎', '河宝社区': '🧾', '绑定账号': '🔐', '绑定Kit': '🔗', '使用帮助': '❓', '课表推送': '🔔',
@@ -22,7 +23,7 @@ def navigation_config() -> dict:
         {'name': MENU_LABELS[name], 'type': 'menu', 'sub_menu_items': [
             {'name': TASK_ICONS[label] + label, 'type': 'send_message', 'send_message': label}
             for label, _ in tasks
-        ]} for name, tasks in TASKS
+        ]} for name, tasks in ((name, [task for task in tasks if task[0] not in {'雨课堂', '开始考试'}]) for name, tasks in TASKS)
     ]}
     panels = {}
     for scope in ('c2c', 'group'):
@@ -60,6 +61,9 @@ async def handle_navigation(plugin, ctx, *, listener=None, defer_binding=False) 
     if not chain or any(not isinstance(item, (Plain, At, Source)) for item in chain):
         return False
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
+    from henu_plugin.rain_entry import handle_rain_text
+    if await handle_rain_text(plugin, ctx, text):
+        return True
     alerts = getattr(plugin, 'library_seat_alerts', None)
     if alerts is not None and await alerts.handle(ctx, text):
         return True
@@ -170,6 +174,9 @@ async def handle_menu_query(plugin, ctx) -> bool:
     text = ''.join(item.text for item in chain if isinstance(item, Plain)).strip()
     from henu_plugin.qq_buttons import handle
     if await handle(plugin, ctx):
+        return True
+    from henu_plugin.rain_entry import handle_rain_text
+    if await handle_rain_text(plugin, ctx, text):
         return True
     alerts = getattr(plugin, 'library_seat_alerts', None)
     if alerts is not None and await alerts.handle(ctx, text):
