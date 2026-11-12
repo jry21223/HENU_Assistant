@@ -1750,13 +1750,14 @@ def _parse_yuketang(raw: str, argv: tuple[str, ...]) -> CliCommandSpec:
                               action="yuketang courses", should_preload_runtime_context=False)
 
     if sub == "browse":
-        options, _, error = _parse_yuketang_options(argv[2:], {"course", "page", "view"})
+        options, _, error = _parse_yuketang_options(argv[2:], {"course", "page", "view", "query"})
         page = _string_option(options, "page") or "1"
         view = _string_option(options, "view") or "available"
-        if error or not re.fullmatch(r"[1-9][0-9]{0,3}", page) or view not in {"available", "all"}:
+        query = _string_option(options, 'query')
+        if error or len(query) > 128 or any(ord(c) < 32 for c in query) or not re.fullmatch(r"[1-9][0-9]{0,3}", page) or view not in {"available", "all"}:
             return _error_spec(raw, error or "用法: yuketang browse [--course 名称] [--page 正整数] [--view available|all]。", help_topic="yuketang")
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="yuketang_browse",
-                              params={"course": _string_option(options, "course"), "page": int(page), "view": view},
+                              params={"course": _string_option(options, "course"), "page": int(page), "view": view, "query": query},
                               action="yuketang browse", should_preload_runtime_context=False)
 
     if sub == "activity":

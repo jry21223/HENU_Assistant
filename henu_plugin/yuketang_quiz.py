@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import contextvars
 import hashlib
 import json
@@ -11,6 +12,7 @@ import time
 from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -164,6 +166,15 @@ class RainQuiz:
                 "status_label": {0: "尚未开始作答", 1: "正在作答", 2: "已交卷", 3: "已结束", 4: "状态处理中"}[status],
                 "limit_seconds": info.get("limit"), "metadata_revision": metadata_revision,
                 "binding_revision": digest(binding), "cache_revision": digest({})}
+        deadline = info.get('deadline')
+        quiz['deadline_china'], quiz['expired'] = None, False
+        if type(deadline) in {int, float} and math.isfinite(deadline) and deadline > 0:
+            try:
+                deadline_at = datetime.fromtimestamp(deadline / 1000 if deadline > 1e12 else deadline, ZoneInfo('Asia/Shanghai'))
+            except (ValueError, OverflowError, OSError):
+                raise QuizError('quiz_response_invalid', '测验截止时间格式无效，请重新查询。') from None
+            quiz['deadline_china'] = deadline_at.isoformat()
+            quiz['expired'] = deadline_at <= datetime.now(ZoneInfo('Asia/Shanghai'))
         questions, cache = [], {}
         if status == 1:
             shapes = self._get("shapes")
@@ -195,6 +206,8 @@ class RainQuiz:
             raise QuizError("quiz_operation_invalid", "该测验操作尚不受支持。")
         if operation == "start" and quiz["status"] not in {0, 1}:
             raise QuizError("quiz_not_startable", "测验已结束或当前不能开始；请查询成绩。")
+        if operation == 'start' and quiz['expired']:
+            raise QuizError('quiz_expired', '测验已截止，不能重新开始；请查询当前状态。')
         current = (quiz["metadata_revision"] if operation == "start" else
                    quiz.get("paper_revision", "") if operation == "save" else
                    quiz.get("submission_revision", digest({"metadata": quiz["metadata_revision"], "status": quiz["status"]})))
