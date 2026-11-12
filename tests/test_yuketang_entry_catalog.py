@@ -188,3 +188,43 @@ def test_new_read_routes_reject_ambiguous_or_malformed_parameters(workflow, comm
         result = await tool.call({'command': command}, session, 1)
         assert not result['success'] and not server.posts
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('repeat', [False, True])
+def test_explicit_course_pagination_reaches_later_classroom_or_fails_closed(workflow, monkeypatch, repeat):
+    async def run():
+        import requests
+        server, _, tool, session = workflow
+        pages = []
+        def get(url, **kwargs):
+            path = urlsplit(url).path
+            if path.endswith('/courses/list'):
+                page = int(parse_qs(urlsplit(url).query).get('page', ['0'])[0])
+                pages.append(page)
+                return server.response({'errcode': 0, 'data': {'total': 2,
+                    'next_page': 1 if page == 0 or repeat else None,
+                    'list': [{'classroom_id': 123 + page, 'name': f'分页班{page}', 'course': {'name': f'分页课程{page}'}}]}})
+            if '/logs/learn/' in path:
+                classroom = int(path.rsplit('/', 1)[1])
+                return server.response({'errcode': 0, 'data': {'activities': [dict(type=4,
+                    courseware_id=9001+classroom-123, status=0, title='后页测评', deadline=4102444800)]}})
+            if path.endswith('/quiz/quiz_info'):
+                payload = server.get(url, **kwargs).json()
+                payload['data'].update(id=int(kwargs['params']['quiz_id']), title='后页测评')
+                return server.response(payload)
+            return server.get(url, **kwargs)
+        monkeypatch.setattr(requests, 'get', get)
+        result = await tool.call({'command': 'yuketang browse'}, session, 1)
+        assert pages == [0, 1]
+        if repeat:
+            assert result['success'] is False
+        else:
+            assert result['success'], result
+            assert {row['classroom_id'] for row in result['activities']} == {'123', '124'}
+            assert result['coverage']['returned_courses'] == 2
+            detail = await tool.call({'command': 'yuketang activity show --classroom-id 124 --type quiz --id 9002'}, session, 2)
+            assert detail['success'], detail
+            assert detail['activity']['classroom_id'] == '124'
+            assert detail['activity']['quiz_id'] == '9002'
+        assert not server.posts
+    asyncio.run(run())

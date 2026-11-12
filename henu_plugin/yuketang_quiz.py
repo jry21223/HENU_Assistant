@@ -1,4 +1,4 @@
-"""Student quiz workflow. Question solving belongs to the calling Agent."""
+"""Student quiz transport and confirmations; no question solving is performed here."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from henu_plugin.yuketang_config import VALID_DOMAINS
 
 QUIZ_WRITE_AUTH: contextvars.ContextVar[tuple[str, str, str, str] | None] = contextvars.ContextVar(
     "quiz_write_authorization", default=None)
+QUIZ_SELECTION_GUARD: contextvars.ContextVar[Any] = contextvars.ContextVar("quiz_selection_guard", default=None)
 QUIZ_INTERNAL_PREVIEW: contextvars.ContextVar[bool] = contextvars.ContextVar("quiz_internal_preview", default=False)
 
 def digest(value: Any) -> str:
@@ -66,6 +67,9 @@ class RainQuiz:
             raise QuizError("quiz_route_invalid", "测验写入接口无效。")
         if not self.headers.get("X-CSRFToken"):
             raise QuizError("rain_login_required", "测验登录校验信息缺失，请重新核对登录状态。")
+        guard = QUIZ_SELECTION_GUARD.get()
+        if guard is not None and not guard():
+            raise QuizError('rain_selection_changed', '列表或开始预览已更新、过期或未成功展示，请重新选择测评。')
         self.attempted = True
         try:
             response = requests.post(f"https://{self.domain}/v2/api/web/quiz/{route}", json=payload,

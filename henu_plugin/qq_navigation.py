@@ -23,7 +23,7 @@ def navigation_config() -> dict:
         {'name': MENU_LABELS[name], 'type': 'menu', 'sub_menu_items': [
             {'name': TASK_ICONS[label] + label, 'type': 'send_message', 'send_message': label}
             for label, _ in tasks
-        ]} for name, tasks in ((name, tasks[:5]) for name, tasks in TASKS)
+        ]} for name, tasks in ((name, [task for task in tasks if task[0] not in {'雨课堂', '开始考试'}]) for name, tasks in TASKS)
     ]}
     panels = {}
     for scope in ('c2c', 'group'):

@@ -53,20 +53,28 @@ def assessment_state(row: dict) -> str:
         deadline = _china_moment(_value(row, 'deadline', 'deadline_china', default=None))
         if row.get('expired') is True or deadline is not None and datetime.now(CHINA) >= deadline:
             return '已截止'
-    return labels.get(state, str(_value(row, 'status_label', default='状态未核验')))
+    return labels.get(state if type(state) is int else -1, str(_value(row, 'status_label', default='状态未核验')))
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _activity(result: dict) -> dict | None:
     row = result.get('activity') or result.get('quiz')
     if not isinstance(row, dict):
         return None
-    classroom = row.get('classroom') if isinstance(row.get('classroom'), dict) else {}
+    classroom = _dict(row.get('classroom'))
     return {**classroom, **row, 'assessment_type': row.get('assessment_type', 'quiz')}
 
 
 def activity_lines(row: dict, *, number: int | None = None) -> tuple[str, ...]:
     kind = row.get('assessment_type')
-    type_text = {'quiz': '测验 · quiz', 'exam': '考试 · exam'}.get(kind, '类型未核验')
+    type_text = {'quiz': '测验 · quiz', 'exam': '考试 · exam'}.get(str(kind), '类型未核验')
     heading = (f'{number}. ' if number is not None else '') + str(_value(row, 'title'))
     count = _value(row, 'question_count', 'problem_count', default=None)
     count_text = f'{count} 题' if type(count) is int and count >= 0 else UNKNOWN
@@ -80,7 +88,7 @@ def activity_lines(row: dict, *, number: int | None = None) -> tuple[str, ...]:
 
 
 def _backend_lines(result: dict) -> list[str]:
-    backend = result.get('backend') if isinstance(result.get('backend'), dict) else {}
+    backend = _dict(result.get('backend'))
     labels = (
         ('target', '目标发现', {'found': '已发现', 'discovered': '已发现'}),
         ('model', '模型处理', {'processing': '处理中', 'started': '处理中', 'returned': '已返回结果'}),
@@ -105,19 +113,20 @@ def _backend_lines(result: dict) -> list[str]:
 
 
 def _configuration(result: dict, tool: str) -> Card:
-    cfg = result.get('yuketang') if isinstance(result.get('yuketang'), dict) else {}
+    cfg = _dict(result.get('yuketang'))
     bridge = result.get('bridge')
     bridge_data = bridge if isinstance(bridge, dict) else {}
-    exam = cfg.get('exam') if isinstance(cfg.get('exam'), dict) else {}
-    lesson = cfg.get('lesson') if isinstance(cfg.get('lesson'), dict) else {}
-    on_off = lambda value: '开' if value is True else '关' if value is False else '未核验'
+    exam = _dict(cfg.get('exam'))
+    lesson = _dict(cfg.get('lesson'))
+    def on_off(value: Any) -> str:
+        return '开' if value is True else '关' if value is False else '未核验'
     lines = []
     mutation = tool not in {'yuketang_status', 'yuketang_config_show'}
     if mutation:
         lines.append('配置保存：已保存')
     if 'enabled' in cfg:
         lines.append('监听设置：' + ('已启用' if cfg['enabled'] is True else '未启用'))
-    monitor = {'running': '已运行', 'stopped': '已停用'}.get(bridge_data.get('monitoring_state'), '未核验')
+    monitor = {'running': '已运行', 'stopped': '已停用'}.get(str(bridge_data.get('monitoring_state')), '未核验')
     lines.append('监听运行：' + monitor)
     accepted = bridge == 'synced' or bridge_data.get('config_hash_matches') is True
     lines.append('桥端配置：' + ('已接收' if accepted else '待同步' if bridge == 'pending' else '未核验'))
@@ -137,7 +146,7 @@ def _configuration(result: dict, tool: str) -> Card:
 
 
 def result_card(result: dict, tool: str = 'henu_cli') -> Card | None:
-    cli = result.get('cli') if isinstance(result.get('cli'), dict) else {}
+    cli = _dict(result.get('cli'))
     rain_help = cli.get('mode') == 'help' and str(cli.get('topic', '')).startswith('yuketang')
     if not tool.startswith('yuketang') and not rain_help:
         return None
@@ -179,7 +188,7 @@ def result_card(result: dict, tool: str = 'henu_cli') -> Card | None:
         lines = []
         page, size = result.get('page', 1), result.get('page_size', len(rows) or 5)
         offset = (page - 1) * size if type(page) is int and type(size) is int else 0
-        classroom = result.get('classroom') if isinstance(result.get('classroom'), dict) else {}
+        classroom = _dict(result.get('classroom'))
         for index, item in enumerate(rows, 1):
             if isinstance(item, dict):
                 lines.extend((*activity_lines({**classroom, **item}, number=offset + index), ''))
@@ -193,9 +202,9 @@ def result_card(result: dict, tool: str = 'henu_cli') -> Card | None:
         if not rows:
             lines.insert(0, '当前查询范围内没有符合条件的测评。')
         return Card('雨课堂 · 测评列表', f'第 {page} 页', tuple(lines),
-            '回复测评序号、标题或课程选择；可用“下一页”“上一页”，无需输入编号。')
+            f'发送“选择第{offset + 1}项”等本页序号、标题或课程；翻页用“测评下一页”“测评上一页”，无需输入编号。')
     if tool == 'yuketang_courses':
-        courses = result.get('courses') if isinstance(result.get('courses'), list) else []
+        courses = _list(result.get('courses'))
         lines = [escape(str(c.get('course_name') or UNKNOWN)) + ' · ' + escape(str(c.get('classroom_label') or UNKNOWN)) for c in courses if isinstance(c, dict)]
         lines.append('本次显示 ' + str(len(courses)) + ' 个课程班级；列表是否完整以查询回执为准。')
         return Card('雨课堂 · 课程班级', '', tuple(lines), '发送“开始考试”进入测评列表，或回复课程名称。')

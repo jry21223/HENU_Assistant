@@ -47,10 +47,27 @@ class RainCatalog:
     def courses(self) -> list[dict[str, str]]:
         payload = self._read("/v2/api/web/courses/list?identity=2")
         data = payload.get("data")
-        values = data.get("list") if isinstance(data, dict) else None
-        if payload.get("errcode") != 0 or not isinstance(values, list):
+        if payload.get("errcode") != 0 or not isinstance(data, dict) or not isinstance(data.get("list"), list):
             raise CatalogError("rain_query_failed", "无法读取雨课堂课程列表，请重新核对登录状态。")
+        values = data["list"]
         declared_total = data.get("total")
+        page, pages = 0, {0}
+        while data.get("next_page") is not None and data.get("next_page") is not False:
+            next_page = data["next_page"]
+            if type(next_page) is not int or next_page <= page or next_page in pages or len(pages) >= 32:
+                raise CatalogError("rain_response_invalid", "课程分页标识重复或无效，无法核对完整范围。")
+            page = next_page
+            pages.add(page)
+            payload = self._read(f"/v2/api/web/courses/list?identity=2&page={page}")
+            next_data = payload.get("data")
+            if payload.get("errcode") != 0 or not isinstance(next_data, dict) or not isinstance(next_data.get("list"), list):
+                raise CatalogError("rain_query_failed", "课程分页查询失败，不能将部分结果当作完整列表。")
+            data = next_data
+            if type(data.get("total")) is int:
+                if type(declared_total) is int and declared_total != data["total"]:
+                    raise CatalogError("rain_response_invalid", "课程分页总数已变化，请重新查询。")
+                declared_total = data["total"]
+            values = [*values, *data["list"]]
         self.course_coverage = {"returned": len(values), "declared_total": declared_total if type(declared_total) is int else None,
             "complete": type(declared_total) is int and declared_total == len(values) and not data.get("has_more"),
             "reason": "官方课程响应未提供可核验的总数或穷尽标记"}
@@ -81,7 +98,7 @@ class RainCatalog:
         payload = self._read(f"/v2/api/web/logs/learn/{identifier}?actype=5&page=0&offset=100&sort=-1")
         data = payload.get("data")
         activities = data.get("activities") if isinstance(data, dict) else None
-        if payload.get("errcode") != 0 or not isinstance(activities, list):
+        if payload.get("errcode") != 0 or not isinstance(data, dict) or not isinstance(activities, list):
             raise CatalogError("rain_query_failed", "考试列表查询失败，不能判断是否有考试。")
         declared_total = data.get("total")
         envelopes = [(payload, data)]
@@ -93,10 +110,11 @@ class RainCatalog:
             page = next_page
             pages.add(page)
             next_payload = self._read(f'/v2/api/web/logs/learn/{identifier}?actype=5&page={page}&offset=100&sort=-1')
-            data = next_payload.get('data')
-            next_rows = data.get('activities') if isinstance(data, dict) else None
-            if next_payload.get('errcode') != 0 or not isinstance(next_rows, list):
+            next_data = next_payload.get('data')
+            next_rows = next_data.get('activities') if isinstance(next_data, dict) else None
+            if next_payload.get('errcode') != 0 or not isinstance(next_data, dict) or not isinstance(next_rows, list):
                 raise CatalogError('rain_query_failed', '测评分页查询失败，不能将部分结果当作完整列表。')
+            data = next_data
             if type(data.get('total')) is int:
                 if type(declared_total) is int and declared_total != data['total']:
                     raise CatalogError('rain_response_invalid', '测评分页总数已变化，请重新查询。')
@@ -256,9 +274,9 @@ class RainCatalog:
         matches = [row for row in rows if row['assessment_type'] == kind and row['assessment_id'] == identifier]
         if len(matches) != 1:
             raise CatalogError('rain_target_invalid', '当前班级中未找到唯一匹配测评，请重新选择。')
-        activity = dict(matches[0])
+        activity: dict[str, Any] = dict(matches[0])
         activity['status_label'] = activity['display_status']
-        backend = {key: 'unverified' for key in ('target', 'model', 'saved', 'submission')}
+        backend: dict[str, Any] = {key: 'unverified' for key in ('target', 'model', 'saved', 'submission')}
         if kind == 'quiz':
             client = RainQuiz(self.domain, self._headers['Cookie'], classroom, activity)
             snapshot = client.snapshot()

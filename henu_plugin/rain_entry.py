@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from contextvars import ContextVar
 import re
@@ -30,6 +31,8 @@ class Selection:
     query: str = ''
     detail: dict | None = None
     preview_command: str = ''
+    generation: int = 0
+    page_size: int = 5
 
 
 class RainEntry:
@@ -93,7 +96,7 @@ class RainEntry:
                 operation, value = 'select', int(match[1])
             elif current:
                 match = re.fullmatch(r'(?:选择|查看|查找测评)\s+(.{1,128})', text)
-                candidates = [i + 1 for i, row in enumerate(current.rows)
+                candidates = [(current.page - 1) * current.page_size + i + 1 for i, row in enumerate(current.rows)
                     if text in {row.get('title'), row.get('course_name'), row.get('classroom_label')}]
                 if match:
                     operation, value = 'search', match[1].strip()
@@ -114,26 +117,47 @@ class RainEntry:
         key = (*owner, ctx.query_id)
         if key in self.tasks:
             return True
-        if operation in {'home', 'browse', 'search'}:
-            state = Selection(secrets.token_urlsafe(12), time.monotonic() + 300)
-            self.selections[owner] = state
-            self.selections.move_to_end(owner)
-            while len(self.selections) > 128:
-                self.selections.popitem(last=False)
-        else:
+        # Serialize state changes with confirmed writes, but never hold this lock
+        # across a CLI call: QuizFlow uses the same per-account lock.
+        from components.cli_tools.base import _resolve_storage_key
+        storage_owner = _resolve_storage_key(SimpleNamespace(sender_id=owner[3], launcher_id=owner[2]), {})
+        locks = getattr(self.plugin, '_quiz_operation_locks', None)
+        if locks is None:
+            locks = self.plugin._quiz_operation_locks = {}
+        previous = None
+        async with locks.setdefault(storage_owner, asyncio.Lock()):
             state = self.valid(owner)
-            if operation not in {'command'} and state is None:
-                await self.tell(ctx, Card('雨课堂', '选择已过期', ('请发送“开始考试”重新读取列表。',)))
-                return True
+            if operation in {'home', 'browse', 'search', 'page'}:
+                old = state
+                state = Selection(secrets.token_urlsafe(12), time.monotonic() + 300)
+                if operation == 'page' and old:
+                    state.page = max(1, old.page + (1 if value == '测评下一页' else -1))
+                    state.view, state.query = old.view, old.query
+                    if value == '全部测评':
+                        state.page, state.view = 1, 'all'
+                self.selections[owner] = state
+                self.selections.move_to_end(owner)
+                while len(self.selections) > 128:
+                    self.selections.popitem(last=False)
+            elif state and operation in {'select', 'refresh', 'preview'}:
+                previous = deepcopy(state.detail)
+                state.generation += 1
+                state.preview_command = ''
+                if operation == 'select':
+                    state.detail = None
+            generation = state.generation if state else 0
+        if operation != 'command' and state is None:
+            await self.tell(ctx, Card('雨课堂', '选择已过期', ('请发送“开始考试”重新读取列表。',)))
+            return True
         # ACK before starting the read; no operation can outlive an undelivered ACK.
         await self.tell(ctx, Card('雨课堂', '正在核对', ('正在读取当前账号的测评信息，请稍候。',)))
-        task = create_background_task(self.plugin, self.run(ctx, owner, state, operation, value))
+        task = create_background_task(self.plugin, self.run(ctx, owner, state, operation, value, generation, previous))
         self.tasks[key] = task
         if len(self.tasks) > 512:
             self.tasks = {k: v for k, v in self.tasks.items() if not v.done()}
         return True
 
-    async def run(self, ctx, owner, state, operation, value):
+    async def run(self, ctx, owner, state, operation, value, generation, previous):
         try:
             if operation == 'home':
                 result = await self.call(ctx, 'yuketang status')
@@ -155,12 +179,7 @@ class RainEntry:
             elif operation in {'browse', 'search', 'page'}:
                 page, view, query = 1, 'available', ''
                 if operation == 'page':
-                    page = max(1, state.page + (1 if value == '测评下一页' else -1))
-                    view, query = state.view, state.query
-                    if value == '全部测评':
-                        page, view = 1, 'all'
-                    replacement = Selection(secrets.token_urlsafe(12), time.monotonic() + 300)
-                    self.selections[owner] = state = replacement
+                    page, view, query = state.page, state.view, state.query
                 elif operation == 'search':
                     query, view = value, 'all'
                 command = f'yuketang browse --page {page} --view {view}'
@@ -174,9 +193,11 @@ class RainEntry:
                     return
                 state.account = result['account_revision']
                 state.rows, state.page, state.view, state.query = result['activities'], page, view, query
+                state.page_size = result.get('page_size', 5)
                 rows = state.rows
+                offset = (page - 1) * state.page_size
                 specs = [(f'查看第{i}项', {'kind': 'rain_select', 'version': state.version, 'index': i})
-                         for i in range(1, len(rows) + 1)]
+                         for i in range(offset + 1, offset + len(rows) + 1)]
                 if page > 1:
                     specs.append(('上一页测评', {'kind': 'rain_page', 'version': state.version, 'direction': -1}))
                 if result.get('has_more'):
@@ -189,17 +210,18 @@ class RainEntry:
                         await self.tell(ctx, Card('选择测评', '有多个候选',
                             ('同一课程或标题对应多个目标，请按本页序号选择准确班级。',)))
                         return
-                    if not 1 <= value <= len(state.rows):
+                    offset = (state.page - 1) * state.page_size
+                    if not offset < value <= offset + len(state.rows):
                         await self.tell(ctx, Card('选择测评', '序号不在本页', ('请使用本页列出的序号，或发送“测评下一页”。',)))
                         return
-                    selected = state.rows[value - 1]
+                    selected = state.rows[value - offset - 1]
                 else:
-                    selected = (state.detail or {}).get('activity')
+                    selected = (previous or {}).get('activity')
                     if not selected:
                         await self.tell(ctx, Card('选择测评', '尚未选定目标', ('请先按列表序号或标题选择一份测评。',)))
                         return
                 detail = await self.call(ctx, selected['detail_command'])
-                if self.selections.get(owner) is not state or state.expires <= time.monotonic():
+                if not self.current(owner, state, generation):
                     return
                 if not detail.get('success'):
                     await self.tell(ctx, result_card(detail, 'yuketang_activity_show'))
@@ -209,7 +231,6 @@ class RainEntry:
                     await self.tell(ctx, Card('选择测评', '登录账号已变化', ('旧列表已失效，请发送“开始考试”重新查询。',)))
                     return
                 row = detail['activity']
-                previous = state.detail
                 state.detail = detail
                 if operation == 'preview' and previous:
                     fields = ('classroom_id', 'assessment_type', 'assessment_id', 'title',
@@ -221,16 +242,17 @@ class RainEntry:
                         return
                     command = detail.get('start_command')
                     if command and row.get('assessment_type') == 'quiz' and row.get('can_start'):
-                        token = active_selection.set({'owner': list(owner), 'version': state.version})
+                        token = active_selection.set({'owner': list(owner), 'version': state.version,
+                            'generation': generation, 'target': self.target(row)})
                         try:
                             result = await self.call(ctx, command)
                         finally:
                             active_selection.reset(token)
-                        if self.selections.get(owner) is not state or state.expires <= time.monotonic():
+                        if not self.current(owner, state, generation):
                             return
                         result['activity'] = row
                         await self.confirmation_card(ctx, result)
-                        if result.get('confirmation_required'):
+                        if result.get('confirmation_required') and self.current(owner, state, generation):
                             state.preview_command = result.get('canonical_command', '')
                         return
                 await self.detail_card(ctx, state)
@@ -244,13 +266,20 @@ class RainEntry:
             await self.tell(ctx, Card('雨课堂', '本次未完成',
                 ('查询或确认结果未能核实，请重新查询；没有自动重试任何答题或交卷操作。',)))
 
+    def current(self, owner, state, generation):
+        return (self.valid(owner) is state and state.generation == generation)
+
+    @staticmethod
+    def target(row):
+        return [str(row.get(key, '')) for key in ('classroom_id', 'assessment_type', 'assessment_id')]
+
     async def detail_card(self, ctx, state):
         result = state.detail
         row = result['activity']
         specs = []
         if row.get('can_start') and row.get('assessment_type') == 'quiz':
-            specs.append(('查看开始预览', {'kind': 'rain_preview', 'version': state.version}))
-        specs.append(('刷新状态', {'kind': 'rain_refresh', 'version': state.version}))
+            specs.append(('查看开始预览', {'kind': 'rain_preview', 'version': state.version, 'generation': state.generation}))
+        specs.append(('刷新状态', {'kind': 'rain_refresh', 'version': state.version, 'generation': state.generation}))
         card = result_card(result, 'yuketang_activity_show')
         url = result.get('official_url') or row.get('official_url')
         if self.valid_url(url, row):
@@ -324,4 +353,7 @@ async def dispatch_rain(plugin, ctx, payload, *, receipt=None):
         value = '全部测评' if payload.get('direction') == 0 else '测评下一页' if payload.get('direction') == 1 else '测评上一页'
         await coordinator.launch(ctx, owner, 'page', value)
     elif kind in {'rain_preview', 'rain_refresh'}:
+        if payload.get('generation') != state.generation:
+            await coordinator.tell(ctx, Card('雨课堂', '详情已更新', ('请使用当前测评详情的按钮。',)))
+            return
         await coordinator.launch(ctx, owner, 'preview' if kind == 'rain_preview' else 'refresh')
