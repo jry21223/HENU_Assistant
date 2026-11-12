@@ -119,3 +119,33 @@ def test_verified_save_and_formal_submit_have_distinct_receipt_titles():
     assert '答案保存' in saved and '已保存 · 未交卷' in saved
     assert '提交结果' in submitted and '已交卷' in submitted
     assert '后台接管成功' not in saved
+
+
+@pytest.mark.parametrize('count', [0, 5])
+def test_incomplete_save_never_claims_all_answers_verified(count):
+    text = render('yuketang_quiz_save', success=True,
+        quiz=activity(status=1, saved_count=count), submission_state='not_submitted')
+    assert f'已保存 {count} / 12 题' in text
+    assert '答案保存：尚未全部保存' in text
+    assert '答案保存：已由官方缓存核验' not in text
+
+
+def test_explicit_expired_activity_overrides_future_display_time():
+    text = render('yuketang_activity_show', success=True, activity=activity(expired=True))
+    assert '已截止' in text
+    assert '选择“开始预览”' not in text
+
+
+def test_deadline_comparison_preserves_seconds_and_includes_exact_cutoff(monkeypatch):
+    from datetime import datetime
+    from henu_plugin import rain_ui
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 12, 14, 30, 10, tzinfo=tz)
+    monkeypatch.setattr(rain_ui, 'datetime', Clock)
+    for deadline in ['2026-11-12T14:30:09+08:00', '2026-11-12T14:30:10+08:00']:
+        text = render('yuketang_activity_show', success=True,
+            activity=activity(deadline_china=deadline))
+        assert '已截止' in text
+        assert '选择“开始预览”' not in text
