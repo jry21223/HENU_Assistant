@@ -185,6 +185,8 @@ class HenuPluginService:
             "yuketang_status": self._yuketang_status,
             "yuketang_courses": self._yuketang_courses,
             "yuketang_exam_list": self._yuketang_exam_list,
+            "yuketang_browse": self._yuketang_browse,
+            "yuketang_activity_show": self._yuketang_activity_show,
             "yuketang_quiz_show": self._yuketang_quiz,
             "yuketang_quiz_question": self._yuketang_quiz,
             "yuketang_quiz_start": self._yuketang_quiz,
@@ -1196,6 +1198,20 @@ class HenuPluginService:
         return {"success": True, "classroom": classroom, "exams": exams, "total": len(exams),
                 "source": "live_rain_api", "msg": "雨课堂考试查询成功", "reply_text": "\n".join(lines)}
 
+    def _yuketang_browse(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._yuketang_catalog().browse(course=_text(params.get("course")),
+                page=int(params.get("page") or 1), view=_text(params.get("view")) or "available")
+        except CatalogError as exc:
+            return self._yuketang_catalog_failure(exc)
+
+    def _yuketang_activity_show(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._yuketang_catalog().activity_detail(_text(params.get("classroom_id")),
+                _text(params.get("type")), _text(params.get("id")))
+        except (CatalogError, QuizError) as exc:
+            return self._yuketang_catalog_failure(exc)
+
     def _yuketang_quiz(self, params: dict[str, Any]) -> dict[str, Any]:
         identity = getattr(_CURRENT_IDENTITY, "value", None)
         if identity is None or identity.launcher_type != "person":
@@ -1203,7 +1219,8 @@ class HenuPluginService:
         client = None
         try:
             catalog = self._yuketang_catalog()
-            classroom = resolve_classroom(catalog.courses(), _text(params.get("course")))
+            classroom = resolve_classroom(catalog.courses(), _text(params.get("course")),
+                                          classroom_id=_text(params.get("classroom_id")))
             activities = catalog.exams(classroom, quizzes_only=True)
             matches = [activity for activity in activities if activity.get("quiz_id") == _text(params.get("quiz_id"))]
             if len(matches) != 1:
