@@ -9,12 +9,12 @@ from pathlib import Path
 import platform
 import sys
 
-from PIL import Image, __version__ as pillow_version
+from PIL import Image, ImageChops, __version__ as pillow_version
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from henu_plugin.classroom_floorplans import plans
+from henu_plugin.classroom_floorplans import period_label, plans
 from henu_plugin.classroom_map import LAYOUTS, build_classroom_image
 
 OUT = ROOT / 'output' / 'classroom-preview'
@@ -29,7 +29,7 @@ def demo_result(campus, building, campus_name, building_name, names, free, unkno
         'success': True,
         '_resolved_tool_name': 'empty_classroom_query',
         'query': {**scope, 'campusName': campus_name, 'buildingName': building_name,
-                  'periodName': '第2大节 · DEMO'},
+                  'periodName': '第2大节'},
         'rooms': [{'roomName': name, 'campusCode': campus, 'buildingCode': building}
                   for name in free],
         'total': len(free),
@@ -66,7 +66,7 @@ def main():
     readme = [
         '# 空教室机器人回复示例', '',
         '**全部为模拟数据；未连接教务接口、未发送 QQ。图片中的 DEMO 表示演示。**', '',
-        '使用现有 `build_classroom_image()` 生成 Base64，再解码为原始 PNG；没有修改渲染器或平面图资源。', '',
+        '使用 `build_classroom_image()` 生成 Base64，再解码为 PNG。', '',
         '绿色＝模拟课程未占用；灰色＝模拟课程占用或未核验。日期、周次、时效字段均为测试输入，不能用于找教室。', '',
         '复现：在仓库根目录，使用已安装项目依赖的 Python 执行 `python ops/render-classroom-preview.py`。', '',
         f'本次环境：Python {platform.python_version()} / Pillow {pillow_version}。', '',
@@ -82,6 +82,9 @@ def main():
         png = base64.b64decode(encoded, validate=True)
         with Image.open(io.BytesIO(png)) as image:
             image.load()
+            left, top, right, bottom = ImageChops.difference(
+                image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()
+            assert (left, top, image.width - right, image.height - bottom) == (48, 48, 48, 48)
             record = dict(name=stem, format=image.format, width=image.width, height=image.height,
                           png_bytes=len(png), base64_chars=len(encoded), free_rooms=result['total'],
                           metadata=image.info)
@@ -92,7 +95,7 @@ def main():
         (OUT / f'{stem}.result.json').write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         reply = ('> 模拟机器人回复；合成数据，未发送 QQ。文字为本地示例，未经过 LangBot 消息封装。\n\n'
-                 f'{record["metadata"]["Title"]} · 第10周 · 星期五 · 第2大节\n\n'
+                 f'{record["metadata"]["Title"]} · 第10周 · 星期五 · {period_label(2)}\n\n'
                  f'模拟课程未占用 {result["total"]} 间；绿色表示课程未占用，灰色表示占用或未核验。\n\n'
                  f'![空教室 DEMO]({stem}.png)\n\n'
                  '仅演示图片效果，不代表实时空闲；现场是否开放以实际为准。\n')
