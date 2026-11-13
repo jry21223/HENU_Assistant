@@ -4,7 +4,7 @@ The classroom plan, classroom grid, and seat map renderers share three static
 PingFang SC subsets, renamed **HENU UI**: Regular 400, Medium 500, and Bold 700.
 All three have the same cmap and include ASCII, GB2312, supported characters
 from the former Noto subsets, and text used by the renderers and classroom
-catalog, including `厕所` and `卫浴`.
+catalog, including `厕所`.
 
 PingFang SC 10.11d9e1 source hashes:
 

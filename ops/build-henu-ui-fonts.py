@@ -64,7 +64,7 @@ def desired_codepoints(source_dir: Path) -> set[int]:
             except UnicodeDecodeError:
                 pass
 
-    values.update(map(ord, "厕所卫浴／第10大节 08:00–09:40"))
+    values.update(map(ord, "厕所／第10大节 08:00–09:40"))
     if MANIFEST.is_file():
         stored = json.loads(MANIFEST.read_text(encoding="utf-8"))["codepoints"]
         values.update(int(value, 16) for value in

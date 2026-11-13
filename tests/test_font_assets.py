@@ -40,7 +40,7 @@ def test_coverage_has_gb2312_and_requested_label_and_time_glyphs():
             except UnicodeDecodeError:
                 pass
     assert gb2312 <= coverage
-    assert set(map(ord, "厕所卫浴／第10大节 08:00–09:40")) <= coverage
+    assert set(map(ord, "厕所／第10大节 08:00–09:40")) <= coverage
     assert len(coverage) == len(codepoints)
     assert manifest["family"] == "HENU UI"
     assert manifest["formerNotoUnsupported"] == ["2713"]
