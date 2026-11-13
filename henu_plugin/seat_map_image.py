@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 import io
 import math
-from pathlib import Path
 from statistics import median
 
 COLORS = {
@@ -31,7 +30,8 @@ def seat_state(row):
 
 
 def render_seat_map(title, window, rows, fetched):
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
+    from henu_plugin.font_assets import draw_text, new_font_cache
 
     if not rows or len(rows) > 2000:
         raise ValueError("seat geometry missing or too large")
@@ -99,16 +99,16 @@ def render_seat_map(title, window, rows, fetched):
     size_px = max(12, round(min(width, height)))
     image = Image.new("RGB", (4096, 2560), "white")
     draw = ImageDraw.Draw(image)
-    font_file = str(Path(__file__).with_name("assets") / "NotoSansSC-SeatMap.otf")
+    fonts = new_font_cache()
 
-    def font(size):
-        return ImageFont.truetype(font_file, size=size)
-
-    draw.text((80, 28), str(title)[:60], font=font(52), fill=(25, 35, 48))
-    draw.text(
+    draw_text(draw, (80, 28), str(title)[:60], 52, fonts,
+              weight="bold", fill=(25, 35, 48))
+    draw_text(
+        draw,
         (80, 112),
         str(window) + "  查询 " + str(fetched),
-        font=font(34),
+        34,
+        fonts,
         fill=(65, 75, 90),
     )
     counts = Counter(seat_state(r) for r in rows)
@@ -123,10 +123,13 @@ def render_seat_map(title, window, rows, fetched):
     ):
         x = 80 + index * 700
         draw.rounded_rectangle((x, 198, x + 38, 236), radius=7, fill=COLORS[state])
-        draw.text(
+        draw_text(
+            draw,
             (x + 56, 190),
             label + " " + str(counts[state]),
-            font=font(32),
+            32,
+            fonts,
+            weight="medium",
             fill=(45, 55, 68),
         )
     for row, name, x, y, w, h in geometry:
@@ -142,17 +145,22 @@ def render_seat_map(title, window, rows, fetched):
             width=2,
         )
         size = max(12, min(34, int((right - left) / (len(name) * 0.7))))
-        draw.text(
+        draw_text(
+            draw,
             ((left + right) / 2, (top + bottom) / 2),
             name,
-            font=font(size),
+            size,
+            fonts,
+            weight="medium",
             fill="white",
             anchor="mm",
         )
-    draw.text(
+    draw_text(
+        draw,
         (80, 2508),
         "学校坐标重绘 · 颜色仅反映所选时段 · 门窗通道未标注",
-        font=font(26),
+        26,
+        fonts,
         fill=(65, 75, 90),
     )
     out = io.BytesIO()

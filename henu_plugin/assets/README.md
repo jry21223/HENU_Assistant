@@ -1,21 +1,34 @@
-# Seat map font
+# HENU UI fonts
 
-`NotoSansSC-SeatMap.otf` is a renamed character subset of Noto Sans CJK SC Regular,
-used for the seat-map diagram's Chinese labels and numbers. The upstream source
-is https://github.com/notofonts/noto-cjk/tree/main/Sans/OTF/SimplifiedChinese .
-It is distributed under SIL Open Font License 1.1; see `NotoSansSC-LICENSE.txt`.
-The subset includes ASCII, the map legend, and the library region names verified
-on 2026-10-20. FontTools is needed only to rebuild the subset, not at runtime.
+The classroom plan, classroom grid, and seat map renderers share three static
+PingFang SC subsets, renamed **HENU UI**: Regular 400, Medium 500, and Bold 700.
+All three have the same cmap and include ASCII, GB2312, supported characters
+from the former Noto subsets, and text used by the renderers and classroom
+catalog, including `厕所` and `卫浴`.
 
-## Classroom fonts
+PingFang SC 10.11d9e1 source hashes:
 
-`NotoSansSC-Classroom.otf` is a renamed HENU Classroom subset of Noto Sans
-CJK SC Regular, rebuilt for the two-color classroom plans on 2026-10-29. It
-includes the original glyphs plus every heading, legend, note, and catalog
-name in `classroom_map.py`, `classroom_floorplans.py` and `classroom-plans.json`.
-Source: https://github.com/notofonts/noto-cjk/blob/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
-Use FontTools `pyftsubset` with the union of those characters to rebuild it.
-Verify the resulting cmap before release; Pillow silently omits missing glyphs.
+| File | SHA-256 |
+|---|---|
+| PingFang Regular.ttf | `26b017dfb34a8aa0059f47eda6f90d7ffd19a24912dc1129abc24867a1385353` |
+| PingFang Medium.ttf | `ddf051a97717d35e90d297eab1fbb75bab48120983586cf2a70be9fd3dfad2c8` |
+| PingFang Bold.ttf | `96ec2276d8e77453e0e44f1e9633ee513396f2eeabb3d330f9e9306343b25fd9` |
 
-`NotoSansSC-Classroom-Status.ttf` remains for older callers; the current maps use
-the main classroom font. Both fonts use SIL OFL 1.1; see `NotoSansSC-LICENSE.txt`.
+The source font does not map GB2312 U+30FB `・`; the subset maps it to the
+PingFang U+00B7 `·` glyph. The three former Noto subsets also included U+2713,
+which PingFang does not contain and these renderers do not use. If runtime text
+contains any uncovered character, image generation returns to its existing
+text response.
+
+The Apple copyright and license name records are retained. The project
+maintainer confirms separate authorization for redistribution of these
+subsets; they are not licensed under the SIL Open Font License. FontTools is
+needed only to rebuild or verify assets, not by the plugin at runtime.
+
+To rebuild, install `requirements-fonts.txt`, place the three source files in
+the workspace-level `output/` directory, then run:
+
+```bash
+python ops/build-henu-ui-fonts.py
+python ops/build-henu-ui-fonts.py --verify
+```

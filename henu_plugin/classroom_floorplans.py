@@ -7,8 +7,9 @@ import math
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw
 from PIL.PngImagePlugin import PngInfo
+from henu_plugin.font_assets import draw_text, new_font_cache
 
 FREE = (35, 155, 112)
 GRAY = (225, 230, 236)
@@ -25,11 +26,6 @@ def plans():
     return json.loads((Path(__file__).with_name('assets') / 'classroom-plans.json').read_text())
 
 
-@lru_cache(maxsize=32)
-def font(size):
-    return ImageFont.truetype(str(Path(__file__).with_name('assets') / 'NotoSansSC-Classroom.otf'), size)
-
-
 def catalog_name(campus, building, name):
     entry = plans().get(f'{campus}-{building}', {})
     return name if any(r['name'] == name for r in entry.get('rooms', [])) else ''
@@ -42,7 +38,7 @@ def period_label(period, name=None, clock_start=None, clock_end=None):
     return f'{label}（{start}–{end}）' if start and end else label
 
 
-def _draw_floor(draw, floor, kind, left, top, available, all_day):
+def _draw_floor(draw, floor, kind, left, top, available, all_day, fonts):
     """Scale the reviewed normalized photo coordinates into a floor panel."""
     ten = kind == 'ten'
     scale, shift = (0.7, 40) if ten else (0.55, 0)
@@ -50,8 +46,9 @@ def _draw_floor(draw, floor, kind, left, top, available, all_day):
     def point(x, y):
         return (left + (x + shift) * scale, top + y * scale)
 
-    def text(x, y, value, size=24, fill=INK):
-        draw.text(point(x, y), value, font=font(max(9, round(size * scale))), anchor='mm', fill=fill)
+    def text(x, y, value, size=24, fill=INK, weight='regular'):
+        draw_text(draw, point(x, y), value, max(9, round(size * scale)), fonts,
+                  weight=weight, anchor='mm', fill=fill)
 
     def line(points, width=38, fill='#edf1f5'):
         draw.line([point(x, y) for x, y in points], width=max(1, round(width * scale)), fill=fill, joint='curve')
@@ -138,8 +135,9 @@ def _draw_floor(draw, floor, kind, left, top, available, all_day):
         else:
             box(x, y, w, h, fill=fill)
         label_y = y + h / 2 - (15 if c.get('uncertain') else 7)
+        label_weight = 'medium' if any(char.isdigit() for char in c['label']) else 'regular'
         text(x + w / 2, label_y, c['label'], 27 if w < 105 or c.get('uncertain') else 32,
-             'white' if free else INK)
+             'white' if free else INK, label_weight)
         if c.get('uncertain'):
             text(x + w / 2, label_y + 24, '编号待核', 14, '#657e90')
         if all_day:
@@ -154,8 +152,9 @@ def _draw_floor(draw, floor, kind, left, top, available, all_day):
     text(north_x, 35, 'N', 21, '#657e90')
 
 
-def render_catalog_plan(entry, query, available, all_day, periods):
+def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache=None):
     """Render only evidence supplied by the caller's verified query scope."""
+    fonts = font_cache or new_font_cache()
     kind = entry.get('kind')
     ten = kind == 'ten'
     floors = sorted(entry.get('floors', []), key=lambda f: f['floor'], reverse=not ten)
@@ -168,8 +167,8 @@ def render_catalog_plan(entry, query, available, all_day, periods):
     image = Image.new('RGB', (1280, notes_top + footer_height), '#f6f8fa')
     draw = ImageDraw.Draw(image)
     title = entry['campus'] + ' · ' + entry['name']
-    draw.text((48, 48 - font(46).getmask(title).getbbox()[1]), title,
-              font=font(46), fill=INK, anchor='lt')
+    draw_text(draw, (48, 48 - fonts(46, 'bold').getmask(title).getbbox()[1]),
+              title, 46, fonts, weight='bold', fill=INK, anchor='lt')
     view = '全天 · 状态点对应各大节' if all_day else period_label(
         query.get('period', '?'), query.get('periodName'),
         query.get('clockStart') if query.get('clockVerified') else None,
@@ -177,22 +176,24 @@ def render_catalog_plan(entry, query, available, all_day, periods):
     scope = f"第{query.get('week', '?')}周 · 星期{query.get('dayOfWeek', '?')} · "
     if all_day and query.get('date'):
         scope = str(query['date']) + ' · '
-    draw.text((48, 118), scope + view, font=font(30), fill=INK)
+    draw_text(draw, (48, 118), scope + view, 30, fonts, fill=INK)
     for x, color, label in [(48, FREE, '课程未占用'), (600, GRAY, '未确认空闲')]:
         draw.rounded_rectangle((x, 192, x+40, 232), radius=8, fill=color)
-        draw.text((x+58, 190), label, font=font(30), fill=INK)
+        draw_text(draw, (x+58, 190), label, 30, fonts, weight='medium', fill=INK)
     if not floors:
-        draw.text((48, 248), '教室目录 · 暂无位置平面图', font=font(24), fill='#59697b')
+        draw_text(draw, (48, 248), '教室目录 · 暂无位置平面图', 24, fonts, fill='#59697b')
     for i, f in enumerate(floors):
         left = 48 if ten else 48 + i % 2 * 604
         top = 300 + (i * 782 if ten else i // 2 * 660)
         draw.rounded_rectangle((left, top, left+(1183 if ten else 579), top+(770 if ten else 638)),
                                radius=18, fill='white')
-        draw.text((left+24, top+16), f"{f['floor']}F", font=font(32), fill=INK)
-        _draw_floor(draw, f, kind, left+12 if ten else left+24, top+70, available, all_day)
+        draw_text(draw, (left+24, top+16), f"{f['floor']}F", 32, fonts,
+                  weight='medium', fill=INK)
+        _draw_floor(draw, f, kind, left+12 if ten else left+24, top+70,
+                    available, all_day, fonts)
     if unplaced:
         label = '目录中有、原图未定位的房间' if floors else '按教室名称排列，位置以现场为准'
-        draw.text((48, directory_top), label, font=font(24), fill=INK)
+        draw_text(draw, (48, directory_top), label, 24, fonts, fill=INK)
     for i, room in enumerate(unplaced):
         x, y = 64 + i % 3 * 386, directory_top + 50 + i // 3 * 100
         free = not all_day and available[1].get(room['name']) == 'free'
@@ -200,8 +201,8 @@ def render_catalog_plan(entry, query, available, all_day, periods):
                                fill='white' if all_day else FREE if free else GRAY)
         name = room['name']
         size = max(14, min(28, int(325 / max(len(name), 1))))
-        draw.text((x+175, y+27 if all_day else y+40), name, anchor='mm',
-                  font=font(size), fill='white' if free else INK)
+        draw_text(draw, (x+175, y+27 if all_day else y+40), name, size, fonts,
+                  weight='medium', anchor='mm', fill='white' if free else INK)
         if all_day:
             for p in range(1, 6):
                 cx, cy = x+133+(p-1)*21, y+60
@@ -213,11 +214,12 @@ def render_catalog_plan(entry, query, available, all_day, periods):
             y = offset + i*50
             label = period_label(slot['period'], clock_start=slot.get('clockStart') if query.get('clockVerified') else None,
                                  clock_end=slot.get('clockEnd') if query.get('clockVerified') else None)
-            draw.text((48, y), label, font=font(28), fill=INK)
+            draw_text(draw, (48, y), label, 28, fonts, fill=INK)
         offset += 265
     filtered = any((s.get('freshness') or {}).get('roomStates', {}).get('filtered') for s in periods)
     if filtered:
-        draw.text((48, offset), '图示整栋课程状态；文字清单已筛选。', font=font(23), fill=INK)
+        draw_text(draw, (48, offset), '图示整栋课程状态；文字清单已筛选。',
+                  23, fonts, fill=INK)
         offset += 38
     metadata = PngInfo()
     metadata.add_text('Title', title)
