@@ -168,8 +168,8 @@ def render_catalog_plan(entry, query, available, all_day, periods):
     for x, color, label in [(64, FREE, '课程未占用'), (600, GRAY, '未确认空闲')]:
         draw.rounded_rectangle((x, 180, x+40, 220), radius=8, fill=color)
         draw.text((x+58, 178), label, font=font(30), fill=INK)
-    draw.text((64, 248), '按原图相对位置 · 非比例图' if floors else '教室目录 · 暂无位置平面图',
-              font=font(24), fill='#59697b')
+    if not floors:
+        draw.text((64, 248), '教室目录 · 暂无位置平面图', font=font(24), fill='#59697b')
     for i, f in enumerate(floors):
         left = 48 if ten else 48 + i % 2 * 604
         top = 300 + (i * 800 if ten else i // 2 * 660)
@@ -194,10 +194,6 @@ def render_catalog_plan(entry, query, available, all_day, periods):
                 cx, cy = x+133+(p-1)*21, y+60
                 draw.ellipse((cx-7, cy-7, cx+7, cy+7),
                              fill=FREE if available[p].get(room['name']) == 'free' else GRAY)
-    note = ('五层两处、六层大间编号待核，未匹配课表。' if kind == 'comprehensive' else
-            '二层宽间为200，三层为310；未标号区域不推断编号。' if ten else
-            '学校目录仅用于确认教室名称。')
-    draw.text((64, notes_top+10), note, font=font(23), fill='#59697b')
     offset = notes_top + 65
     if all_day:
         for i, slot in enumerate(sorted(periods, key=lambda s: s['period'])):
@@ -210,7 +206,6 @@ def render_catalog_plan(entry, query, available, all_day, periods):
     if filtered:
         draw.text((64, offset), '图示整栋课程状态；文字清单已筛选。', font=font(23), fill=INK)
         offset += 38
-    draw.text((64, offset+8), '灰色含课程占用或未核验；现场是否开放以实际为准。', font=font(25), fill='#59697b')
     metadata = PngInfo()
     metadata.add_text('Title', title)
     metadata.add_text('PlanRooms', str(sum(len(f['cells']) for f in floors)))

@@ -185,13 +185,10 @@ def render_classroom_map(result):
     for x, color, label in ((64, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
         draw.rounded_rectangle((x, 180, x + 40, 220), radius=8, fill=color)
         draw.text((x + 58, 178), label, font=status_font(30), fill=INK)
-    draw.text((64, 248), '按原图相对位置 · 非比例图', font=font(24), fill='#59697b')
     for index, floor in enumerate((5, 4, 3, 2, 1)):
         top = 300 + index * 210
         draw.rounded_rectangle((48, top, 1232, top + 198), radius=18, fill='white')
         draw.text((72, top + 70), f'{floor}F', font=font(40), fill=INK)
-        draw.line((170, top + 110, 1160, top + 110), fill='#c4ced8', width=3)
-        draw.text((1070, top + 85), '走廊', font=font(21), fill='#657589')
         for row_index, row in enumerate(layout['floors'][floor]):
             for column, number in enumerate(row):
                 if not number:
@@ -230,7 +227,6 @@ def render_classroom_map(result):
                 draw.text((650, 1405 + index // 6 * 32), '、'.join(uncovered[index:index + 6]), font=status_font(23), fill=INK)
         else:
             draw.text((64, 1405), label + '、'.join(uncovered), font=status_font(23), fill=INK)
-    draw.text((64, 1660 if all_day else 1450), '灰色含课程占用或未核验；现场是否开放以实际为准。', font=font(28), fill='#59697b')
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
