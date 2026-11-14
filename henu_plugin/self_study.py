@@ -152,6 +152,7 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
         return True
     period = state.get('period')
+    from henu_plugin.classroom_floorplans import period_label
     automatic = not period
     if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
         current = now.strftime('%H:%M')
@@ -159,13 +160,14 @@ async def handle_self_study(plugin, ctx, text):
         if not period:
             await _reply(ctx, '当前不在教学时段', [now.strftime('%m月%d日 %H:%M'),
                 '当前不在该校区教学时段内，不能据此认定所有教室空闲或开放。'],
-                '如需查询课程占用，可回复指定大节，例如“第2大节”。')
+                f'如需查询课程占用，可回复指定大节，例如“{period_label(2)}”。')
             return True
     if not period:
         await _reply(ctx, '需确认当前大节', [
             '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
-            '可直接回复“第2大节”，并补充所选校区的具体楼名。'])
+            f'可直接回复“{period_label(2)}”，并补充所选校区的具体楼名。'])
         return True
+    period_text = period_label(period)
     if state.get('building') and not state.get('campus'):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
         return True
@@ -202,7 +204,7 @@ async def handle_self_study(plugin, ctx, text):
     else:
         command += ' --freshness cache_only'
     await _reply(ctx, '正在查询', [
-        f'正在查{building}第{period}大节的空教室。' if building else f'正在查第{period}大节的空教室。'])
+        f'正在查{building}{period_text}的空教室。' if building else f'正在查{period_text}的空教室。'])
     staged_page = None
     try:
         result = await tool.call({'command': command}, session, ctx.query_id)
@@ -237,7 +239,7 @@ async def handle_self_study(plugin, ctx, text):
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}
-    lines = [now.strftime('%m月%d日') + (f' · 当前第{period}大节' if automatic else f' · 本人指定第{period}大节'),
+    lines = [now.strftime('%m月%d日') + (f' · 当前{period_text}' if automatic else f' · 本人指定{period_text}'),
              '仅反映课程占用，不保证现场无人或楼门开放。']
     cached = not building or not freshness.get('liveChecked')
     stale = freshness.get('stale') is True

@@ -101,7 +101,7 @@ def synthetic_tool(command, *, prepare=True):
         else:
             result = {"success": True, "query": {"week": p.get('week'), "dayOfWeek": p.get('day_of_week'), "period": p.get('period'),
                 "campusName": p.get('campus_text') or '金明校区', "buildingName": p.get('building_text') or '十号楼'},
-                "total": 2, "rooms": [{"roomName": "十号楼101"}, {"roomName": "十号楼102"}], "msg": "金明十号楼101、102第3大节没有排课。仅反映课程占用，不保证现场开放。"}
+                "total": 2, "rooms": [{"roomName": "十号楼101"}, {"roomName": "十号楼102"}], "msg": "金明十号楼101、102第3大节（14:05–16:40）没有排课。仅反映课程占用，不保证现场开放。"}
     else:
         return spec, {"success": False, "msg": "本隔离评测禁止此操作，不执行任何外部写入。"}
     result["cli"] = {"command": command, "resolved_tool": spec.resolved_tool}

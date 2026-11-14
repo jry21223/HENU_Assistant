@@ -131,9 +131,12 @@ def catalog_uncovered(result):
 
 def render_classroom_map(result):
     """Return a PNG; absent rooms remain unverified, never inferred occupied."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageChops, ImageDraw
+    from henu_plugin.font_assets import draw_text, new_font_cache
+
     if not is_classroom(result):
         raise ValueError('unsupported classroom result')
+    font = new_font_cache()
     data = result.get('data') if isinstance(result.get('data'), dict) else {}
     all_day = isinstance(data.get('periods'), list)
     query = data if all_day else result.get('query') or {}
@@ -169,29 +172,27 @@ def render_classroom_map(result):
     else:
         available = {1: _room_states(result, campus, building)}
     if entry:
-        return render_catalog_plan(entry, query, available, all_day, data['periods'] if all_day else [result])
-    font_file = Path(__file__).with_name('assets') / 'NotoSansSC-Classroom.otf'
-    font = lambda size: ImageFont.truetype(str(font_file), size)
-    status_font = font
+        return render_catalog_plan(entry, query, available, all_day,
+                                   data['periods'] if all_day else [result], font_cache=font)
     image = Image.new('RGB', (1280, 1720 if all_day else 1550), '#f6f8fa')
     draw = ImageDraw.Draw(image)
     title = '金明校区 · 综合楼' + layout['number']
-    draw.text((64, 36), title, font=font(46), fill=INK)
-    period = '全天 · 状态点从左到右为第1至5大节' if all_day else query.get('periodName') or f"第{query.get('period', '?')}大节"
+    draw_text(draw, (48, 48 - font(46, 'bold').getmask(title).getbbox()[1]),
+              title, 46, font, weight='bold', fill=INK, anchor='lt')
+    from henu_plugin.classroom_floorplans import period_label
+    period = '全天 · 状态点对应各大节' if all_day else period_label(
+        query.get('period', '?'), query.get('periodName'),
+        query.get('clockStart') if query.get('clockVerified') else None,
+        query.get('clockEnd') if query.get('clockVerified') else None)
     window = (str(data.get('date', '')) + ' · ' if all_day else f"第{query.get('week', '?')}周 · 星期{query.get('dayOfWeek', '?')} · ") + period
-    if not all_day and query.get('clockVerified'):
-        window += ' ' + query['clockStart'] + '–' + query['clockEnd']
-    draw.text((64, 106), window, font=font(30), fill=INK)
-    for x, color, label in ((64, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
-        draw.rounded_rectangle((x, 180, x + 40, 220), radius=8, fill=color)
-        draw.text((x + 58, 178), label, font=status_font(30), fill=INK)
-    draw.text((64, 248), '按原图相对位置 · 非比例图', font=font(24), fill='#59697b')
+    draw_text(draw, (48, 118), window, 30, font, fill=INK)
+    for x, color, label in ((48, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
+        draw.rounded_rectangle((x, 192, x + 40, 232), radius=8, fill=color)
+        draw_text(draw, (x + 58, 190), label, 30, font, weight='medium', fill=INK)
     for index, floor in enumerate((5, 4, 3, 2, 1)):
         top = 300 + index * 210
-        draw.rounded_rectangle((48, top, 1232, top + 198), radius=18, fill='white')
-        draw.text((72, top + 70), f'{floor}F', font=font(40), fill=INK)
-        draw.line((170, top + 110, 1160, top + 110), fill='#c4ced8', width=3)
-        draw.text((1070, top + 85), '走廊', font=font(21), fill='#657589')
+        draw.rounded_rectangle((48, top, 1231, top + 198), radius=18, fill='white')
+        draw_text(draw, (72, top + 70), f'{floor}F', 40, font, weight='medium', fill=INK)
         for row_index, row in enumerate(layout['floors'][floor]):
             for column, number in enumerate(row):
                 if not number:
@@ -202,8 +203,8 @@ def render_classroom_map(result):
                 draw.rounded_rectangle((x, y, x + 130, y + 64), radius=10,
                                        fill='white' if all_day else FREE if free else UNKNOWN,
                                        outline=UNKNOWN if all_day else None, width=2)
-                draw.text((x + 65, y + (20 if all_day else 32)), number, anchor='mm', font=font(32),
-                          fill='white' if free else INK)
+                draw_text(draw, (x + 65, y + (20 if all_day else 32)), number, 32, font,
+                          weight='medium', anchor='mm', fill='white' if free else INK)
                 if all_day:
                     for p in range(1, 6):
                         cx = x + 17 + (p - 1) * 21
@@ -214,23 +215,28 @@ def render_classroom_map(result):
         for index, slot in enumerate(sorted(data['periods'], key=lambda row: row['period'])):
             y = 1370 + index * 52
             draw.rounded_rectangle((64, y, 104, y + 40), radius=12, fill=INK)
-            draw.text((84, y + 20), str(slot['period']), anchor='mm', font=font(27), fill='white')
-            label = (slot.get('clockStart', '') + '–' + slot.get('clockEnd', '')
-                     if data.get('clockVerified') else '第' + str(slot['period']) + '大节 · 时刻待核验')
-            draw.text((132, y + 20), label, anchor='lm', font=font(32), fill=INK)
+            draw_text(draw, (84, y + 20), str(slot['period']), 27, font,
+                      weight='medium', anchor='mm', fill='white')
+            label = period_label(slot['period'],
+                                 clock_start=slot.get('clockStart') if data.get('clockVerified') else None,
+                                 clock_end=slot.get('clockEnd') if data.get('clockVerified') else None)
+            draw_text(draw, (132, y + 20), label, 32, font, anchor='lm', fill=INK)
     state_rows = data['periods'] if all_day else [result]
     uncovered = sorted({number for row in state_rows for number, _ in catalog_uncovered(row)})
     if any((row.get('freshness') or {}).get('roomStates', {}).get('filtered') for row in state_rows):
-        draw.text((64, 1630 if all_day else 1365), '图示整栋课程状态；文字清单已筛选。', font=status_font(23), fill=INK)
+        draw_text(draw, (48, 1630 if all_day else 1365),
+                  '图示整栋课程状态；文字清单已筛选。', 23, font, fill=INK)
     if uncovered:
         label = '教室已确认，部分课表未覆盖：' if all_day else '教室已确认，课表未覆盖：'
         if all_day:
-            draw.text((650, 1370), label, font=status_font(23), fill=INK)
+            draw_text(draw, (650, 1370), label, 23, font, fill=INK)
             for index in range(0, len(uncovered), 6):
-                draw.text((650, 1405 + index // 6 * 32), '、'.join(uncovered[index:index + 6]), font=status_font(23), fill=INK)
+                draw_text(draw, (650, 1405 + index // 6 * 32),
+                          '、'.join(uncovered[index:index + 6]), 23, font, fill=INK)
         else:
-            draw.text((64, 1405), label + '、'.join(uncovered), font=status_font(23), fill=INK)
-    draw.text((64, 1660 if all_day else 1450), '灰色含课程占用或未核验；现场是否开放以实际为准。', font=font(28), fill='#59697b')
+            draw_text(draw, (48, 1405), label + '、'.join(uncovered), 23, font, fill=INK)
+    content_bottom = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()[3]
+    image = image.crop((0, 0, 1280, content_bottom + 48))
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
@@ -253,10 +259,11 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
     query = result.get('query') if isinstance(result.get('query'), dict) else {}
     proof = result.get('freshness') if isinstance(result.get('freshness'), dict) else {}
     lines = [' · '.join(escape(query.get(k, '')) for k in ('campusName', 'buildingName') if query.get(k))]
+    from henu_plugin.classroom_floorplans import period_label
     lines.append(f"第{query.get('week', '?')}周 · 星期{('一二三四五六日'[query['dayOfWeek'] - 1] if type(query.get('dayOfWeek')) is int and 1 <= query['dayOfWeek'] <= 7 else '?')} · "
-                 + str(query.get('periodName') or f"第{query.get('period', '?')}大节"))
-    if query.get('clockVerified'):
-        lines.append(query['clockStart'] + '–' + query['clockEnd'])
+                 + period_label(query.get('period', '?'), query.get('periodName'),
+                                query.get('clockStart') if query.get('clockVerified') else None,
+                                query.get('clockEnd') if query.get('clockVerified') else None))
     rooms = [row for row in result.get('rooms', []) if isinstance(row, dict)]
     current = verified(result)
     if rooms and current:

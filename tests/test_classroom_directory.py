@@ -92,7 +92,7 @@ def test_live_card_and_image_explain_matched_identity_without_inventing_course_s
     assert '6305、6405' in text
     assert '课表未覆盖' in text
     image = Image.open(io.BytesIO(render_classroom_map(row)))
-    assert image.size == (1280, 1550)
+    assert image.size == (1280, 1484)
     assert '6305、6405' in image.info['CatalogUncovered']
     assert image.getpixel((195, 1274)) == (35, 155, 112)  # 6101 stays free
     assert image.getpixel((775, 760)) == (225, 230, 236)  # 6305 stays unknown

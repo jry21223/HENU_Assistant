@@ -7,6 +7,16 @@ from PIL import Image
 import pytest
 
 from henu_plugin.classroom_map import build_classroom_image, render_classroom_map
+from henu_plugin.classroom_floorplans import period_label
+
+
+def test_period_labels_include_the_official_twenty_four_hour_ranges():
+    assert [period_label(period) for period in range(1, 6)] == [
+        '第1大节（08:00–09:40）', '第2大节（10:00–12:30）',
+        '第3大节（14:05–16:40）', '第4大节（17:00–18:40）',
+        '第5大节（19:10–21:40）',
+    ]
+    assert period_label(2, '第二大节') == '第二大节（10:00–12:30）'
 
 
 def result():
@@ -23,10 +33,12 @@ def result():
 
 def test_complete_result_uses_green_only_for_free_and_gray_for_other_rooms():
     image = Image.open(io.BytesIO(render_classroom_map(result())))
-    assert image.size == (1280, 1550)
+    assert image.size == (1280, 1387)
     assert image.getpixel((195, 1180)) == (35, 155, 112)  # 3101: free
     assert image.getpixel((195, 1274)) == (225, 230, 236)  # 3102: occupied
     assert image.getpixel((340, 1180)) == (225, 230, 236)  # 3103: no school coverage
+    from henu_plugin.classroom_map import classroom_summary
+    assert '第2大节（10:00–12:30）' in '\n'.join(classroom_summary(result()).pages())
 
 
 @pytest.mark.parametrize('change', ['stale', 'partial', 'refreshFailed', 'age', 'missing_coverage', 'wrong_scope', 'truncated', 'conflict'])
@@ -81,7 +93,7 @@ def test_query_emits_explicit_unfiltered_room_coverage_and_preserves_it_in_cache
     assert cached['freshness']['roomStates'] == proof
 
 
-def test_day_image_keeps_five_independent_states_and_original_canvas():
+def test_day_image_keeps_five_independent_states_and_bottom_padding():
     base = result()
     periods = []
     for period in range(1, 6):
@@ -96,7 +108,7 @@ def test_day_image_keeps_five_independent_states_and_original_canvas():
            'data': {'campusCode': '02', 'campusName': '金明校区', 'buildingCode': '18',
                     'buildingName': '金明综合楼3', 'periods': periods}}
     image = Image.open(io.BytesIO(render_classroom_map(row)))
-    assert image.size == (1280, 1720)
+    assert image.size == (1280, 1667)
     assert image.getpixel((197, 1212)) == (35, 155, 112)
     assert image.getpixel((218, 1212)) == (225, 230, 236)
 

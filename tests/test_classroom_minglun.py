@@ -23,7 +23,7 @@ def test_building_ten_preserves_photo_room_200_and_delivers_status_colors():
     assert image.info['PlanRooms'] == '68'
     assert image.info['UnnumberedSpaces'] == '13'
     # Second floor 200 lies south of the central corridor; left wing 201 is occupied.
-    assert image.getpixel((600, 1650)) == (35, 155, 112)
+    assert image.getpixel((600, 1600)) == (35, 155, 112)
     assert image.getpixel((100, 1530)) == (225, 230, 236)
 
 
@@ -65,3 +65,11 @@ def test_day_matrix_rejects_wrong_period_and_cross_day_evidence():
     row['data']['periods'][1]['freshness']['roomStates']['scope']['dayOfWeek'] = 5
     with pytest.raises(ValueError):
         render_classroom_map(row)
+
+
+def test_uncovered_dynamic_text_returns_to_classroom_text_fallback():
+    from henu_plugin.classroom_map import build_classroom_image
+
+    row = scoped('0013', ['十号楼200'])
+    row['query']['periodName'] = '\uE000'
+    assert build_classroom_image(row) is None

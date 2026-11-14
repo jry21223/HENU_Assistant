@@ -277,7 +277,8 @@ def _classroom_query_card(result: dict) -> Card:
     day = query.get('dayOfWeek')
     if type(day) is int and 1 <= day <= 7:
         scope.append('星期' + '一二三四五六日'[day - 1])
-    period = query.get('periodName') or ('第' + str(query['period']) + '大节' if query.get('period') else '')
+    from henu_plugin.classroom_floorplans import period_label
+    period = period_label(query.get('period', '?'), query.get('periodName')) if query.get('period') else ''
     if period:
         scope.append(str(period))
     location = ' · '.join(str(query[key]) for key in ('campusName', 'buildingName') if query.get(key))
@@ -489,7 +490,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             collections.append(("courses", data["courses"]))
         for period in data.get("periods", []) if isinstance(data.get("periods"), list) else []:
             if isinstance(period, dict) and isinstance(period.get("rooms"), list):
-                label = str(period.get("periodName") or f"第{period.get('period')}大节")
+                from henu_plugin.classroom_floorplans import period_label
+                label = period_label(period.get('period', '?'), period.get('periodName'))
                 lines.append(f"**{escape(label)} · 空闲 {period.get('total', len(period['rooms']))} 间**")
                 for row in period["rooms"]:
                     lines.extend(_row_lines(row))
