@@ -17,7 +17,7 @@ FONT_FILES = {
 
 @lru_cache(maxsize=1)
 def _covered_codepoints() -> array:
-    data = json.loads((ASSETS / "HENUUI-coverage.json").read_text(encoding="utf-8"))
+    data = json.loads((ASSETS / "HENUUI-coverage.data").read_text(encoding="utf-8"))
     return array("I", (int(value, 16) for value in data["codepoints"].split(",")))
 
 

@@ -29,7 +29,7 @@ ZHENGZHOU_CAMPUSES = {'03', '郑州', '郑州校区', '龙子湖', '龙子湖校
 
 @lru_cache(maxsize=1)
 def plans():
-    return json.loads((Path(__file__).with_name('assets') / 'classroom-plans.json').read_text())
+    return json.loads((Path(__file__).with_name('assets') / 'classroom-plans.data').read_text())
 
 
 def catalog_name(campus, building, name):
@@ -233,12 +233,12 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
                                fill='white' if all_day else FREE if free else GRAY)
         name = _room_display_label(entry, room)
         size = 38 if two_columns else max(14, min(28, int((card_width - 25) / max(len(name), 1))))
-        draw_text(draw, (x + card_width / 2, y + card_height / 2), name, size, fonts,
+        draw_text(draw, (x + card_width / 2, y + card_height / (3 if all_day else 2)), name, size, fonts,
                   weight='medium', anchor='mm', fill='white' if free else INK)
         if all_day:
             for p in range(1, 6):
                 cx = x + card_width / 2 - 42 + (p - 1) * 21
-                cy = y + 60
+                cy = y + card_height * 3 / 4
                 draw.ellipse((cx-7, cy-7, cx+7, cy+7),
                              fill=FREE if available[p].get(room['name']) == 'free' else GRAY)
     offset = notes_top + 65
@@ -261,7 +261,7 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     metadata.add_text('UnnumberedSpaces', str(sum(len(f['blank']) for f in floors)))
     metadata.add_text('UnlocatedRooms', '、'.join(r['name'] for r in unplaced) if floors else '')
     content_bottom = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()[3]
-    image = image.crop((0, 0, 1280, (862 if two_columns else content_bottom + 48)))
+    image = image.crop((0, 0, 1280, content_bottom + 48))
     output = io.BytesIO()
     image.save(output, 'PNG', optimize=True, pnginfo=metadata)
     return output.getvalue()

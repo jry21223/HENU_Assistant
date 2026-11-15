@@ -62,10 +62,10 @@ python ops/render-classroom-preview.py
 修改前读 `docs/classroom-two-state-minglun-20261028.md`；调整文字或字体时读 `henu_plugin/assets/README.md`。
 
 - 数据入口：`campus_core/empty_classroom/client.py` 解析上游；`query.py` 查询并生成证据；`henu_mcp/tools/empty_classroom.py` 转出共享工具入口。
-- 图片入口：`henu_plugin/classroom_map.py` 的 `render_classroom_map()` / `build_classroom_image()`；照片平面图和目录展示在同目录 `classroom_floorplans.py`；资源在 `henu_plugin/assets/classroom-plans.json`。
+- 图片入口：`henu_plugin/classroom_map.py` 的 `render_classroom_map()` / `build_classroom_image()`；照片平面图和目录展示在同目录 `classroom_floorplans.py`；资源在 `henu_plugin/assets/classroom-plans.data`。
 - 标绿需要 `verified()` 通过、`freshness.roomStates.complete == true`、证据与查询的学期/周/星期/节次/校区/楼栋完全一致，以及有效的 `free`、`occupied` 与结果数量。仅有 `rooms` 不能证明当前空闲。
 - 绿色表示“课程未占用”；灰色包含“课程占用或未核验”。缺失、过期、部分结果、跨范围数据不能推断为空闲。全天五个大节分别核验。
-- 平面图只使用已核对位置；目录视图只表示名称。金明 `LAYOUTS` 是限定楼栋的回退；未知楼栋不能编造位置。
+- 平面图只使用已核对位置；目录视图只表示名称。金明四栋使用 `JINMING_BUILDINGS` 楼层目录，按房号升序连续排列，不保留走廊两侧或空格；未知楼栋不能编造位置。明伦仍保留照片平面图。
 - 明伦图使用 `floors[].cells`、`roomKey` 和 `stateKey`。编号不确定的房间保持灰色；`605-2`、`605-3` 独立，未标号区域不推断编号。学校目录身份不能替代课表状态证据。
 - 守卫限制 PNG 原始字节不超过 `2 * 1024 * 1024`；Base64 编码另有体积开销。保留异常返回 `None` 与 QQ 文字回退。
 - 内置字体是字符子集；新增文案需核验字形，Pillow 可能静默缺字。保留字体许可；演示状态和示例日期只放预览输出，不写入发布资源。

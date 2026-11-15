@@ -14,3 +14,11 @@ Source photos (provided 2026-10-28; photograph date unknown):
 - Building 10 SHA256: f223753b616fedc427f953d0d0675efb85617aa85e534812e738c19e48c83502
 
 Production uses a narrow source allowlist, verified source and online SQLite backups, atomic replacement and a runtime-only restart. Preserve unrelated live overlays. Rollback restores only source/marker, never user data. Installed-code tests, fresh read-only school queries and management API initialization are required before recording success.
+
+## 2026-11-15：金明改用楼层目录
+
+用户确认金明综合楼 2、3、5、6 放弃走廊结构，明伦综合楼、十号楼保留照片平面图。本次选择替代上文金明四栋保留位置的旧约定。
+
+金明只保留原有房间身份和楼层归属；每层按房号升序连续排卡，满五个换行，楼层高度按实际行数计算。不再以奇偶号表示走廊两侧，不保留 `None` 占位或空上排。图片明确标为“楼层目录”。
+
+课程状态证据、灰色未核验、全天独立时段、目录有身份但无课表覆盖等规则保持不变。更改目录排列不代表重新核验了学校现场位置，也不包含生产部署。

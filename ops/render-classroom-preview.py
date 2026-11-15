@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from henu_plugin.classroom_floorplans import period_label, plans
-from henu_plugin.classroom_map import LAYOUTS, build_classroom_image
+from henu_plugin.classroom_map import JINMING_BUILDINGS, build_classroom_image
 
 OUT = ROOT / 'output' / 'classroom-preview'
 
@@ -54,8 +54,7 @@ def samples():
     yield 'minglun-10', demo_result('01', '0013', entry['campus'], entry['name'], names, free)
 
     names = sorted('金明综合楼' + number
-                   for rows in LAYOUTS['18']['floors'].values()
-                   for row in rows for number in row if number)
+                   for rooms in JINMING_BUILDINGS['18']['floors'].values() for number in rooms)
     yield 'jinming-3', demo_result(
         '02', '18', '金明校区', '金明综合楼3', names, names[::3], ['金明综合楼3103'])
 

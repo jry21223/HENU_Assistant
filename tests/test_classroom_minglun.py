@@ -23,8 +23,8 @@ def test_building_ten_preserves_photo_room_200_and_delivers_status_colors():
     assert image.info['PlanRooms'] == '68'
     assert image.info['UnnumberedSpaces'] == '13'
     # Second floor 200 lies south of the central corridor; left wing 201 is occupied.
-    assert image.getpixel((600, 1600)) == (35, 155, 112)
-    assert image.getpixel((100, 1530)) == (225, 230, 236)
+    assert image.getpixel((630, 1540)) == (35, 155, 112)
+    assert image.getpixel((150, 1460)) == (225, 230, 236)
 
 
 def test_comprehensive_keeps_subrooms_separate_and_ambiguous_photo_cells_gray():
@@ -37,9 +37,9 @@ def test_comprehensive_keeps_subrooms_separate_and_ambiguous_photo_cells_gray():
     assert '509' in image.info['UnlocatedRooms']
     # 6F large room printed 509 remains unknown, while small 609 can match exactly.
     assert image.getpixel((450, 450)) == (225, 230, 236)
-    assert image.getpixel((310, 500)) == (35, 155, 112)
+    assert image.getpixel((310, 450)) == (35, 155, 112)
     # 605-2 and 605-3 never grant free state to the larger photo room 605.
-    assert image.getpixel((310, 640)) == (225, 230, 236)
+    assert image.getpixel((310, 620)) == (225, 230, 236)
 
 
 def test_day_matrix_rejects_wrong_period_and_cross_day_evidence():

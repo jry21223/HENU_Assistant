@@ -1,4 +1,4 @@
-"""Read-only classroom diagrams transcribed from reviewed floor-plan photos."""
+"""Read-only classroom directories and reviewed Minglun photo plans."""
 from __future__ import annotations
 
 import base64
@@ -13,22 +13,18 @@ FREE = (35, 155, 112)
 UNKNOWN = (225, 230, 236)
 INK = (30, 45, 61)
 
-# Three-numbered building: odd rooms north of the corridor, remaining rooms south.
-# Source: user-provided 2026-10-20 floor-plan photo, matched to Jinming building 18.
-LAYOUTS = {'18': {'number': '3', 'floors': {
-    floor: ([f'3{floor}{n:02}' for n in (1, 3, 5)],
-            [f'3{floor}{n:02}' for n in (2, 4, 6, 7, 8, 9)])
-    for floor in range(1, 6)}}}
-LAYOUTS.update({
+# Room identity and floor membership only; list order does not describe a corridor.
+JINMING_BUILDINGS = {
     '17': {'number': '2', 'floors': {
-        f: ([None, None, None, None, f'2{f}06'] if f in (3, 4) else [],
-            [f'2{f}{n:02}' for n in range(1, 4 if f == 1 else 6)]) for f in range(1, 6)}},
+        f: [f'2{f}{n:02}' for n in range(1, 4 if f == 1 else 7 if f in (3, 4) else 6)]
+        for f in range(1, 6)}},
+    '18': {'number': '3', 'floors': {
+        f: [f'3{f}{n:02}' for n in range(1, 10)] for f in range(1, 6)}},
     '20': {'number': '5', 'floors': {
-        f: ([f'5{f}{n:02}' for n in (1, 3, 5)],
-            [f'5{f}{n:02}' for n in ((2, 4, 6, 7, 8) if f >= 4 else (2, 4, 6, 7))]) for f in range(1, 6)}},
+        f: [f'5{f}{n:02}' for n in range(1, 9 if f >= 4 else 8)] for f in range(1, 6)}},
     '21': {'number': '6', 'floors': {
-        f: ([None, None, None, None, f'6{f}05'] if f in (3, 4) else [],
-            [f'6{f}{n:02}' for n in range(1, 5)]) for f in range(1, 6)}}})
+        f: [f'6{f}{n:02}' for n in range(1, 6 if f in (3, 4) else 5)] for f in range(1, 6)}},
+}
 
 
 def is_classroom(result):
@@ -58,10 +54,10 @@ def _room_number(row, campus, building):
     if row.get('campusCode', campus) != campus or row.get('buildingCode', building) != building:
         raise ValueError('classroom scope mismatch')
     name = str(row.get('roomName') or row.get('room_name') or '')
-    if campus != '02' or building not in LAYOUTS:
+    if campus != '02' or building not in JINMING_BUILDINGS:
         from henu_plugin.classroom_floorplans import catalog_name
         return catalog_name(campus, building, name)
-    number = LAYOUTS[building]['number']
+    number = JINMING_BUILDINGS[building]['number']
     match = re.fullmatch(r'(?:金明综合楼)?(' + number + r'[1-5][0-9]{2})', name)
     return match[1] if match else ''
 
@@ -108,7 +104,7 @@ def catalog_uncovered(result):
     """Exact school identities with no course coverage; never status evidence."""
     query = result.get('query') or {}
     campus, building = query.get('campusCode'), query.get('buildingCode')
-    if campus != '02' or building not in LAYOUTS:
+    if campus != '02' or building not in JINMING_BUILDINGS:
         return []
     states = _room_states(result, campus, building)
     if not states:
@@ -148,12 +144,12 @@ def render_classroom_map(result):
                 or query.get('buildingName', entry['name']) not in
                 {entry['name'], entry['campus'] + ' ' + entry['name']}):
             raise ValueError('scope name mismatch')
-    elif campus != '02' or building not in LAYOUTS:
+    elif campus != '02' or building not in JINMING_BUILDINGS:
         raise ValueError('no reviewed layout for this scope')
-    layout = LAYOUTS.get(building) if campus == '02' else None
+    directory = JINMING_BUILDINGS.get(building) if campus == '02' else None
     if not entry and (query.get('campusName', '金明校区') != '金明校区'
-            or query.get('buildingName', '金明综合楼' + layout['number']) not in
-            {'金明综合楼' + layout['number'], '金明校区 金明综合楼' + layout['number']}):
+            or query.get('buildingName', '金明综合楼' + directory['number']) not in
+            {'金明综合楼' + directory['number'], '金明校区 金明综合楼' + directory['number']}):
         raise ValueError('scope name mismatch')
     if all_day:
         slots = data['periods']
@@ -174,9 +170,19 @@ def render_classroom_map(result):
     if entry:
         return render_catalog_plan(entry, query, available, all_day,
                                    data['periods'] if all_day else [result], font_cache=font)
-    image = Image.new('RGB', (1280, 1720 if all_day else 1550), '#f6f8fa')
+    state_rows = data['periods'] if all_day else [result]
+    uncovered = sorted({number for row in state_rows for number, _ in catalog_uncovered(row)})
+    filtered = any((row.get('freshness') or {}).get('roomStates', {}).get('filtered') for row in state_rows)
+    floors = sorted(directory['floors'].items(), reverse=True)
+    floor_rows = {floor: math.ceil(len(rooms) / 5) for floor, rooms in floors}
+    panel_heights = {floor: 48 + rows * 64 + max(0, rows - 1) * 16
+                     for floor, rows in floor_rows.items()}
+    footer_top = 300 + sum(height + 12 for height in panel_heights.values()) + 24
+    footer_height = ((276 if all_day else 0) + (40 if filtered else 0)
+                     + (35 + math.ceil(len(uncovered) / 12) * 32 if uncovered else 0))
+    image = Image.new('RGB', (1280, footer_top + footer_height + 48), '#f6f8fa')
     draw = ImageDraw.Draw(image)
-    title = '金明校区 · 综合楼' + layout['number']
+    title = '金明校区 · 综合楼' + directory['number']
     draw_text(draw, (48, 48 - font(46, 'bold').getmask(title).getbbox()[1]),
               title, 46, font, weight='bold', fill=INK, anchor='lt')
     from henu_plugin.classroom_floorplans import period_label
@@ -190,31 +196,30 @@ def render_classroom_map(result):
     for x, color, label in ((48, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
         draw.rounded_rectangle((x, 192, x + 40, 232), radius=8, fill=color)
         draw_text(draw, (x + 58, 190), label, 30, font, weight='medium', fill=INK)
-    for index, floor in enumerate((5, 4, 3, 2, 1)):
-        top = 300 + index * 210
-        draw.rounded_rectangle((48, top, 1231, top + 198), radius=18, fill='white')
-        draw_text(draw, (72, top + 70), f'{floor}F', 40, font, weight='medium', fill=INK)
-        for row_index, row in enumerate(layout['floors'][floor]):
-            for column, number in enumerate(row):
-                if not number:
-                    continue
-                x, y = 180 + column * 145, top + 28 + row_index * 94
-                state = available[1].get(number, 'unknown') if not all_day else 'unknown'
-                free = state == 'free'
-                draw.rounded_rectangle((x, y, x + 130, y + 64), radius=10,
-                                       fill='white' if all_day else FREE if free else UNKNOWN,
-                                       outline=UNKNOWN if all_day else None, width=2)
-                draw_text(draw, (x + 65, y + (20 if all_day else 32)), number, 32, font,
-                          weight='medium', anchor='mm', fill='white' if free else INK)
-                if all_day:
-                    for p in range(1, 6):
-                        cx = x + 17 + (p - 1) * 21
-                        state = available[p].get(number, 'unknown')
-                        draw.ellipse((cx - 7, y + 43, cx + 7, y + 57),
-                                     fill=FREE if state == 'free' else UNKNOWN)
+    draw_text(draw, (48, 252), '楼层目录 · 按房号排序', 23, font, fill=INK)
+    top = 300
+    for floor, rooms in floors:
+        height = panel_heights[floor]
+        draw.rounded_rectangle((48, top, 1231, top + height), radius=18, fill='white')
+        draw_text(draw, (96, top + height / 2), f'{floor}F', 40, font,
+                  weight='medium', fill=INK, anchor='mm')
+        for index, number in enumerate(sorted(rooms)):
+            x, y = 180 + index % 5 * 210, top + 24 + index // 5 * 80
+            free = not all_day and available[1].get(number) == 'free'
+            draw.rounded_rectangle((x, y, x + 190, y + 64), radius=10,
+                                   fill='white' if all_day else FREE if free else UNKNOWN,
+                                   outline=UNKNOWN if all_day else None, width=2)
+            draw_text(draw, (x + 95, y + (20 if all_day else 32)), number, 32, font,
+                      weight='medium', anchor='mm', fill='white' if free else INK)
+            if all_day:
+                for p in range(1, 6):
+                    cx = x + 95 - 42 + (p - 1) * 21
+                    draw.ellipse((cx - 7, y + 43, cx + 7, y + 57),
+                                 fill=FREE if available[p].get(number) == 'free' else UNKNOWN)
+        top += height + 12
     if all_day:
         for index, slot in enumerate(sorted(data['periods'], key=lambda row: row['period'])):
-            y = 1370 + index * 52
+            y = footer_top + index * 52
             draw.rounded_rectangle((64, y, 104, y + 40), radius=12, fill=INK)
             draw_text(draw, (84, y + 20), str(slot['period']), 27, font,
                       weight='medium', anchor='mm', fill='white')
@@ -223,26 +228,24 @@ def render_classroom_map(result):
                                  clock_end=slot.get('clockEnd') if data.get('clockVerified') else None,
                                  campus=data.get('campusName') or data.get('campusCode'))
             draw_text(draw, (132, y + 20), label, 32, font, anchor='lm', fill=INK)
-    state_rows = data['periods'] if all_day else [result]
-    uncovered = sorted({number for row in state_rows for number, _ in catalog_uncovered(row)})
-    if any((row.get('freshness') or {}).get('roomStates', {}).get('filtered') for row in state_rows):
-        draw_text(draw, (48, 1630 if all_day else 1365),
+        footer_top += 276
+    if filtered:
+        draw_text(draw, (48, footer_top),
                   '图示整栋课程状态；文字清单已筛选。', 23, font, fill=INK)
+        footer_top += 40
     if uncovered:
         label = '教室已确认，部分课表未覆盖：' if all_day else '教室已确认，课表未覆盖：'
-        if all_day:
-            draw_text(draw, (650, 1370), label, 23, font, fill=INK)
-            for index in range(0, len(uncovered), 6):
-                draw_text(draw, (650, 1405 + index // 6 * 32),
-                          '、'.join(uncovered[index:index + 6]), 23, font, fill=INK)
-        else:
-            draw_text(draw, (48, 1405), label + '、'.join(uncovered), 23, font, fill=INK)
+        draw_text(draw, (48, footer_top), label, 23, font, fill=INK)
+        for index in range(0, len(uncovered), 12):
+            draw_text(draw, (48, footer_top + 35 + index // 12 * 32),
+                      '、'.join(uncovered[index:index + 12]), 23, font, fill=INK)
     content_bottom = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()[3]
     image = image.crop((0, 0, 1280, content_bottom + 48))
     output = io.BytesIO()
     from PIL.PngImagePlugin import PngInfo
     metadata = PngInfo()
     metadata.add_text('Title', title)
+    metadata.add_text('View', 'floor-directory')
     metadata.add_text('CatalogUncovered', '、'.join(uncovered))
     image.save(output, 'PNG', optimize=True, pnginfo=metadata)
     return output.getvalue()

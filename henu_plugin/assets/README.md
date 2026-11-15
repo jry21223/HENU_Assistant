@@ -25,6 +25,10 @@ maintainer confirms separate authorization for redistribution of these
 subsets; they are not licensed under the SIL Open Font License. FontTools is
 needed only to rebuild or verify assets, not by the plugin at runtime.
 
+`HENUUI-coverage.data` 与 `classroom-plans.data` 的内容仍为 JSON。静态资源使用
+`.data` 扩展名，避免普通 `lbp build` 按 `.gitignore` 的 `*.json` 规则漏包；不要放开
+该规则，以免收录运行时缓存或凭据。
+
 To rebuild, install `requirements-fonts.txt`, place the three source files in
 the workspace-level `output/` directory, then run:
 

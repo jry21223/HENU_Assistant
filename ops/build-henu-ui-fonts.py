@@ -26,7 +26,7 @@ SOURCE_SHA256 = {
 }
 FONT_FILES = {weight: f"HENUUI-{title}.ttf"
               for weight, (_, _, title) in FONT_SOURCES.items()}
-MANIFEST = ASSETS / "HENUUI-coverage.json"
+MANIFEST = ASSETS / "HENUUI-coverage.data"
 GLYPH_ALIASES = {0x30FB: 0x00B7}
 LEGACY_UNSUPPORTED = {0x2713}
 
@@ -72,7 +72,7 @@ def desired_codepoints(source_dir: Path) -> set[int]:
     for path in (ROOT / "henu_plugin" / "classroom_map.py",
                  ROOT / "henu_plugin" / "classroom_floorplans.py",
                  ROOT / "henu_plugin" / "seat_map_image.py",
-                 ASSETS / "classroom-plans.json"):
+                 ASSETS / "classroom-plans.data"):
         values.update(codepoint for codepoint in map(ord, path.read_text(encoding="utf-8"))
                       if codepoint not in {0x09, 0x0A, 0x0D})
     legacy = legacy_codepoints()

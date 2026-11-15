@@ -29,7 +29,7 @@ def test_henu_ui_weights_render_distinctly_and_use_a_bounded_local_cache():
 
 
 def test_coverage_has_gb2312_and_requested_label_and_time_glyphs():
-    manifest = json.loads((ASSETS / "HENUUI-coverage.json").read_text(encoding="utf-8"))
+    manifest = json.loads((ASSETS / "HENUUI-coverage.data").read_text(encoding="utf-8"))
     codepoints = manifest["codepoints"].split(",")
     coverage = {int(value, 16) for value in codepoints}
     gb2312 = set(range(0x20, 0x7F))
