@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -79,8 +80,13 @@ class HenuCampusBot(
                 for name in tuple(cookie_data)
                 if name in CAS_COOKIE_NAMES
             }
-            if cookie_data:
-                self.session.cookies.update(cookie_data)
+            # A domainless restored cookie is sent alongside the server's new
+            # scoped cookie. Duplicate PHPSESSID values break the CAS callback.
+            for name, value in cookie_data.items():
+                if not name.startswith("_"):
+                    self.session.cookies.set(
+                        name, str(value), domain=urlsplit(self.base_url).hostname, path="/"
+                    )
             apply_cas_cookies(self.session, saved_cas_cookies)
 
         apply_cas_cookies(self.session, cas_cookies)
