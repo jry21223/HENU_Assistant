@@ -186,9 +186,6 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     placed = {c['roomKey'] for f in floors for c in f['cells']}
     unplaced = [r for r in entry['rooms'] if r['key'] not in placed]
     two_columns = uses_zhengzhou_schedule(query.get('campusName') or query.get('campusCode'))
-    if two_columns:
-        order = {'301': 0, '302': 1, '401': 2, '402': 3, '303': 4}
-        unplaced.sort(key=lambda room: order.get(_room_display_label(entry, room), len(order)))
     legend_top, content_top = (248, 386) if two_columns else (184, 256)
     card_columns = 2 if two_columns else 3
     card_width, card_gap = (550, 34) if two_columns else (378, 24)
