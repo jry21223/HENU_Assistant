@@ -137,7 +137,7 @@ def render_classroom_map(result):
     all_day = isinstance(data.get('periods'), list)
     query = data if all_day else result.get('query') or {}
     campus, building = query.get('campusCode'), query.get('buildingCode')
-    from henu_plugin.classroom_floorplans import plans, render_catalog_plan
+    from henu_plugin.classroom_floorplans import draw_period_legend, plans, render_catalog_plan
     entry = plans().get(f'{campus}-{building}')
     if entry:
         if (query.get('campusName', entry['campus']) != entry['campus']
@@ -218,17 +218,7 @@ def render_classroom_map(result):
                                  fill=FREE if available[p].get(number) == 'free' else UNKNOWN)
         top += height + 12
     if all_day:
-        for index, slot in enumerate(sorted(data['periods'], key=lambda row: row['period'])):
-            y = footer_top + index * 52
-            draw.rounded_rectangle((64, y, 104, y + 40), radius=12, fill=INK)
-            draw_text(draw, (84, y + 20), str(slot['period']), 27, font,
-                      weight='medium', anchor='mm', fill='white')
-            label = period_label(slot['period'],
-                                 clock_start=slot.get('clockStart') if data.get('clockVerified') else None,
-                                 clock_end=slot.get('clockEnd') if data.get('clockVerified') else None,
-                                 campus=data.get('campusName') or data.get('campusCode'))
-            draw_text(draw, (132, y + 20), label, 32, font, anchor='lm', fill=INK)
-        footer_top += 276
+        footer_top = draw_period_legend(draw, footer_top, data['periods'], query, font)
     if filtered:
         draw_text(draw, (48, footer_top),
                   '图示整栋课程状态；文字清单已筛选。', 23, font, fill=INK)

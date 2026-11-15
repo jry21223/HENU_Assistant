@@ -54,6 +54,21 @@ def period_label(period, name=None, clock_start=None, clock_end=None, *, campus=
     return f'{label}（{start}–{end}）' if start and end else label
 
 
+def draw_period_legend(draw, top, periods, query, fonts):
+    """绘制统一全天大节说明，返回下一段说明的纵坐标。"""
+    for index, slot in enumerate(sorted(periods, key=lambda row: row['period'])):
+        y = top + index * 52
+        draw.rounded_rectangle((64, y, 104, y + 40), radius=12, fill=INK)
+        draw_text(draw, (84, y + 20), str(slot['period']), 27, fonts,
+                  weight='medium', anchor='mm', fill='white')
+        label = period_label(slot['period'],
+                             clock_start=slot.get('clockStart') if query.get('clockVerified') else None,
+                             clock_end=slot.get('clockEnd') if query.get('clockVerified') else None,
+                             campus=query.get('campusName') or query.get('campusCode'))
+        draw_text(draw, (132, y + 20), label, 32, fonts, anchor='lm', fill=INK)
+    return top + len(periods) * 52 + 16
+
+
 def _room_display_label(entry, room):
     label = str(room.get('label') or room.get('name') or '')
     if not entry.get('floors'):
@@ -243,13 +258,7 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
                              fill=FREE if available[p].get(room['name']) == 'free' else GRAY)
     offset = notes_top + 65
     if all_day:
-        for i, slot in enumerate(sorted(periods, key=lambda s: s['period'])):
-            y = offset + i*50
-            label = period_label(slot['period'], clock_start=slot.get('clockStart') if query.get('clockVerified') else None,
-                                 clock_end=slot.get('clockEnd') if query.get('clockVerified') else None,
-                                 campus=query.get('campusName') or query.get('campusCode'))
-            draw_text(draw, (48, y), label, 28, fonts, fill=INK)
-        offset += 265
+        offset = draw_period_legend(draw, offset, periods, query, fonts)
     filtered = any((s.get('freshness') or {}).get('roomStates', {}).get('filtered') for s in periods)
     if filtered:
         draw_text(draw, (48, offset), '图示整栋课程状态；文字清单已筛选。',
