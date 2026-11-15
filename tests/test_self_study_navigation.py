@@ -268,22 +268,38 @@ def test_conversation_campus_is_reused_without_inventing_a_preference(monkeypatc
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('campus', ['金明', '龙子湖'])
-def test_mismatched_clock_or_longzihu_never_applies_kaifeng_mapping(monkeypatch, campus):
+def test_mismatched_kaifeng_clock_still_requires_explicit_period(monkeypatch):
     import henu_plugin.self_study as study
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai')))
     clock = json.loads(json.dumps(PRODUCTION_CLOCK))
-    if campus == '金明':
-        clock['6']['start'] = '14:00'
+    clock['6']['start'] = '14:00'
     plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=json.dumps(clock).encode()))
-    call = AsyncMock(return_value={'success': True, 'preferences': {'campus': campus}})
+    call = AsyncMock(return_value={'success': True, 'preferences': {'campus': '金明'}})
     monkeypatch.setattr(HenuCliSafe, 'call', call)
     async def run():
         await handle_navigation(plugin, context('找自习室'))
-        ctx = context(campus)
+        ctx = context('金明')
         assert await handle_navigation(plugin, ctx)
         assert '第几大节' in str(ctx.reply.call_args)
+    asyncio.run(run())
+    call.assert_not_awaited()
+
+
+def test_longzihu_uses_zhengzhou_period_at_current_time(monkeypatch):
+    import henu_plugin.self_study as study
+    from components.cli_tools.henu_cli_safe import HenuCliSafe
+    monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai')))
+    monkeypatch.setattr(study, '_campus_building_choices', lambda *args, **kwargs: [])
+    plugin = SimpleNamespace(get_plugin_storage=AsyncMock(return_value=b'{}'))
+    call = AsyncMock()
+    monkeypatch.setattr(HenuCliSafe, 'call', call)
+    async def run():
+        await handle_navigation(plugin, context('找自习室'))
+        ctx = context('龙子湖')
+        assert await handle_navigation(plugin, ctx)
+        assert '第几大节' not in str(ctx.reply.call_args)
+        assert any(row.get('period') == '3' for row in plugin._self_study_pending.values())
     asyncio.run(run())
     call.assert_not_awaited()
 

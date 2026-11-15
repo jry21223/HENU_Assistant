@@ -390,6 +390,17 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
 
 
+def test_zhengzhou_matrix_card_uses_zhengzhou_period_times():
+    matrix = {'success': True, 'data': {
+        'campusCode': '03', 'campusName': '龙子湖校区',
+        'buildingCode': '26', 'buildingName': '九章学堂北楼B座',
+        'week': 8, 'dayOfWeek': 2,
+        'periods': [{'period': 2, 'periodName': '第二大节', 'total': 0, 'rooms': []}],
+    }}
+    page = result_card(matrix, 'empty_classroom_query').pages()[0]
+    assert '10:20–12:45' in page and '10:00–12:30' not in page
+
+
 def test_food_detail_keeps_existing_public_description_and_dishes():
     detail = {"post": {"shop": {"name": "面馆"}, "campus": "jinming", "tier": "hang", "review_text": "面筋道汤清爽", "price_reference": "12元", "hours_reference": "10:00–21:00", "dishes": [{"name": "刀削面", "price": "12元", "reason": "汤清爽"}], "author": "hidden-author", "images": ["https://private-image.test"]}}
     page = "\n".join(result_card({"success": True, "reply_text": "详情：" + json.dumps(detail, ensure_ascii=False)}, "food").pages())

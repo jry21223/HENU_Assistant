@@ -4551,6 +4551,7 @@ def empty_classroom_query(
             }
 
         periods_result: list[dict[str, Any]] = []
+        period_name_map = {1: "第一大节", 2: "第二大节", 3: "第三大节", 4: "第四大节", 5: "第五大节"}
         for p in (1, 2, 3, 4, 5):
             result = query_free_classrooms(
                 client=client,
@@ -4568,32 +4569,31 @@ def empty_classroom_query(
                 ttl_seconds=ttl_seconds,
                 max_stale_seconds=max_stale_seconds,
             )
-            period_name_map = {1: "第一大节", 2: "第二大节", 3: "第三大节", 4: "第四大节", 5: "第五大节"}
-            periods_result.append(
-                {
-                    "period": p,
-                    "periodName": period_name_map.get(p, ""),
-                    "total": result.total,
-                    "rooms": [
-                        {
-                            "roomId": r.get("roomId", ""),
-                            "roomName": r.get("roomName", ""),
-                            "capacity": r.get("capacity", 0),
-                        }
-                        for r in result.rooms
-                    ],
-                }
-            )
+            slot = result.to_dict()
+            slot.update(period=p, periodName=period_name_map[p])
+            periods_result.append(slot)
+
+        first_query = periods_result[0].get("query", {}) if periods_result else {}
+        first_resolved = periods_result[0].get("resolved", {}) if periods_result else {}
+        campus_meta = first_resolved.get("campus", {}) if isinstance(first_resolved, dict) else {}
+        building_meta = first_resolved.get("building", {}) if isinstance(first_resolved, dict) else {}
+        matrix_data = {
+            "termCode": term_code,
+            "week": week,
+            "dayOfWeek": day_of_week,
+            "campusCode": campus_code or first_query.get("campusCode", ""),
+            "buildingCode": building_code or first_query.get("buildingCode", ""),
+            "periods": periods_result,
+        }
+        for key, source in (("campusName", campus_meta), ("buildingName", building_meta)):
+            value = first_query.get(key) or source.get(key, "")
+            if value:
+                matrix_data[key] = value
 
         return {
             "success": True,
             "msg": f"已查询 {len(periods_result)} 个大节",
-            "data": {
-                "termCode": term_code,
-                "week": week,
-                "dayOfWeek": day_of_week,
-                "periods": periods_result,
-            },
+            "data": matrix_data,
         }
 
     if view == "occupancy":

@@ -17,10 +17,6 @@ KAIFENG_CLOCK = dict(zip((str(n) for n in range(1, 14)), (
         ('10:55', '11:40'), ('11:45', '12:30'), ('14:05', '14:50'),
         ('15:00', '15:45'), ('15:55', '16:40'), ('17:00', '17:45'),
         ('17:55', '18:40'), ('19:10', '19:55'), ('20:05', '20:50'), ('20:55', '21:40')))))
-KAIFENG_UNITS = (('08:00', '09:40'), ('10:00', '12:30'), ('14:05', '16:40'),
-                  ('17:00', '18:40'), ('19:10', '21:40'))
-
-
 def campus_now():
     return datetime.now(ZoneInfo('Asia/Shanghai'))
 
@@ -152,22 +148,24 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
         return True
     period = state.get('period')
-    from henu_plugin.classroom_floorplans import period_label
+    from henu_plugin.classroom_floorplans import period_label, period_ranges, uses_zhengzhou_schedule
     automatic = not period
-    if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
+    if automatic and (uses_zhengzhou_schedule(state['campus'])
+                      or (state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin))):
         current = now.strftime('%H:%M')
-        period = next((str(n) for n, (start, end) in enumerate(KAIFENG_UNITS, 1) if start <= current < end), None)
+        period = next((str(n) for n, (start, end) in enumerate(period_ranges(state['campus']), 1)
+                       if start <= current < end), None)
         if not period:
             await _reply(ctx, '当前不在教学时段', [now.strftime('%m月%d日 %H:%M'),
                 '当前不在该校区教学时段内，不能据此认定所有教室空闲或开放。'],
-                f'如需查询课程占用，可回复指定大节，例如“{period_label(2)}”。')
+                f'如需查询课程占用，可回复指定大节，例如“{period_label(2, campus=state["campus"])}”。')
             return True
     if not period:
         await _reply(ctx, '需确认当前大节', [
             '暂时无法确定当前查询时段，请选择第几大节（1–5）。',
-            f'可直接回复“{period_label(2)}”，并补充所选校区的具体楼名。'])
+            f'可直接回复“{period_label(2, campus=state["campus"])}”，并补充所选校区的具体楼名。'])
         return True
-    period_text = period_label(period)
+    period_text = period_label(period, campus=state.get('campus'))
     if state.get('building') and not state.get('campus'):
         await _reply(ctx, '补充校区', ['请回复校区，例如“金明校区”。'])
         return True
@@ -239,8 +237,7 @@ async def handle_self_study(plugin, ctx, text):
         return True
     rooms = result.get('rooms') or []
     freshness = result.get('freshness') or {}
-    lines = [now.strftime('%m月%d日') + (f' · 当前{period_text}' if automatic else f' · 本人指定{period_text}'),
-             '仅反映课程占用，不保证现场无人或楼门开放。']
+    lines = [now.strftime('%m月%d日') + (f' · 当前{period_text}' if automatic else f' · 本人指定{period_text}')]
     cached = not building or not freshness.get('liveChecked')
     stale = freshness.get('stale') is True
     if stale:

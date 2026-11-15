@@ -1,4 +1,6 @@
 """Campus/building selection and QQ presentation regressions."""
+from types import SimpleNamespace
+
 from henu_plugin.cli import inspect_cli_command
 
 
@@ -14,6 +16,45 @@ def test_numbered_building_resolves_within_campus(tmp_path, monkeypatch):
     result = api._resolve_campus_and_building('金明', '综合楼1')
     assert result.get('campus_code') == '02', result
     assert result.get('building_code') == '0006', result
+
+
+def test_day_matrix_preserves_campus_scope_for_zhengzhou_rendering(monkeypatch):
+    from henu_mcp.tools import server_impl as api
+
+    class Client:
+        def fetch_buildings(self, campus_code):
+            assert campus_code == '03'
+            return [SimpleNamespace(building_code='26')]
+
+    def query(**kwargs):
+        period = kwargs['period']
+        scope = {
+            'termCode': kwargs['term_code'], 'week': kwargs['week'],
+            'dayOfWeek': kwargs['day_of_week'], 'period': period,
+            'campusCode': kwargs['campus_code'], 'buildingCode': kwargs['building_code'],
+        }
+        return SimpleNamespace(
+            total=0,
+            to_dict=lambda: {
+                'query': {**scope, 'campusName': '郑州校区', 'buildingName': '九章学堂北楼B座'},
+                'total': 0, 'rooms': [], 'resolved': {
+                    'campus': {'campusCode': '03', 'campusName': '郑州校区'},
+                    'building': {'buildingCode': '26', 'buildingName': '九章学堂北楼B座'},
+                },
+                'freshness': {'liveChecked': True, 'roomStates': {'complete': True, 'scope': scope, 'free': [], 'occupied': []}},
+            },
+        )
+
+    monkeypatch.setattr(api, '_get_empty_classroom_client', lambda: Client())
+    monkeypatch.setattr(api, 'query_free_classrooms', query)
+    result = api.empty_classroom_query(view='day_matrix', term_code='2026,1', week=10,
+                                       day_of_week=5, campus_code='03', building_code='26')
+    data = result['data']
+    assert data['campusCode'] == '03' and data['campusName'] == '郑州校区'
+    assert data['buildingCode'] == '26' and data['buildingName'] == '九章学堂北楼B座'
+    assert {slot['period'] for slot in data['periods']} == {1, 2, 3, 4, 5}
+    assert all(slot['query']['campusCode'] == '03' and slot['freshness']['roomStates']['scope']['period'] == slot['period']
+               for slot in data['periods'])
 
 
 def test_jinming_prompt_lists_its_actual_buildings_and_selection_codes(tmp_path, monkeypatch):

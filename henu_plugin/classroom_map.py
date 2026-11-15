@@ -183,7 +183,8 @@ def render_classroom_map(result):
     period = '全天 · 状态点对应各大节' if all_day else period_label(
         query.get('period', '?'), query.get('periodName'),
         query.get('clockStart') if query.get('clockVerified') else None,
-        query.get('clockEnd') if query.get('clockVerified') else None)
+        query.get('clockEnd') if query.get('clockVerified') else None,
+        campus=query.get('campusName') or query.get('campusCode'))
     window = (str(data.get('date', '')) + ' · ' if all_day else f"第{query.get('week', '?')}周 · 星期{query.get('dayOfWeek', '?')} · ") + period
     draw_text(draw, (48, 118), window, 30, font, fill=INK)
     for x, color, label in ((48, FREE, '课程未占用'), (600, UNKNOWN, '未确认空闲')):
@@ -219,7 +220,8 @@ def render_classroom_map(result):
                       weight='medium', anchor='mm', fill='white')
             label = period_label(slot['period'],
                                  clock_start=slot.get('clockStart') if data.get('clockVerified') else None,
-                                 clock_end=slot.get('clockEnd') if data.get('clockVerified') else None)
+                                 clock_end=slot.get('clockEnd') if data.get('clockVerified') else None,
+                                 campus=data.get('campusName') or data.get('campusCode'))
             draw_text(draw, (132, y + 20), label, 32, font, anchor='lm', fill=INK)
     state_rows = data['periods'] if all_day else [result]
     uncovered = sorted({number for row in state_rows for number, _ in catalog_uncovered(row)})
@@ -263,7 +265,8 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
     lines.append(f"第{query.get('week', '?')}周 · 星期{('一二三四五六日'[query['dayOfWeek'] - 1] if type(query.get('dayOfWeek')) is int and 1 <= query['dayOfWeek'] <= 7 else '?')} · "
                  + period_label(query.get('period', '?'), query.get('periodName'),
                                 query.get('clockStart') if query.get('clockVerified') else None,
-                                query.get('clockEnd') if query.get('clockVerified') else None))
+                                query.get('clockEnd') if query.get('clockVerified') else None,
+                                campus=query.get('campusName') or query.get('campusCode')))
     rooms = [row for row in result.get('rooms', []) if isinstance(row, dict)]
     current = verified(result)
     if rooms and current:
@@ -272,15 +275,11 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
         age, ttl = proof.get('ageSeconds'), proof.get('ttlSeconds')
         expired = result.get('stale') or result.get('is_stale') or proof.get('stale') or (type(age) in (int, float) and type(ttl) in (int, float) and age > ttl)
         lines.append('缓存已过期，未将其中教室列为可用；请重新查询。' if expired else '本次结果时效待核验，未列为当前可用。')
-    if image_failed:
-        lines.append('示意图未能显示，仍可查看简短结果。')
-    elif not image_ok:
-        lines.append('该楼栋暂未提供可核对的位置示意图。')
-    else:
+    if image_ok:
         from henu_plugin.classroom_floorplans import plans
         entry = plans().get(f"{query.get('campusCode')}-{query.get('buildingCode')}")
-        lines.append('图片按教室名称排列，位置以现场为准。' if entry and not entry.get('floors')
-                     else '图中仅标记已核对位置，其余房间可查看清单。')
+        if entry and entry.get('floors'):
+            lines.append('图中仅标记已核对位置，其余房间可查看清单。')
     if image_ok and proof.get('roomStates', {}).get('filtered'):
         lines.append('图片为整栋课程状态；数量及教室清单已按条件筛选。')
     uncovered = catalog_uncovered(result)
@@ -290,7 +289,6 @@ def classroom_summary(result, *, image_ok=False, image_failed=False):
         lines.append('来源获取时间：' + escape(proof['fetchedAt'], 60))
     if proof.get('liveChecked') is False:
         lines.append('本次读取缓存，未请求上游重新核验。')
-    lines.append('仅反映课程占用，临时占用及楼门是否开放以现场为准。')
     return Card('空教室', f'课程未占用 {len(rooms)} 间' if current else '时效待核验', tuple(lines),
                 '回复“教室清单”查看完整结果；仍可指定大节或查全天。')
 

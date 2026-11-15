@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,6 +20,11 @@ PERIOD_TIMES = {
     1: ('08:00', '09:40'), 2: ('10:00', '12:30'),
     3: ('14:05', '16:40'), 4: ('17:00', '18:40'), 5: ('19:10', '21:40'),
 }
+ZHENGZHOU_PERIOD_TIMES = {
+    1: ('08:30', '10:10'), 2: ('10:20', '12:45'),
+    3: ('13:30', '16:05'), 4: ('16:15', '17:45'), 5: ('18:10', '20:40'),
+}
+ZHENGZHOU_CAMPUSES = {'03', '郑州', '郑州校区', '龙子湖', '龙子湖校区'}
 
 
 @lru_cache(maxsize=1)
@@ -31,11 +37,30 @@ def catalog_name(campus, building, name):
     return name if any(r['name'] == name for r in entry.get('rooms', [])) else ''
 
 
-def period_label(period, name=None, clock_start=None, clock_end=None):
+def uses_zhengzhou_schedule(campus):
+    return str(campus or '').strip() in ZHENGZHOU_CAMPUSES
+
+
+def period_ranges(campus=None):
+    times = ZHENGZHOU_PERIOD_TIMES if uses_zhengzhou_schedule(campus) else PERIOD_TIMES
+    return tuple(times[index] for index in range(1, 6))
+
+
+def period_label(period, name=None, clock_start=None, clock_end=None, *, campus=None):
     label = name or f'第{period}大节'
-    times = PERIOD_TIMES.get(int(period)) if str(period).isdigit() else None
+    schedule = ZHENGZHOU_PERIOD_TIMES if uses_zhengzhou_schedule(campus) else PERIOD_TIMES
+    times = schedule.get(int(period)) if str(period).isdigit() else None
     start, end = (clock_start, clock_end) if clock_start and clock_end else times or (None, None)
     return f'{label}（{start}–{end}）' if start and end else label
+
+
+def _room_display_label(entry, room):
+    label = str(room.get('label') or room.get('name') or '')
+    if not entry.get('floors'):
+        match = re.search(r'(\d{3,4}(?:-\d+)?)$', label)
+        if match:
+            return match.group(1)
+    return label
 
 
 def _draw_floor(draw, floor, kind, left, top, available, all_day, fonts):
@@ -160,8 +185,13 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     floors = sorted(entry.get('floors', []), key=lambda f: f['floor'], reverse=not ten)
     placed = {c['roomKey'] for f in floors for c in f['cells']}
     unplaced = [r for r in entry['rooms'] if r['key'] not in placed]
-    directory_top = 318 + (len(floors) * 782 if ten else math.ceil(len(floors) / 2) * 660)
-    directory_rows = math.ceil(len(unplaced) / 3)
+    legend_top, content_top = 184, 256
+    two_columns = uses_zhengzhou_schedule(query.get('campusName') or query.get('campusCode'))
+    card_columns = 2 if two_columns else 3
+    card_width, card_gap = (580, 24) if two_columns else (378, 24)
+    directory_top = (content_top + 18 + (len(floors) * 782 if ten else math.ceil(len(floors) / 2) * 660)
+                     if floors else content_top - 50)
+    directory_rows = math.ceil(len(unplaced) / card_columns)
     notes_top = directory_top + (50 + directory_rows * 100 if unplaced else 0)
     footer_height = 430 if all_day else 160
     image = Image.new('RGB', (1280, notes_top + footer_height), '#f6f8fa')
@@ -172,40 +202,38 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     view = '全天 · 状态点对应各大节' if all_day else period_label(
         query.get('period', '?'), query.get('periodName'),
         query.get('clockStart') if query.get('clockVerified') else None,
-        query.get('clockEnd') if query.get('clockVerified') else None)
+        query.get('clockEnd') if query.get('clockVerified') else None,
+        campus=query.get('campusName') or query.get('campusCode'))
     scope = f"第{query.get('week', '?')}周 · 星期{query.get('dayOfWeek', '?')} · "
     if all_day and query.get('date'):
         scope = str(query['date']) + ' · '
     draw_text(draw, (48, 118), scope + view, 30, fonts, fill=INK)
     for x, color, label in [(48, FREE, '课程未占用'), (600, GRAY, '未确认空闲')]:
-        draw.rounded_rectangle((x, 192, x+40, 232), radius=8, fill=color)
-        draw_text(draw, (x+58, 190), label, 30, fonts, weight='medium', fill=INK)
-    if not floors:
-        draw_text(draw, (48, 248), '教室目录 · 暂无位置平面图', 24, fonts, fill='#59697b')
+        draw.rounded_rectangle((x, legend_top, x+40, legend_top + 40), radius=8, fill=color)
+        draw_text(draw, (x+58, legend_top - 2), label, 30, fonts, weight='medium', fill=INK)
     for i, f in enumerate(floors):
         left = 48 if ten else 48 + i % 2 * 604
-        top = 300 + (i * 782 if ten else i // 2 * 660)
+        top = content_top + (i * 782 if ten else i // 2 * 660)
         draw.rounded_rectangle((left, top, left+(1183 if ten else 579), top+(770 if ten else 638)),
                                radius=18, fill='white')
         draw_text(draw, (left+24, top+16), f"{f['floor']}F", 32, fonts,
                   weight='medium', fill=INK)
         _draw_floor(draw, f, kind, left+12 if ten else left+24, top+70,
                     available, all_day, fonts)
-    if unplaced:
-        label = '目录中有、原图未定位的房间' if floors else '按教室名称排列，位置以现场为准'
-        draw_text(draw, (48, directory_top), label, 24, fonts, fill=INK)
     for i, room in enumerate(unplaced):
-        x, y = 64 + i % 3 * 386, directory_top + 50 + i // 3 * 100
+        x = 48 + i % card_columns * (card_width + card_gap)
+        y = directory_top + 50 + i // card_columns * 100
         free = not all_day and available[1].get(room['name']) == 'free'
-        draw.rounded_rectangle((x, y, x+350, y+80), radius=10,
+        draw.rounded_rectangle((x, y, x + card_width, y + 80), radius=10,
                                fill='white' if all_day else FREE if free else GRAY)
-        name = room['name']
-        size = max(14, min(28, int(325 / max(len(name), 1))))
-        draw_text(draw, (x+175, y+27 if all_day else y+40), name, size, fonts,
+        name = _room_display_label(entry, room)
+        size = max(14, min(28, int((card_width - 25) / max(len(name), 1))))
+        draw_text(draw, (x + card_width / 2, y + 27 if all_day else y + 40), name, size, fonts,
                   weight='medium', anchor='mm', fill='white' if free else INK)
         if all_day:
             for p in range(1, 6):
-                cx, cy = x+133+(p-1)*21, y+60
+                cx = x + card_width / 2 - 42 + (p - 1) * 21
+                cy = y + 60
                 draw.ellipse((cx-7, cy-7, cx+7, cy+7),
                              fill=FREE if available[p].get(room['name']) == 'free' else GRAY)
     offset = notes_top + 65
@@ -213,7 +241,8 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
         for i, slot in enumerate(sorted(periods, key=lambda s: s['period'])):
             y = offset + i*50
             label = period_label(slot['period'], clock_start=slot.get('clockStart') if query.get('clockVerified') else None,
-                                 clock_end=slot.get('clockEnd') if query.get('clockVerified') else None)
+                                 clock_end=slot.get('clockEnd') if query.get('clockVerified') else None,
+                                 campus=query.get('campusName') or query.get('campusCode'))
             draw_text(draw, (48, y), label, 28, fonts, fill=INK)
         offset += 265
     filtered = any((s.get('freshness') or {}).get('roomStates', {}).get('filtered') for s in periods)

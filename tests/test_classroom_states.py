@@ -7,16 +7,22 @@ from PIL import Image
 import pytest
 
 from henu_plugin.classroom_map import build_classroom_image, render_classroom_map
-from henu_plugin.classroom_floorplans import period_label
+from henu_plugin.classroom_floorplans import _room_display_label, period_label, plans
 
 
 def test_period_labels_include_the_official_twenty_four_hour_ranges():
-    assert [period_label(period) for period in range(1, 6)] == [
+    assert [period_label(period, campus='明伦校区') for period in range(1, 6)] == [
         '第1大节（08:00–09:40）', '第2大节（10:00–12:30）',
         '第3大节（14:05–16:40）', '第4大节（17:00–18:40）',
         '第5大节（19:10–21:40）',
     ]
+    assert period_label(2, '第二大节', campus='金明校区') == '第二大节（10:00–12:30）'
+    assert period_label(2, '第二大节', campus='03') == '第二大节（10:20–12:45）'
+    assert period_label(3, campus='郑州校区') == '第3大节（13:30–16:05）'
+    assert period_label(4, campus='龙子湖校区') == '第4大节（16:15–17:45）'
+    assert period_label(2, '第二大节', campus='04') == '第二大节（10:00–12:30）'
     assert period_label(2, '第二大节') == '第二大节（10:00–12:30）'
+    assert period_label(2, '第二大节', '09:30', '11:00', campus='龙子湖校区') == '第二大节（09:30–11:00）'
 
 
 def result():
@@ -29,6 +35,22 @@ def result():
                 'fetchedAt': '2026-10-27T04:00:00', 'ageSeconds': 0, 'ttlSeconds': 300,
                 'roomStates': {'complete': True, 'scope': scope,
                     'free': ['金明综合楼3101'], 'occupied': ['金明综合楼3102']}}}
+
+
+def zhengzhou_day_matrix():
+    scope = {'termCode': '2026,1', 'week': 9, 'dayOfWeek': 2,
+             'campusCode': '03', 'buildingCode': '26'}
+    periods = []
+    for period in range(1, 6):
+        query = {**scope, 'period': period, 'campusName': '郑州校区',
+                 'buildingName': '九章学堂北楼B座'}
+        periods.append({'success': True, 'period': period, 'periodName': f'第{period}大节',
+                        'query': query, 'rooms': [], 'total': 0,
+                        'freshness': {'liveChecked': True, 'roomStates': {
+                            'complete': True, 'scope': query, 'free': [], 'occupied': []}}})
+    return {'success': True, '_resolved_tool_name': 'empty_classroom_query',
+            'data': {**scope, 'campusName': '郑州校区', 'buildingName': '九章学堂北楼B座',
+                     'periods': periods}}
 
 
 def test_complete_result_uses_green_only_for_free_and_gray_for_other_rooms():
@@ -111,6 +133,21 @@ def test_day_image_keeps_five_independent_states_and_bottom_padding():
     assert image.size == (1280, 1667)
     assert image.getpixel((197, 1212)) == (35, 155, 112)
     assert image.getpixel((218, 1212)) == (225, 230, 236)
+
+
+def test_zhengzhou_day_image_preserves_campus_scope_and_schedule():
+    image = Image.open(io.BytesIO(render_classroom_map(zhengzhou_day_matrix())))
+    assert image.info['Title'] == '郑州校区 · 九章学堂北楼B座'
+    entry = plans()['03-26']
+    assert _room_display_label(entry, entry['rooms'][0]) == '301'
+
+
+def test_classroom_summary_omits_location_defensive_copy():
+    from henu_plugin.classroom_map import classroom_summary
+    text = '\n'.join(classroom_summary(result(), image_ok=False, image_failed=True).pages())
+    assert '暂无位置平面图' not in text
+    assert '位置以现场为准' not in text
+    assert '以现场为准' not in text
 
 
 @pytest.mark.parametrize('freshness', ['live', 'cache_first'])
