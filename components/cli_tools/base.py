@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextvars import ContextVar
 import re
 import json
 from pathlib import Path
@@ -31,6 +32,9 @@ def _resolve_storage_key(session: provider_session.Session, identity_hint: dict[
     if not storage_key:
         storage_key = hashlib.sha1(qq.encode("utf-8")).hexdigest()[:16]
     return storage_key
+
+
+_LIBRARY_PLAN_RESULT = ContextVar("henu_library_plan_result", default=False)
 
 
 class BaseHenuTool(Tool):
@@ -67,6 +71,8 @@ class BaseHenuTool(Tool):
                 query_id,
                 identity_hint,
             )
+            if _LIBRARY_PLAN_RESULT.get():
+                return result
             self._prepare_delivery_result(result)
             await self._refresh_after_sensitive_success(query_id, params, result)
             self._strip_internal_fields(result)
@@ -133,6 +139,8 @@ class BaseHenuTool(Tool):
 
         await sync_after_commit(self.plugin, storage_key, result)
 
+        if _LIBRARY_PLAN_RESULT.get():
+            return result
         self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)
         self._strip_internal_fields(result)

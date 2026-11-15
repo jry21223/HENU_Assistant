@@ -8,7 +8,7 @@ import shlex
 import time
 from typing import Any
 
-from components.cli_tools.base import BaseHenuTool, _resolve_storage_key
+from components.cli_tools.base import BaseHenuTool, _resolve_storage_key, _LIBRARY_PLAN_RESULT
 from henu_plugin.cli import inspect_cli_command
 from henu_plugin.confirmation import (
     conversation_context,
@@ -160,7 +160,11 @@ class HenuCli(BaseHenuTool):
         )
         if p.get("preferred_end_time"):
             command += " --end-time " + shlex.quote(p["preferred_end_time"])
-        result = await super().call({"command": command}, session, query_id)
+        plan_context = _LIBRARY_PLAN_RESULT.set(True)
+        try:
+            result = await super().call({"command": command}, session, query_id)
+        finally:
+            _LIBRARY_PLAN_RESULT.reset(plan_context)
         if not isinstance(result, dict) or not result.get("success"):
             return result
         rules = result.get("reservation_rules") or {}
