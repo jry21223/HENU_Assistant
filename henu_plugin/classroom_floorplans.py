@@ -185,20 +185,26 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     floors = sorted(entry.get('floors', []), key=lambda f: f['floor'], reverse=not ten)
     placed = {c['roomKey'] for f in floors for c in f['cells']}
     unplaced = [r for r in entry['rooms'] if r['key'] not in placed]
-    legend_top, content_top = 184, 256
     two_columns = uses_zhengzhou_schedule(query.get('campusName') or query.get('campusCode'))
+    if two_columns:
+        order = {'301': 0, '302': 1, '401': 2, '402': 3, '303': 4}
+        unplaced.sort(key=lambda room: order.get(_room_display_label(entry, room), len(order)))
+    legend_top, content_top = (248, 386) if two_columns else (184, 256)
     card_columns = 2 if two_columns else 3
-    card_width, card_gap = (580, 24) if two_columns else (378, 24)
+    card_width, card_gap = (550, 34) if two_columns else (378, 24)
+    card_height, row_gap = (118, 28) if two_columns else (80, 20)
     directory_top = (content_top + 18 + (len(floors) * 782 if ten else math.ceil(len(floors) / 2) * 660)
                      if floors else content_top - 50)
     directory_rows = math.ceil(len(unplaced) / card_columns)
-    notes_top = directory_top + (50 + directory_rows * 100 if unplaced else 0)
+    notes_top = directory_top + (50 + directory_rows * card_height + max(0, directory_rows - 1) * row_gap
+                                 if unplaced else 0)
     footer_height = 430 if all_day else 160
     image = Image.new('RGB', (1280, notes_top + footer_height), '#f6f8fa')
     draw = ImageDraw.Draw(image)
     title = entry['campus'] + ' · ' + entry['name']
-    draw_text(draw, (48, 48 - fonts(46, 'bold').getmask(title).getbbox()[1]),
-              title, 46, fonts, weight='bold', fill=INK, anchor='lt')
+    title_x, title_size = (48, 54) if two_columns else (48, 46)
+    draw_text(draw, (title_x, (60 if two_columns else 48) - fonts(title_size, 'bold').getmask(title).getbbox()[1]),
+              title, title_size, fonts, weight='bold', fill=INK, anchor='lt')
     view = '全天 · 状态点对应各大节' if all_day else period_label(
         query.get('period', '?'), query.get('periodName'),
         query.get('clockStart') if query.get('clockVerified') else None,
@@ -207,10 +213,12 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     scope = f"第{query.get('week', '?')}周 · 星期{query.get('dayOfWeek', '?')} · "
     if all_day and query.get('date'):
         scope = str(query['date']) + ' · '
-    draw_text(draw, (48, 118), scope + view, 30, fonts, fill=INK)
-    for x, color, label in [(48, FREE, '课程未占用'), (600, GRAY, '未确认空闲')]:
-        draw.rounded_rectangle((x, legend_top, x+40, legend_top + 40), radius=8, fill=color)
-        draw_text(draw, (x+58, legend_top - 2), label, 30, fonts, weight='medium', fill=INK)
+    draw_text(draw, (title_x, 151 if two_columns else 118), scope + view, 38 if two_columns else 30, fonts, fill=INK)
+    legend_size, legend_font = (60, 38) if two_columns else (40, 30)
+    legend_items = [(48, FREE, '课程未占用'), (840 if two_columns else 600, GRAY, '未确认空闲')]
+    for x, color, label in legend_items:
+        draw.rounded_rectangle((x, legend_top, x + legend_size, legend_top + legend_size), radius=10, fill=color)
+        draw_text(draw, (x + legend_size + 26, legend_top + 2), label, legend_font, fonts, weight='medium', fill=INK)
     for i, f in enumerate(floors):
         left = 48 if ten else 48 + i % 2 * 604
         top = content_top + (i * 782 if ten else i // 2 * 660)
@@ -222,13 +230,13 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
                     available, all_day, fonts)
     for i, room in enumerate(unplaced):
         x = 48 + i % card_columns * (card_width + card_gap)
-        y = directory_top + 50 + i // card_columns * 100
+        y = directory_top + 50 + i // card_columns * (card_height + row_gap)
         free = not all_day and available[1].get(room['name']) == 'free'
-        draw.rounded_rectangle((x, y, x + card_width, y + 80), radius=10,
+        draw.rounded_rectangle((x, y, x + card_width, y + card_height), radius=10,
                                fill='white' if all_day else FREE if free else GRAY)
         name = _room_display_label(entry, room)
-        size = max(14, min(28, int((card_width - 25) / max(len(name), 1))))
-        draw_text(draw, (x + card_width / 2, y + 27 if all_day else y + 40), name, size, fonts,
+        size = 38 if two_columns else max(14, min(28, int((card_width - 25) / max(len(name), 1))))
+        draw_text(draw, (x + card_width / 2, y + card_height / 2), name, size, fonts,
                   weight='medium', anchor='mm', fill='white' if free else INK)
         if all_day:
             for p in range(1, 6):
@@ -256,7 +264,7 @@ def render_catalog_plan(entry, query, available, all_day, periods, *, font_cache
     metadata.add_text('UnnumberedSpaces', str(sum(len(f['blank']) for f in floors)))
     metadata.add_text('UnlocatedRooms', '、'.join(r['name'] for r in unplaced) if floors else '')
     content_bottom = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()[3]
-    image = image.crop((0, 0, 1280, content_bottom + 48))
+    image = image.crop((0, 0, 1280, (862 if two_columns else content_bottom + 48)))
     output = io.BytesIO()
     image.save(output, 'PNG', optimize=True, pnginfo=metadata)
     return output.getvalue()
