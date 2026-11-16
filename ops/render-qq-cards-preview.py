@@ -14,7 +14,7 @@ FIXTURES = [
     ("seminar_query", {"success": True, "date": "2026-10-14", "rooms": [{"nameMerge": "金明馆 · 研讨室301", "id": "sample-room", "capacity": 6, "available_slots": [{"start_time": "14:00", "end_time": "16:00"}]}], "next_commands": ["请说明研讨室、主题、日期与起止时间，私聊发起预约。"]}),
     ("library_reserve", {"success": False, "confirmation_required": True, "msg": "即将预约：金明馆北区 A-101，2026-10-14 08:00–10:00。本次尚未提交。"}),
     ("library_query", {"success": False, "error_code": "auth_required", "msg": "未绑定账号，无法获取实时可预约区域。", "seats": []}),
-    ("empty_classroom_query", {"success": True, "msg": "已查询金明校区十号楼第8周星期二第2大节。", "rooms": [], "next_commands": ["补充其他楼房或时段后重新查询。"]}),
+    ("empty_classroom_query", {"success": True, "msg": "已查询金明校区十号楼第8周星期二第2大节（10:00–12:30）。", "rooms": [], "next_commands": ["补充其他楼房或时段后重新查询。"]}),
 ]
 
 STYLE = '''body{margin:0;background:#edf1f7;color:#17233b;font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}header{padding:30px 36px 20px}h1{font-size:26px;margin:0 0 6px}header p{color:#69778c;margin:0}main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;padding:12px 36px 36px}.card{background:white;border:1px solid #dae3ed;border-radius:16px;padding:22px;box-shadow:0 8px 24px #192e5510;overflow-wrap:anywhere}.card h2{font-size:19px;margin:0 0 18px;color:#125fc2}.line{margin:5px 0}.gap{height:8px}.source{padding:0 36px 24px;font-size:12px;color:#69778c}@media(max-width:900px){main{grid-template-columns:repeat(2,minmax(0,1fr))}}'''

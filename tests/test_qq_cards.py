@@ -390,6 +390,17 @@ def test_actual_empty_classroom_nested_matrix_occupancy_and_freshness():
     assert "大学英语" in page and "5-6节" in page and "十号楼103" in page
 
 
+def test_zhengzhou_matrix_card_uses_zhengzhou_period_times():
+    matrix = {'success': True, 'data': {
+        'campusCode': '03', 'campusName': '龙子湖校区',
+        'buildingCode': '26', 'buildingName': '九章学堂北楼B座',
+        'week': 8, 'dayOfWeek': 2,
+        'periods': [{'period': 2, 'periodName': '第二大节', 'total': 0, 'rooms': []}],
+    }}
+    page = result_card(matrix, 'empty_classroom_query').pages()[0]
+    assert '10:20–12:45' in page and '10:00–12:30' not in page
+
+
 def test_food_detail_keeps_existing_public_description_and_dishes():
     detail = {"post": {"shop": {"name": "面馆"}, "campus": "jinming", "tier": "hang", "review_text": "面筋道汤清爽", "price_reference": "12元", "hours_reference": "10:00–21:00", "dishes": [{"name": "刀削面", "price": "12元", "reason": "汤清爽"}], "author": "hidden-author", "images": ["https://private-image.test"]}}
     page = "\n".join(result_card({"success": True, "reply_text": "详情：" + json.dumps(detail, ensure_ascii=False)}, "food").pages())
@@ -496,7 +507,8 @@ def test_five_classrooms_fit_one_result_first_card_without_internal_metadata():
     assert '第8周' in pages[0] and '星期二' in pages[0] and '第二大节' in pages[0]
     assert '2026,0' not in pages[0] and 'xk_room_schedule' not in pages[0]
     assert '缓存年龄' not in pages[0] and '来源获取时间' not in pages[0]
-    assert '现场为准' in pages[0]
+    assert '现场为准' not in pages[0]
+    assert '10:00–12:30' in pages[0]
 
 
 def test_routine_cards_skip_workflow_labels():
@@ -522,3 +534,20 @@ def test_cancel_binding_copy_keeps_original_account_clear():
     page = text_card('校园账号与校准', '已取消账号凭据录入。')[0]
     assert '已取消填写，原来的账号保留' in page
     assert '凭据录入' not in page and '与校准' not in page
+
+
+@pytest.mark.parametrize('all_day', [False, True])
+@pytest.mark.parametrize('clock_verified', [False, True])
+def test_classroom_card_uses_verified_query_clock_in_single_and_daily_results(all_day, clock_verified):
+    query = {'period': 2, 'periodName': '第二大节', 'campusName': '金明校区',
+             'clockVerified': clock_verified, 'clockStart': '09:30', 'clockEnd': '11:00'}
+    source = {'success': True, 'query': query, 'rooms': [{'roomName': '金明综合楼6101'}], 'total': 1}
+    if all_day:
+        source = {'success': True, 'data': {'campusName': '金明校区', 'clockVerified': clock_verified,
+                  'periods': [{'period': 2, 'periodName': '第二大节', 'clockStart': '09:30',
+                               'clockEnd': '11:00', 'rooms': [{'roomName': '金明综合楼6101'}], 'total': 1}]}}
+    page = '\n'.join(result_card(source, 'empty_classroom_query').pages())
+    expected = '09:30–11:00' if clock_verified else '10:00–12:30'
+    assert expected in page
+    if clock_verified:
+        assert '10:00–12:30' not in page

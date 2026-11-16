@@ -1,21 +1,26 @@
-# Seat map font
+# HENU UI fonts
 
-`NotoSansSC-SeatMap.otf` is a renamed character subset of Noto Sans CJK SC Regular,
-used for the seat-map diagram's Chinese labels and numbers. The upstream source
-is https://github.com/notofonts/noto-cjk/tree/main/Sans/OTF/SimplifiedChinese .
-It is distributed under SIL Open Font License 1.1; see `NotoSansSC-LICENSE.txt`.
-The subset includes ASCII, the map legend, and the library region names verified
-on 2026-10-20. FontTools is needed only to rebuild the subset, not at runtime.
+The classroom and seat renderers share static Noto Sans SC subsets renamed
+**HENU UI**: Regular 400, Medium 500, Bold 700. All weights cover the same
+characters: ASCII, GB2312, the former Noto subsets, and renderer/catalog text.
+Uncovered runtime text continues to use the existing text fallback.
 
-## Classroom fonts
+Source: [Google Fonts Noto Sans SC](https://github.com/google/fonts/tree/a85815a42757630ce188fdad368c2dfc444d4773/ofl/notosanssc),
+pinned commit `a85815a42757630ce188fdad368c2dfc444d4773`.
+The source and subsets are licensed under SIL Open Font License 1.1;
+`HENUUI-OFL.txt` preserves the complete copyright and license notice.
+Font name records retain the source copyright and license. Subsets use the
+family name HENU UI. The coverage manifest records source and output SHA-256.
 
-`NotoSansSC-Classroom.otf` is a renamed HENU Classroom subset of Noto Sans
-CJK SC Regular, rebuilt for the two-color classroom plans on 2026-10-29. It
-includes the original glyphs plus every heading, legend, note, and catalog
-name in `classroom_map.py`, `classroom_floorplans.py` and `classroom-plans.json`.
-Source: https://github.com/notofonts/noto-cjk/blob/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
-Use FontTools `pyftsubset` with the union of those characters to rebuild it.
-Verify the resulting cmap before release; Pillow silently omits missing glyphs.
+FontTools is only required for asset rebuilding and verification.
+Download `NotoSansSC[wght].ttf` and `OFL.txt` from the pinned source into
+`output/pr98-review/font-source/`, install `requirements-fonts.txt`, and run:
 
-`NotoSansSC-Classroom-Status.ttf` remains for older callers; the current maps use
-the main classroom font. Both fonts use SIL OFL 1.1; see `NotoSansSC-LICENSE.txt`.
+```bash
+python ops/build-henu-ui-fonts.py
+python ops/build-henu-ui-fonts.py --verify
+```
+
+`HENUUI-coverage.data` and `classroom-plans.data` contain JSON. Their `.data`
+extension keeps ordinary `lbp build` from excluding static resources under
+its `*.json` ignore rule. Do not relax that rule to include runtime caches.

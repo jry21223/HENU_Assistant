@@ -3,10 +3,26 @@ import copy
 import io
 from types import SimpleNamespace
 
-from PIL import Image
+from PIL import Image, ImageChops
 import pytest
 
 from henu_plugin.classroom_map import build_classroom_image, render_classroom_map
+from henu_plugin.classroom_floorplans import _room_display_label, period_label, plans
+
+
+def test_period_labels_distinguish_campus_reference_ranges():
+    assert [period_label(period, campus='明伦校区') for period in range(1, 6)] == [
+        '第1大节（08:00–09:40）', '第2大节（10:00–12:30）',
+        '第3大节（14:05–16:40）', '第4大节（17:00–18:40）',
+        '第5大节（19:10–21:40）',
+    ]
+    assert period_label(2, '第二大节', campus='金明校区') == '第二大节（10:00–12:30）'
+    assert period_label(2, '第二大节', campus='03') == '第二大节（参考 10:20–12:45）'
+    assert period_label(3, campus='郑州校区') == '第3大节（参考 13:30–16:05）'
+    assert period_label(4, campus='龙子湖校区') == '第4大节（参考 16:15–17:45）'
+    assert period_label(2, '第二大节', campus='04') == '第二大节（10:00–12:30）'
+    assert period_label(2, '第二大节') == '第二大节（10:00–12:30）'
+    assert period_label(2, '第二大节', '09:30', '11:00', campus='龙子湖校区') == '第二大节（09:30–11:00）'
 
 
 def result():
@@ -21,12 +37,32 @@ def result():
                     'free': ['金明综合楼3101'], 'occupied': ['金明综合楼3102']}}}
 
 
+def zhengzhou_day_matrix():
+    scope = {'termCode': '2026,1', 'week': 9, 'dayOfWeek': 2,
+             'campusCode': '03', 'buildingCode': '26'}
+    periods = []
+    for period in range(1, 6):
+        query = {**scope, 'period': period, 'campusName': '郑州校区',
+                 'buildingName': '九章学堂北楼B座'}
+        periods.append({'success': True, 'period': period, 'periodName': f'第{period}大节',
+                        'query': query, 'rooms': [], 'total': 0,
+                        'freshness': {'liveChecked': True, 'roomStates': {
+                            'complete': True, 'scope': query, 'free': [], 'occupied': []}}})
+    return {'success': True, '_resolved_tool_name': 'empty_classroom_query',
+            'data': {**scope, 'campusName': '郑州校区', 'buildingName': '九章学堂北楼B座',
+                     'periods': periods}}
+
+
 def test_complete_result_uses_green_only_for_free_and_gray_for_other_rooms():
     image = Image.open(io.BytesIO(render_classroom_map(result())))
-    assert image.size == (1280, 1550)
-    assert image.getpixel((195, 1180)) == (35, 155, 112)  # 3101: free
-    assert image.getpixel((195, 1274)) == (225, 230, 236)  # 3102: occupied
-    assert image.getpixel((340, 1180)) == (225, 230, 236)  # 3103: no school coverage
+    assert image.width == 1280
+    bounds = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()
+    assert image.height - bounds[3] == 48
+    assert image.getpixel((195, 1155)) == (35, 155, 112)  # 3101: free
+    assert image.getpixel((405, 1155)) == (225, 230, 236)  # 3102: occupied
+    assert image.getpixel((615, 1155)) == (225, 230, 236)  # 3103: no school coverage
+    from henu_plugin.classroom_map import classroom_summary
+    assert '第2大节（10:00–12:30）' in '\n'.join(classroom_summary(result()).pages())
 
 
 @pytest.mark.parametrize('change', ['stale', 'partial', 'refreshFailed', 'age', 'missing_coverage', 'wrong_scope', 'truncated', 'conflict'])
@@ -45,8 +81,8 @@ def test_unreliable_data_never_marks_rooms_free_or_occupied(change):
     else:
         row['freshness']['roomStates']['occupied'].append('金明综合楼3101')
     image = Image.open(io.BytesIO(render_classroom_map(row)))
-    assert image.getpixel((195, 1180)) == (225, 230, 236)
-    assert image.getpixel((195, 1274)) == (225, 230, 236)
+    assert image.getpixel((195, 1155)) == (225, 230, 236)
+    assert image.getpixel((405, 1155)) == (225, 230, 236)
 
 
 def test_failed_query_does_not_fabricate_a_status_image():
@@ -81,7 +117,7 @@ def test_query_emits_explicit_unfiltered_room_coverage_and_preserves_it_in_cache
     assert cached['freshness']['roomStates'] == proof
 
 
-def test_day_image_keeps_five_independent_states_and_original_canvas():
+def test_day_image_keeps_five_independent_states_and_bottom_padding():
     base = result()
     periods = []
     for period in range(1, 6):
@@ -96,9 +132,26 @@ def test_day_image_keeps_five_independent_states_and_original_canvas():
            'data': {'campusCode': '02', 'campusName': '金明校区', 'buildingCode': '18',
                     'buildingName': '金明综合楼3', 'periods': periods}}
     image = Image.open(io.BytesIO(render_classroom_map(row)))
-    assert image.size == (1280, 1720)
-    assert image.getpixel((197, 1212)) == (35, 155, 112)
-    assert image.getpixel((218, 1212)) == (225, 230, 236)
+    assert image.width == 1280
+    bounds = ImageChops.difference(image, Image.new('RGB', image.size, '#f6f8fa')).getbbox()
+    assert image.height - bounds[3] == 48
+    assert image.getpixel((233, 1190)) == (35, 155, 112)
+    assert image.getpixel((254, 1190)) == (225, 230, 236)
+
+
+def test_zhengzhou_day_image_preserves_campus_scope_and_schedule():
+    image = Image.open(io.BytesIO(render_classroom_map(zhengzhou_day_matrix())))
+    assert image.info['Title'] == '郑州校区 · 九章学堂北楼B座'
+    entry = plans()['03-26']
+    assert _room_display_label(entry, entry['rooms'][0]) == '301'
+
+
+def test_classroom_summary_omits_location_defensive_copy():
+    from henu_plugin.classroom_map import classroom_summary
+    text = '\n'.join(classroom_summary(result(), image_ok=False, image_failed=True).pages())
+    assert '暂无位置平面图' not in text
+    assert '位置以现场为准' not in text
+    assert '以现场为准' not in text
 
 
 @pytest.mark.parametrize('freshness', ['live', 'cache_first'])
@@ -124,7 +177,7 @@ def test_schedule_parse_errors_make_coverage_incomplete(tmp_path, monkeypatch, f
     assert len(calls) == (1 if freshness == 'live' else 0)
     data.update(success=True, _resolved_tool_name='empty_classroom_query')
     image = Image.open(io.BytesIO(render_classroom_map(data)))
-    assert image.getpixel((195, 1180)) == (225, 230, 236)
+    assert image.getpixel((195, 1155)) == (225, 230, 236)
 
 
 def test_filtered_image_summary_explains_whole_building_states():
@@ -137,4 +190,4 @@ def test_filtered_image_summary_explains_whole_building_states():
     text = '\n'.join(classroom_summary(row, image_ok=True).pages())
     assert '整栋课程状态' in text and '筛选' in text
     image = Image.open(io.BytesIO(render_classroom_map(row)))
-    assert image.getpixel((195, 1180)) == (35, 155, 112)
+    assert image.getpixel((195, 1155)) == (35, 155, 112)

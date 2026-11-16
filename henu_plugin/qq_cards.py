@@ -277,7 +277,12 @@ def _classroom_query_card(result: dict) -> Card:
     day = query.get('dayOfWeek')
     if type(day) is int and 1 <= day <= 7:
         scope.append('星期' + '一二三四五六日'[day - 1])
-    period = query.get('periodName') or ('第' + str(query['period']) + '大节' if query.get('period') else '')
+    from henu_plugin.classroom_floorplans import period_label
+    period = (period_label(query.get('period', '?'), query.get('periodName'),
+                           clock_start=query.get('clockStart') if query.get('clockVerified') is True else None,
+                           clock_end=query.get('clockEnd') if query.get('clockVerified') is True else None,
+                           campus=query.get('campusName') or query.get('campusCode'))
+              if query.get('period') else '')
     if period:
         scope.append(str(period))
     location = ' · '.join(str(query[key]) for key in ('campusName', 'buildingName') if query.get(key))
@@ -306,8 +311,6 @@ def _classroom_query_card(result: dict) -> Card:
             block += ('\n' if block else '') + row
         if block:
             lines.append(block)
-    if rooms:
-        lines.append('按教务课表筛选，临时占用以现场为准。')
     status = '数据已过期' if stale else (str(len(rooms)) + '间空教室' if rooms else '')
     return Card('空教室', status, tuple(lines))
 
@@ -418,9 +421,6 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             value = _first(result, key) or _first(data, key) or _first(query, key)
             if value:
                 lines.append(f"**{label}**：{escape(value, 100)}")
-        if data.get("periods") or data.get("courses") is not None:
-            if not freshness:
-                lines.append("此视图未返回缓存时间；仅反映已登记的课程/占用，不保证现场空闲。")
         if data.get("roomName"):
             lines.append(_row(data))
     if msg and not msg.lstrip().startswith(("{", "[")):
@@ -489,7 +489,11 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             collections.append(("courses", data["courses"]))
         for period in data.get("periods", []) if isinstance(data.get("periods"), list) else []:
             if isinstance(period, dict) and isinstance(period.get("rooms"), list):
-                label = str(period.get("periodName") or f"第{period.get('period')}大节")
+                from henu_plugin.classroom_floorplans import period_label
+                label = period_label(period.get('period', '?'), period.get('periodName'),
+                                     clock_start=period.get('clockStart') if data.get('clockVerified') is True else None,
+                                     clock_end=period.get('clockEnd') if data.get('clockVerified') is True else None,
+                                     campus=data.get('campusName') or data.get('campusCode'))
                 lines.append(f"**{escape(label)} · 空闲 {period.get('total', len(period['rooms']))} 间**")
                 for row in period["rooms"]:
                     lines.extend(_row_lines(row))
