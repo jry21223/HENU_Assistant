@@ -10,25 +10,23 @@ import sys
 
 from fontTools import subset
 from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "henu_plugin" / "assets"
-DEFAULT_SOURCE_DIR = ROOT.parent / "output"
-FONT_SOURCES = {
-    "regular": ("PingFang Regular.ttf", 400, "Regular"),
-    "medium": ("PingFang Medium.ttf", 500, "Medium"),
-    "bold": ("PingFang Bold.ttf", 700, "Bold"),
-}
-SOURCE_SHA256 = {
-    "PingFang Regular.ttf": "26b017dfb34a8aa0059f47eda6f90d7ffd19a24912dc1129abc24867a1385353",
-    "PingFang Medium.ttf": "ddf051a97717d35e90d297eab1fbb75bab48120983586cf2a70be9fd3dfad2c8",
-    "PingFang Bold.ttf": "96ec2276d8e77453e0e44f1e9633ee513396f2eeabb3d330f9e9306343b25fd9",
-}
+DEFAULT_SOURCE_DIR = ROOT / "output" / "pr98-review" / "font-source"
+SOURCE_COMMIT = "a85815a42757630ce188fdad368c2dfc444d4773"
+SOURCE_FILE = "NotoSansSC[wght].ttf"
+FONT_SOURCES = {"regular": (SOURCE_FILE, 400, "Regular"),
+                "medium": (SOURCE_FILE, 500, "Medium"),
+                "bold": (SOURCE_FILE, 700, "Bold")}
+SOURCE_SHA256 = {SOURCE_FILE: "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+                 "OFL.txt": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"}
 FONT_FILES = {weight: f"HENUUI-{title}.ttf"
               for weight, (_, _, title) in FONT_SOURCES.items()}
 MANIFEST = ASSETS / "HENUUI-coverage.data"
-GLYPH_ALIASES = {0x30FB: 0x00B7}
-LEGACY_UNSUPPORTED = {0x2713}
+GLYPH_ALIASES = {}
+LEGACY_UNSUPPORTED = set()
 
 
 def sha256(path: Path) -> str:
@@ -84,7 +82,7 @@ def desired_codepoints(source_dir: Path) -> set[int]:
     missing_text = values - supported
     if missing_text:
         sample = ", ".join(f"U+{value:04X}" for value in sorted(missing_text)[:8])
-        raise ValueError(f"PingFang does not cover renderer text: {sample}")
+        raise ValueError(f"Noto Sans SC does not cover renderer text: {sample}")
     unsupported_legacy = legacy - supported
     if unsupported_legacy != LEGACY_UNSUPPORTED:
         sample = ", ".join(f"U+{value:04X}" for value in sorted(unsupported_legacy))
@@ -111,7 +109,7 @@ def set_names(font: TTFont, style: str) -> None:
 
 def subset_font(source: Path, destination: Path, codepoints: set[int],
                 weight: int, style: str) -> set[int]:
-    font = TTFont(source)
+    font = TTFont(source, recalcTimestamp=False)
     source_cmap = unicode_cmap(font)
     aliases = {codepoint for codepoint, source_codepoint in GLYPH_ALIASES.items()
                if source_codepoint in source_cmap}
@@ -131,6 +129,7 @@ def subset_font(source: Path, destination: Path, codepoints: set[int],
             for codepoint, source_codepoint in GLYPH_ALIASES.items():
                 if source_codepoint in table.cmap:
                     table.cmap[codepoint] = table.cmap[source_codepoint]
+    font = instantiateVariableFont(font, {"wght": weight}, inplace=True)
     set_names(font, style)
     font["OS/2"].usWeightClass = weight
     font["OS/2"].fsSelection &= ~((1 << 5) | (1 << 6))
@@ -147,6 +146,10 @@ def verify() -> dict:
     metadata = json.loads(MANIFEST.read_text(encoding="utf-8"))
     declared = {int(value, 16) for value in metadata["codepoints"].split(",")}
     maps = {}
+    if sha256(ASSETS / "HENUUI-OFL.txt") != SOURCE_SHA256["OFL.txt"]:
+        raise ValueError("font license notice changed")
+    if metadata["sourceCommit"] != SOURCE_COMMIT:
+        raise ValueError("source commit changed")
     if metadata["sourceSha256"] != SOURCE_SHA256:
         raise ValueError("source font hashes do not match the approved inputs")
     if metadata["formerNotoUnsupported"] != [f"{value:04X}" for value in sorted(LEGACY_UNSUPPORTED)]:
@@ -163,8 +166,8 @@ def verify() -> dict:
         subfamily = {record.toUnicode() for record in font["name"].names if record.nameID == 2}
         if "HENU UI" not in family or style not in subfamily:
             raise ValueError(f"{path.name} has incorrect family/style metadata")
-        if "Apple Inc internal use only. Do not distribute." not in {
-                record.toUnicode() for record in font["name"].names if record.nameID == 13}:
+        if not any("SIL Open Font License" in value for value in {
+                record.toUnicode() for record in font["name"].names if record.nameID == 13}):
             raise ValueError(f"{path.name} lost source license metadata")
         if sha256(path) != metadata["outputSha256"][path.name]:
             raise ValueError(f"{path.name} hash does not match the manifest")
@@ -181,24 +184,16 @@ def verify() -> dict:
 
 
 def build(source_dir: Path) -> dict:
+    for filename, expected in SOURCE_SHA256.items():
+        if sha256(source_dir / filename) != expected:
+            raise ValueError(f"unexpected source SHA-256: {filename}")
     codepoints = desired_codepoints(source_dir)
     output_maps = {}
-    source_hashes = {}
-    for weight, (filename, expected_hash, style) in FONT_SOURCES.items():
-        source = source_dir / filename
-        if not source.is_file():
-            raise FileNotFoundError(f"missing source font: {source}")
-        actual_hash = sha256(source)
-        if actual_hash != SOURCE_SHA256[filename]:
-            raise ValueError(f"unexpected source font SHA-256: {filename}")
-        source_font = TTFont(source)
-        versions = {record.toUnicode() for record in source_font["name"].names
-                    if record.nameID == 5}
-        if "10.11d9e1" not in versions:
-            raise ValueError(f"unexpected PingFang version: {filename}")
-        source_hashes[filename] = actual_hash
+    source_hashes = dict(SOURCE_SHA256)
+    for weight, (filename, font_weight, style) in FONT_SOURCES.items():
         output_maps[weight] = subset_font(
-            source, ASSETS / FONT_FILES[weight], codepoints, expected_hash, style)
+            source_dir / filename, ASSETS / FONT_FILES[weight], codepoints, font_weight, style)
+    (ASSETS / "HENUUI-OFL.txt").write_bytes((source_dir / "OFL.txt").read_bytes())
 
     if len({frozenset(cmap) for cmap in output_maps.values()}) != 1:
         raise ValueError("source font subsets have different cmaps")
@@ -208,8 +203,9 @@ def build(source_dir: Path) -> dict:
 
     metadata = {
         "family": "HENU UI",
-        "sourceFamily": "PingFang SC",
-        "sourceVersion": "10.11d9e1",
+        "sourceFamily": "Noto Sans SC",
+        "sourceCommit": SOURCE_COMMIT,
+        "license": "OFL-1.1",
         "sourceSha256": source_hashes,
         "glyphAliases": {f"U+{codepoint:04X}": f"U+{source_codepoint:04X}"
                          for codepoint, source_codepoint in GLYPH_ALIASES.items()},

@@ -148,10 +148,9 @@ async def handle_self_study(plugin, ctx, text):
         await _reply(ctx, '确认校区', ['在哪个校区？'], '请回复“金明”“明伦”或“龙子湖”。')
         return True
     period = state.get('period')
-    from henu_plugin.classroom_floorplans import period_label, period_ranges, uses_zhengzhou_schedule
+    from henu_plugin.classroom_floorplans import period_label, period_ranges
     automatic = not period
-    if automatic and (uses_zhengzhou_schedule(state['campus'])
-                      or (state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin))):
+    if automatic and state['campus'] in {'金明', '明伦'} and await _saved_clock_matches(plugin):
         current = now.strftime('%H:%M')
         period = next((str(n) for n, (start, end) in enumerate(period_ranges(state['campus']), 1)
                        if start <= current < end), None)

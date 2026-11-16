@@ -43,7 +43,7 @@ def test_coverage_has_gb2312_and_requested_label_and_time_glyphs():
     assert set(map(ord, "厕所／第10大节 08:00–09:40")) <= coverage
     assert len(coverage) == len(codepoints)
     assert manifest["family"] == "HENU UI"
-    assert manifest["formerNotoUnsupported"] == ["2713"]
+    assert manifest["formerNotoUnsupported"] == []
 
 
 def test_uncovered_text_raises_for_existing_image_fallbacks():
@@ -60,3 +60,13 @@ def test_uncovered_text_raises_for_existing_image_fallbacks():
               "height": 5, "status": "1", "status_name": "空闲"}],
             "12:00",
         )
+
+
+def test_shipped_font_files_retain_redistributable_license_and_notice():
+    for style in ('Regular', 'Medium', 'Bold'):
+        raw = (ASSETS / f'HENUUI-{style}.ttf').read_bytes()
+        assert 'SIL Open Font License'.encode('utf-16-be') in raw
+        assert 'internal use only'.encode('utf-16-be') not in raw
+    notice = (ASSETS / 'HENUUI-OFL.txt').read_text(encoding='utf-8')
+    assert 'SIL OPEN FONT LICENSE Version 1.1' in notice
+    assert 'Adobe' in notice

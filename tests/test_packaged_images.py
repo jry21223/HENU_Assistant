@@ -23,7 +23,7 @@ def test_lbp_package_renders_images_without_source_assets(tmp_path):
     extracted = tmp_path / "unpacked"
     with ZipFile(package) as archive:
         required = {"henu_plugin/assets/" + name for name in (
-            "HENUUI-coverage.data", "classroom-plans.data",
+            "HENUUI-coverage.data", "HENUUI-OFL.txt", "classroom-plans.data",
             "HENUUI-Regular.ttf", "HENUUI-Medium.ttf", "HENUUI-Bold.ttf",
         )}
         assert required <= set(archive.namelist())

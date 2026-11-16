@@ -279,6 +279,8 @@ def _classroom_query_card(result: dict) -> Card:
         scope.append('星期' + '一二三四五六日'[day - 1])
     from henu_plugin.classroom_floorplans import period_label
     period = (period_label(query.get('period', '?'), query.get('periodName'),
+                           clock_start=query.get('clockStart') if query.get('clockVerified') is True else None,
+                           clock_end=query.get('clockEnd') if query.get('clockVerified') is True else None,
                            campus=query.get('campusName') or query.get('campusCode'))
               if query.get('period') else '')
     if period:
@@ -489,6 +491,8 @@ def result_card(result: dict, tool: str = "henu_cli", *, private: bool = False) 
             if isinstance(period, dict) and isinstance(period.get("rooms"), list):
                 from henu_plugin.classroom_floorplans import period_label
                 label = period_label(period.get('period', '?'), period.get('periodName'),
+                                     clock_start=period.get('clockStart') if data.get('clockVerified') is True else None,
+                                     clock_end=period.get('clockEnd') if data.get('clockVerified') is True else None,
                                      campus=data.get('campusName') or data.get('campusCode'))
                 lines.append(f"**{escape(label)} · 空闲 {period.get('total', len(period['rooms']))} 间**")
                 for row in period["rooms"]:

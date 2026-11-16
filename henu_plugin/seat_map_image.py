@@ -144,17 +144,17 @@ def render_seat_map(title, window, rows, fetched):
             outline="white",
             width=2,
         )
-        size = max(12, min(34, int((right - left) / (len(name) * 0.7))))
-        draw_text(
-            draw,
-            ((left + right) / 2, (top + bottom) / 2),
-            name,
-            size,
-            fonts,
-            weight="medium",
-            fill="white",
-            anchor="mm",
-        )
+        center = ((left + right) / 2, (top + bottom) / 2)
+        for size in range(min(34, size_px), 5, -1):
+            bounds = draw.textbbox((0, 0), name, font=fonts(size, "medium"))
+            if bounds[2] - bounds[0] <= size_px - 6 and bounds[3] - bounds[1] <= size_px - 6:
+                break
+        else:
+            raise ValueError("seat label does not fit its color block")
+        origin = (center[0] - (bounds[0] + bounds[2]) / 2,
+                  center[1] - (bounds[1] + bounds[3]) / 2)
+        draw_text(draw, origin, name, size, fonts, weight="medium", fill="white")
+
     draw_text(
         draw,
         (80, 2508),

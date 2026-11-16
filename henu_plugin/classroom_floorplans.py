@@ -51,7 +51,8 @@ def period_label(period, name=None, clock_start=None, clock_end=None, *, campus=
     schedule = ZHENGZHOU_PERIOD_TIMES if uses_zhengzhou_schedule(campus) else PERIOD_TIMES
     times = schedule.get(int(period)) if str(period).isdigit() else None
     start, end = (clock_start, clock_end) if clock_start and clock_end else times or (None, None)
-    return f'{label}（{start}–{end}）' if start and end else label
+    reference = '参考 ' if uses_zhengzhou_schedule(campus) and not (clock_start and clock_end) else ''
+    return f'{label}（{reference}{start}–{end}）' if start and end else label
 
 
 def draw_period_legend(draw, top, periods, query, fonts):

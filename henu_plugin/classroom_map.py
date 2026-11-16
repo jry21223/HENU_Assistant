@@ -7,7 +7,6 @@ import math
 import re
 import time
 from collections import OrderedDict
-from pathlib import Path
 
 FREE = (35, 155, 112)
 UNKNOWN = (225, 230, 236)
@@ -201,7 +200,10 @@ def render_classroom_map(result):
     for floor, rooms in floors:
         height = panel_heights[floor]
         draw.rounded_rectangle((48, top, 1231, top + height), radius=18, fill='white')
-        draw_text(draw, (96, top + height / 2), f'{floor}F', 40, font,
+        floor_label = f'{floor}F'
+        bounds = draw.textbbox((0, 0), floor_label, font=font(40, 'medium'), anchor='mm')
+        floor_y = top + height / 2 - (bounds[1] + bounds[3]) / 2
+        draw_text(draw, (96, floor_y), floor_label, 40, font,
                   weight='medium', fill=INK, anchor='mm')
         for index, number in enumerate(sorted(rooms)):
             x, y = 180 + index % 5 * 210, top + 24 + index // 5 * 80

@@ -286,7 +286,7 @@ def test_mismatched_kaifeng_clock_still_requires_explicit_period(monkeypatch):
     call.assert_not_awaited()
 
 
-def test_longzihu_uses_zhengzhou_period_at_current_time(monkeypatch):
+def test_longzihu_requires_explicit_period_without_verified_clock(monkeypatch):
     import henu_plugin.self_study as study
     from components.cli_tools.henu_cli_safe import HenuCliSafe
     monkeypatch.setattr(study, 'campus_now', lambda: datetime(2026, 10, 20, 15, 20, tzinfo=ZoneInfo('Asia/Shanghai')))
@@ -298,7 +298,10 @@ def test_longzihu_uses_zhengzhou_period_at_current_time(monkeypatch):
         await handle_navigation(plugin, context('找自习室'))
         ctx = context('龙子湖')
         assert await handle_navigation(plugin, ctx)
-        assert '第几大节' not in str(ctx.reply.call_args)
+        assert '第几大节' in str(ctx.reply.call_args)
+        assert not any(row.get('period') for row in plugin._self_study_pending.values())
+        explicit = context('龙子湖第3大节')
+        assert await handle_navigation(plugin, explicit)
         assert any(row.get('period') == '3' for row in plugin._self_study_pending.values())
     asyncio.run(run())
     call.assert_not_awaited()

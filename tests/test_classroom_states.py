@@ -10,16 +10,16 @@ from henu_plugin.classroom_map import build_classroom_image, render_classroom_ma
 from henu_plugin.classroom_floorplans import _room_display_label, period_label, plans
 
 
-def test_period_labels_include_the_official_twenty_four_hour_ranges():
+def test_period_labels_distinguish_campus_reference_ranges():
     assert [period_label(period, campus='明伦校区') for period in range(1, 6)] == [
         '第1大节（08:00–09:40）', '第2大节（10:00–12:30）',
         '第3大节（14:05–16:40）', '第4大节（17:00–18:40）',
         '第5大节（19:10–21:40）',
     ]
     assert period_label(2, '第二大节', campus='金明校区') == '第二大节（10:00–12:30）'
-    assert period_label(2, '第二大节', campus='03') == '第二大节（10:20–12:45）'
-    assert period_label(3, campus='郑州校区') == '第3大节（13:30–16:05）'
-    assert period_label(4, campus='龙子湖校区') == '第4大节（16:15–17:45）'
+    assert period_label(2, '第二大节', campus='03') == '第二大节（参考 10:20–12:45）'
+    assert period_label(3, campus='郑州校区') == '第3大节（参考 13:30–16:05）'
+    assert period_label(4, campus='龙子湖校区') == '第4大节（参考 16:15–17:45）'
     assert period_label(2, '第二大节', campus='04') == '第二大节（10:00–12:30）'
     assert period_label(2, '第二大节') == '第二大节（10:00–12:30）'
     assert period_label(2, '第二大节', '09:30', '11:00', campus='龙子湖校区') == '第二大节（09:30–11:00）'

@@ -49,7 +49,7 @@ def test_daily_legends_share_badges_alignment_and_keep_campus_times(monkeypatch,
             slot.update(clockStart='09:30', clockEnd='11:00')
         image = Image.open(io.BytesIO(render_classroom_map(row)))
         assert len(badges) == len(labels) == 5
-        first_range = '09:30–11:00' if verified_clock else ('08:00–09:40', '08:30–10:10')[index]
+        first_range = '09:30–11:00' if verified_clock else ('08:00–09:40', '参考 08:30–10:10')[index]
         assert labels[0][0] == f'第1大节（{first_range}）'
         assert [box[1] - badges[0][1] for box in badges] == [0, 52, 104, 156, 208]
         styles.append([(xy[0] - box[0], xy[1] - box[1], size, anchor)
