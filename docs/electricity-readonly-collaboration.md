@@ -24,7 +24,8 @@
 | 宿舍地址解析 | 已实现简写和地址 JSON；默认查询双表，指定表型时查询单表；保留部分成功结果 |
 | App 与 Python 对照 | 已有北苑、东苑宿舍双表对照记录；样本范围和复现方法见实测文档 |
 | 登录态保存与服务器部署 | 已实现 cURL 导入为私有上下文、有读数时合并服务端新发的 Cookie。服务器可在 AVD 关停后查询，限于导入会话仍有效时 |
-| LangBot CLI 与 QQ 入口 | 已接入 `electricity <宿舍>`，使用 `HENU_ELECTRICITY_CONTEXT` 指向的运营者登录态，默认仅私聊；服务入口已用真实登录态冒烟，真实 QQ 消息端到端待验收 |
+| 自动续期 | `pay.do` 换票已实测通过（302 下发可用 `SESSION`，关停 AVD 后可用）；尚缺原生登录获取 `sessionId` 与 `custom_id` |
+| LangBot CLI 与 QQ 入口 | 已接入 `electricity <宿舍>`，使用 `HENU_ELECTRICITY_CONTEXT` 指向的运营者登录态，默认仅私聊；真实 QQ 消息端到端待验收 |
 | 脱离 AVD 的持续使用 | 关停 AVD 后查询成功。`SESSION` 为会话级 Cookie，服务端按空闲时间判定过期；长寿命 Cookie 不能换发可用会话，见下文。10 分钟保活实验进行中 |
 
 历史测试数量属于对应记录的基线；修改后按本次代码重新验证，并记录实际结果。
@@ -43,7 +44,9 @@
 
 服务端可以在 Cookie 值不变时更新空闲计时。要区分空闲超时与固定到期，需要在不同轮次从云缴费会话建立时开始计时，一轮保持空闲，另一轮定期只读查询，在相近的会话年龄比较结果。
 
-11 月 19 日 20 时的续期实验：[只读诊断命令](../campus_core/electricity_client.py) `--refresh` 移除 `SESSION`、保留其余 Cookie 重新请求入口页和项目页。服务端每次都下发新的 `SESSION`，但选房接口仍返回 `-600 idserial为空`，说明拿到的是匿名会话。长寿命 Cookie 不能替代 App 原生登录链路；该链路不在本仓库复刻范围。因此保活的唯一手段是持续使用现有 `SESSION`，每 10 分钟一次的实测正在进行。
+11 月 19 日 20–21 时的续期实验：长寿命 Cookie 不能换发可用会话；真正的换票接口是 `GET /CloudPayment/user/pay.do?token=<校区 sessionId>&customerId=<customId>`，`token` 正确时 302 下发可用 `SESSION`。已用该会话查询成功，并在关停 AVD 后重复查询。[实测记录](electricity-readonly-verification.md#自动续期paydo-换票2026-11-19-实测通过)
+
+因此下一步只剩获取 `sessionId`（`exchangeSecretkey.action`）与 `custom_id`（登录响应），即原生登录客户端；拿到后 `--refresh` 即可全自动续期。
 
 ## 修改入口
 

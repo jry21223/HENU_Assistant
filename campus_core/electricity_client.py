@@ -27,6 +27,10 @@ ORIGIN = "https://h5cloud.17wanxiao.com:18443"
 ROOM_STATE = f"{ORIGIN}/CloudPayment/user/getRoomState.do"
 ROOM_CATALOG = f"{ORIGIN}/CloudPayment/user/getRoom.do"
 ROOM_ACCESS = f"{ORIGIN}/CloudPayment/user/checkRoomCount.do"
+# 云缴费换票：token=校区 sessionId，302 时下发可用的 SESSION。2026-11-19 实测。
+PAY_EXCHANGE = f"{ORIGIN}/CloudPayment/user/pay.do"
+EXCHANGE_PARAMS = {"UAinfo": "wanxiao", "systemType": "Android", "versioncode": "10589101"}
+EXCHANGE_HEADERS = {"X-Requested-With": "com.newcapec.mobile.ncp"}
 ROOM_FIELDS = {"businesstype", "payProId", "roomverify", "schoolcode"}
 ADDRESS_FIELDS = {"campus", "building", "room"}
 CONTEXT_FIELDS = {"cookie", "referer", "schoolcode", "payProId", "businesstype"}
@@ -275,7 +279,8 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
         raise ElectricityInputError("地址需要 campus、building、room，可选 meter、floor。")
     if (
         not isinstance(context, dict)
-        or not CONTEXT_FIELDS <= context.keys() <= CONTEXT_FIELDS | {"directory"}
+        or not CONTEXT_FIELDS <= context.keys()
+        or not context.keys() <= CONTEXT_FIELDS | {"directory", "session_id", "custom_id"}
         or any(not isinstance(context[field], str) or not context[field].strip() for field in CONTEXT_FIELDS)
     ):
         raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
@@ -381,24 +386,32 @@ def _drop_cookies(header: str, names: set[str]) -> str:
 
 
 def refresh_saved(path: Path) -> dict:
-    """丢掉 SESSION，用剩余的长寿命 Cookie 重新打开缴费页，看服务端是否换发可用会话。"""
+    """用上下文里的校区 sessionId 通过 pay.do 换发云缴费会话；只有可用时才写回。"""
     context = _load_context(path)
-    cookie = _drop_cookies(context["cookie"], {"SESSION"})
+    session_id = context.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ElectricityInputError("上下文缺少 session_id，无法刷新会话。")
+    base = _drop_cookies(context["cookie"], {"SESSION"})
     with httpx.Client(timeout=12, trust_env=False) as http:
-        page = http.get(context["referer"], headers={"Cookie": cookie}, follow_redirects=False)
+        page = http.get(PAY_EXCHANGE, params={
+            "customerId": str(context.get("custom_id") or "1"), "token": session_id, **EXCHANGE_PARAMS,
+        }, headers={"Cookie": base, **EXCHANGE_HEADERS}, follow_redirects=False)
         jar = {item.name: item.value for item in http.cookies.jar}
         report = {"page_status": page.status_code, "issued": sorted(jar)}
-        # 页面状态不能单独判定：实测入口页返回 500 时仍下发新的 SESSION，以选房接口为准。
-        if "SESSION" not in jar:
+        location = page.headers.get("location")
+        if "SESSION" not in jar or not location:
             return report | {"recognized": False}
-        updated = _merge_cookie(cookie, jar)
+        merged = _merge_cookie(base, jar)
+        # 跟随 302 完成换票，再确认服务端认这次会话。
+        page = http.get(httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
+                        follow_redirects=True)
+        merged = _merge_cookie(merged, {item.name: item.value for item in http.cookies.jar})
         try:
-            _room_access(http, context, updated)
+            _room_access(http, context, merged)
         except ElectricityError as exc:
             return report | {"recognized": False, "reason": str(exc)}
-    # 只在服务端确实认这份会话时才写回，避免把匿名 Cookie 存成登录态。
-    atomic_write_json(path, {**context, "cookie": updated})
-    return report | {"recognized": True}
+    atomic_write_json(path, {**context, "cookie": merged})
+    return report | {"recognized": True, "follow_status": page.status_code}
 
 
 def main(argv: list[str] | None = None) -> int:

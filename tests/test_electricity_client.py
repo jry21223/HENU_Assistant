@@ -270,37 +270,47 @@ def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, cap
     assert json.loads(context.read_text(encoding="utf-8")) == saved
 
 
-@pytest.mark.parametrize("status", [200, 302])
-def test_refresh_uses_long_lived_cookie_without_session(monkeypatch, tmp_path, capsys, status):
-    from campus_core.electricity_client import refresh_saved
+@pytest.mark.parametrize("status", [302, 200])
+def test_refresh_exchanges_session_id_for_paydo_cookie(monkeypatch, tmp_path, status):
+    from campus_core.electricity_client import PAY_EXCHANGE, refresh_saved
 
     context = tmp_path / "context.json"
     saved = {
-        "cookie": "SESSION=old; standardH5_token=long-lived", "referer": REFERER,
+        "cookie": "SESSION=old; sid=encoded", "referer": REFERER,
         "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "session_id": "campus-session", "custom_id": "817",
     }
     context.write_text(json.dumps(saved), encoding="utf-8")
     context.chmod(0o600)
     seen = []
 
     def handle(request):
-        seen.append(str(request.url).split("?", 1)[0])
-        if str(request.url).split("?", 1)[0] == REFERER:
-            assert request.headers["Cookie"] == "standardH5_token=long-lived"
-            if status != 200:
-                return httpx.Response(status, headers={"Location": REFERER})
-            return httpx.Response(200, headers={"Set-Cookie": "SESSION=fresh; Path=/"}, text="页面")
-        assert request.headers["Cookie"] == "standardH5_token=long-lived; SESSION=fresh"
+        url = str(request.url).split("?", 1)[0]
+        seen.append(url)
+        if url == PAY_EXCHANGE and "token" in dict(request.url.params):
+            params = dict(request.url.params)
+            assert params["token"] in ("campus-session", "fresh-session")
+            assert params["customerId"] == "817" and params["UAinfo"] == "wanxiao"
+            assert request.headers["X-Requested-With"] == "com.newcapec.mobile.ncp"
+            assert "SESSION=" not in request.headers["Cookie"]
+            if status != 302:
+                return httpx.Response(200, headers={"Set-Cookie": "SESSION=anonymous; Path=/"}, text="出错啦")
+            return httpx.Response(302, headers={
+                "Set-Cookie": "SESSION=fresh; Path=/", "Location": PAY_EXCHANGE + "?step=2"})
+        if url == PAY_EXCHANGE:
+            assert request.headers["Cookie"] == "sid=encoded; SESSION=fresh"
+            return httpx.Response(200, text="ok")
+        assert url == ROOM_ACCESS
+        assert request.headers["Cookie"] == "sid=encoded; SESSION=fresh"
         return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
 
     client = httpx.Client
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
     report = refresh_saved(context)
-    assert report["recognized"] is (status == 200)
-    assert report["issued"] == (["SESSION"] if status == 200 else [])
-    assert seen == [REFERER, ROOM_ACCESS] if status == 200 else [REFERER]
+    assert report["recognized"] is (status == 302)
     stored = json.loads(context.read_text(encoding="utf-8"))
-    assert stored == ({**saved, "cookie": "standardH5_token=long-lived; SESSION=fresh"} if status == 200 else saved)
+    assert stored == ({**saved, "cookie": "sid=encoded; SESSION=fresh"} if status == 302 else saved)
+    assert seen == ([PAY_EXCHANGE, PAY_EXCHANGE, ROOM_ACCESS] if status == 302 else [PAY_EXCHANGE])
 
 
 REFERER = ORIGIN + "/CloudPayment/bill/selectPayProject.do"

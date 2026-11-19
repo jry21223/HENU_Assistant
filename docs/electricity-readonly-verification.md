@@ -87,7 +87,27 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
 | 新 `SESSION` 再打开入口页 | 同上 |
 | 新 `SESSION` 打开带 `payProId` 参数的 `selectPayProject.do` | HTTP 200，仍为 `-600` |
 
-结论：长寿命 Cookie 单独不能换来可用的云缴费会话，新下发的 `SESSION` 是匿名会话。可用会话只能来自 App 原生登录链路，本仓库不复刻该链路。
+结论：长寿命 Cookie 单独不能换来可用的云缴费会话，新下发的 `SESSION` 是匿名会话。
+
+## 自动续期：pay.do 换票（2026-11-19 实测通过）
+
+真正可用的换票接口是云缴费的 `pay.do`，不是入口页：
+
+```text
+GET /CloudPayment/user/pay.do
+    ?customerId=<customId>            # 河南大学为 3 位机构代码
+    &systemType=Android&UAinfo=wanxiao&versioncode=10589101
+    &token=<校区 sessionId>            # 密钥交换得到的 session，不是登录 token
+Header: X-Requested-With: com.newcapec.mobile.ncp
+        Cookie: <除去 SESSION 的其余 Cookie>
+```
+
+- `token` 正确时返回 **302**，`Set-Cookie: SESSION=...`；跟随 `Location` 后，`checkRoomCount.do` 返回 `returncode=100`、`useFlag=1`。
+- `token` 错误（登录 token 或过期的 sessionId）时返回 HTTP 200 + 「出错啦」页面，不下发可用会话。
+- 用换到的会话查询「东苑26 638」：空调 169.25 度、照明 61.76 度；随后**关停 AVD**，同一会话再次查询仍成功。
+- 之前从 `sid` Cookie 反解出的 sessionId 与 App 当前会话不一致（该 Cookie 已被 H5 覆盖或过期），这是前几组实验失败的原因。
+
+`sessionId` 只能来自 App 原生链路：`exchangeSecretkey.action` 返回的 `session`。`custom_id` 来自登录响应的 `LoginUserResult.getCustomId()`。两者都需由原生登录客户端获取；`--refresh` 从上下文读取 `session_id`、`custom_id`，换票成功后写回 `SESSION`。
 
 `python -m campus_core.electricity_client --refresh --context <文件>` 保留为诊断命令：只有服务端确认会话可用时才写回文件，否则不改动。
 
