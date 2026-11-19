@@ -270,6 +270,67 @@ def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, cap
     assert json.loads(context.read_text(encoding="utf-8")) == saved
 
 
+def test_query_saved_retries_after_refresh(monkeypatch, tmp_path):
+    from campus_core.electricity_client import PAY_EXCHANGE, query_saved
+
+    context = tmp_path / "context.json"
+    saved = {
+        "cookie": "SESSION=expired", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "session_id": "campus-session", "custom_id": "817",
+        "directory": [{
+            "campus": "金明校区", "building": "东苑26号公寓", "floor": "6层",
+            "rooms": [{"id": "dir-aircon", "name": "638房间"}, {"id": "dir-lighting", "name": "26638房间"}],
+        }],
+    }
+    context.write_text(json.dumps(saved), encoding="utf-8")
+    context.chmod(0o600)
+    seen = []
+
+    def handle(request):
+        url = str(request.url).split("?", 1)[0]
+        seen.append(url)
+        if url == PAY_EXCHANGE and "token" in dict(request.url.params):
+            return httpx.Response(302, headers={"Set-Cookie": "SESSION=fresh; Path=/",
+                                                "Location": PAY_EXCHANGE + "?step=2"})
+        if url == PAY_EXCHANGE:
+            return httpx.Response(200, text="ok")
+        if url == ROOM_ACCESS:
+            if "SESSION=fresh" not in request.headers["Cookie"]:
+                return httpx.Response(200, json={"returncode": "-600", "returnmsg": "idserial为空"})
+            return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
+        assert url == ROOM_STATE
+        if "SESSION=fresh" not in request.headers["Cookie"]:
+            return httpx.Response(401)
+        return success("7.5")(request)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    outcomes = query_saved(context, {"campus": "金明", "building": "东苑26栋", "room": "638", "meter": "aircon"})
+    assert [o["quantity"] for o in outcomes] == [Decimal("7.5")]
+    stored = json.loads(context.read_text(encoding="utf-8"))
+    assert "SESSION=fresh" in stored["cookie"] and stored["session_id"] == "campus-session"
+    assert seen.count(PAY_EXCHANGE) == 2
+
+
+def test_query_saved_without_session_id_raises(monkeypatch, tmp_path):
+    from campus_core.electricity_client import query_saved
+
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({
+        "cookie": "SESSION=expired", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "directory": [{"campus": "金明校区", "building": "东苑26号公寓", "floor": "6层",
+                       "rooms": [{"id": "a", "name": "638房间"}]}],
+    }), encoding="utf-8")
+    context.chmod(0o600)
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(401)), **kwargs))
+    with pytest.raises(ElectricityAuthError):
+        query_saved(context, {"campus": "金明", "building": "东苑26栋", "room": "638"})
+
+
 @pytest.mark.parametrize("status", [302, 200])
 def test_refresh_exchanges_session_id_for_paydo_cookie(monkeypatch, tmp_path, status):
     from campus_core.electricity_client import PAY_EXCHANGE, refresh_saved

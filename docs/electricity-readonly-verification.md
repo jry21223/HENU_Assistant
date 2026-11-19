@@ -130,6 +130,30 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 
 端到端（续期 → pay.do → 查询）尚未在同一轮内跑完，因为 21:18 的轮换结果未被保存。需要一次新的登录取得有效 token。
 
+### 可用路线：直接使用 App 的 sessionId
+
+2026 年 11 月 20 日 00:56 实测，不经过 token 也能换票：
+
+1. 在已登录的 App 里打开「缴费」页，通过 WebView 调试取 `wanxiao_authen.getUserJsonValue()`，得到 `sessionId` 与 `customCode`。
+2. 将两者写入上下文的 `session_id`、`custom_id`，或直接调用 `pay.do` 换取 `SESSION`。
+3. `query_saved()` 遇到会话过期时，会自动用 `pay.do` 重试一次；`--refresh` 可单独触发。
+
+实测结果：`pay.do` 返回 302 并下发 `SESSION`，查询「东苑26 638」得空调 169.25、照明 60.76；关停 AVD 后同一上下文继续查询成功。上下文字段：`cookie`、`referer`、`schoolcode`、`payProId`、`businesstype`、`session_id`、`custom_id`。
+
+`sessionId` 的有效期尚未测出；失效后需要重新从 App 取一次。
+
+### 受阻的路线
+
+| 尝试 | 结果 |
+| --- | --- |
+| 用账号密码登录（`type=1`） | `code 5`「您正在新设备上使用完美校园，请使用验证码进行验证登录」 |
+| `type=3` 续期，随机 `deviceId` | `code 100600`「登录失效」，token 与登录设备绑定 |
+| Frida 读取 App 的 `deviceId` | 注入主进程超时（加固拦截）；WebView 进程无 Java 运行时 |
+| 从 logcat 猜 `deviceId` | 13 个 UUID 候选全部失败 |
+| 解密 App 偏好文件 | 内容为加密二进制，未做进一步破解 |
+
+结论：完全无人值守仍差“App 设备身份”这一块。可行的替代是从 App 的 JS 桥取 `sessionId`，之后服务器只用 `pay.do` 续期。
+
 随后改为每 10 分钟查询一次，观察持续使用能否让 `SESSION` 一直有效。20:15–21:05 连续 6 次成功，21:15 仍失效（距导入约 71 分钟）；上一轮 18:04 导入、19:06 失效（约 62 分钟）。持续使用不能延长会话，`SESSION` 有约 1 小时的绝对有效期。因此保活方案不可行，必须按上节换票或重新登录。
 
 `pay.do` 换发的会话表现不同：21:10 换发后每 10 分钟查询，连续 15 次成功，23:47（约 2 小时 37 分）后 `getRoom.do` 返回非 SUCCESS；随后 `checkRoomCount.do` 返回 `useFlag=0`（「暂未允许选房」），说明会话仍被识别但不再允许查询。累计 16 次查询可能触及额度，也可能是会话状态变化，尚不能区分。运行策略应改为按需查询，避免 10 分钟级轮询。

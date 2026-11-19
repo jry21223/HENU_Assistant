@@ -366,12 +366,25 @@ def _merge_cookie(header: str, updates: dict[str, str]) -> str:
     return "; ".join(f"{name}={value}" for name, value in pairs.items())
 
 
-def query_saved(path: Path, address: dict | str) -> list[dict]:
-    """用私有上下文文件查询；有读数时把服务端新发的 Cookie 写回该文件。"""
-    context = _load_context(path)
+def _query_once(context: dict, address: dict | str) -> tuple[list[dict], str]:
     with httpx.Client(timeout=12, trust_env=False) as http:
         outcomes = query_address(http, address, context=context)
         cookie = _merge_cookie(context["cookie"], {item.name: item.value for item in http.cookies.jar})
+    return outcomes, cookie
+
+
+def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True) -> list[dict]:
+    """用私有上下文文件查询；会话过期时先 pay.do 换票重试一次，有读数时回写 Cookie。"""
+    context = _load_context(path)
+    try:
+        outcomes, cookie = _query_once(context, address)
+    except ElectricityAuthError:
+        if not auto_refresh or not context.get("session_id"):
+            raise
+        if not refresh_saved(path)["recognized"]:
+            raise
+        context = _load_context(path)
+        outcomes, cookie = _query_once(context, address)
     # ponytail: 同一文件并发查询时后写者覆盖，双方都是服务端新发的 Cookie。
     if cookie != context["cookie"] and any("error" not in item for item in outcomes):
         atomic_write_json(path, {**context, "cookie": cookie})
