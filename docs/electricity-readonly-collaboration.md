@@ -24,7 +24,7 @@
 | 宿舍地址解析 | 已实现简写和地址 JSON；默认查询双表，指定表型时查询单表；保留部分成功结果 |
 | App 与 Python 对照 | 已有北苑、东苑宿舍双表对照记录；样本范围和复现方法见实测文档 |
 | 登录态保存与服务器部署 | 已实现 cURL 导入为私有上下文、有读数时合并服务端新发的 Cookie。服务器可在 AVD 关停后查询，限于导入会话仍有效时 |
-| 自动续期 | `pay.do` 换票已实测通过（302 下发可用 `SESSION`，关停 AVD 后可用）；尚缺原生登录获取 `sessionId` 与 `custom_id` |
+| 自动续期 | `pay.do` 换票已实测通过；原生 `type=3` 续期已被服务端接受（带 `deviceId`），但会轮换并作废旧 token。需要一次新登录取得有效 token 后完成端到端 |
 | LangBot CLI 与 QQ 入口 | 已接入 `electricity <宿舍>`，使用 `HENU_ELECTRICITY_CONTEXT` 指向的运营者登录态，默认仅私聊；真实 QQ 消息端到端待验收 |
 | 脱离 AVD 的持续使用 | 关停 AVD 后查询成功，但 `SESSION` 约有 1 小时绝对有效期（每 10 分钟使用也不能延长）。长期运行依赖 `pay.do` 换票，需约每小时一次 |
 
@@ -57,6 +57,7 @@
 | 已确认的园区别名 | [campus_core/config/electricity_area_aliases.toml](../campus_core/config/electricity_area_aliases.toml) |
 | 合成查询与解析测试 | [test_electricity_client.py](../tests/test_electricity_client.py)、[test_electricity_meter.py](../tests/test_electricity_meter.py) |
 | Bot 命令与回复 | [henu_plugin/cli.py](../henu_plugin/cli.py) 的 `electricity` 分支、[henu_plugin/service.py](../henu_plugin/service.py) 的 `_electricity_query` |
+| 原生登录与续期 | [campus_core/wmxy_auth.py](../campus_core/wmxy_auth.py)、[test_wmxy_auth.py](../tests/test_wmxy_auth.py) |
 
 后续接入需要补齐：真实 QQ 消息端到端验收、会话有效期实测及是否需要保活。HTTPX 请求日志已过滤云缴费 URL；认证失效时 Bot 提示联系管理员重新导入。
 

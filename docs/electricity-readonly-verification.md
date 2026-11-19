@@ -111,6 +111,25 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 
 `python -m campus_core.electricity_client --refresh --context <文件>` 保留为诊断命令：只有服务端确认会话可用时才写回文件，否则不改动。
 
+## 原生登录与 token 续期实测（2026-11-19）
+
+`campus_core/wmxy_auth.py` 按 `docs/protocol-audit.md` 实现，合成测试通过。真实环境下：
+
+| 步骤 | 结果 |
+| --- | --- |
+| `exchangeSecretkey.action`（仅换密钥，不带账号） | HTTP 200；解出 key 32 字符、session 36 字符 |
+| `loginnew.action` type=3，缺 `deviceId` | HTTP 500。`deviceId` 是必填字段 |
+| 同一请求带上 `deviceId` | HTTP 200，响应带 `campusSign` 且签名匹配，说明服务端已接受续期并轮换 token |
+| 用旧 token 再请求 | `code_=100600`、`result_=false`、「登录失效，请重新登录，上次登录信息：21:18:05 登录于 sdk_gphone_arm64」 |
+
+要点：
+
+- 外层响应键为 `code_`、`message_`、`result_`，`data` 只在成功时出现；`data` 用交换所得的 3DES 密钥解密。
+- token 续期会**轮换并作废旧 token**。轮换后的新 token 必须立即保存，否则 App 与本机都会失去登录态。
+- 因此服务器与 App 共用同一条 token 链：机器人续期后，App 的原生登录会失效；只读电费查询本身不依赖 App 登录态，但成绩、课表等原生功能会提示重新登录。
+
+端到端（续期 → pay.do → 查询）尚未在同一轮内跑完，因为 21:18 的轮换结果未被保存。需要一次新的登录取得有效 token。
+
 随后改为每 10 分钟查询一次，观察持续使用能否让 `SESSION` 一直有效。20:15–21:05 连续 6 次成功，21:15 仍失效（距导入约 71 分钟）；上一轮 18:04 导入、19:06 失效（约 62 分钟）。持续使用不能延长会话，`SESSION` 有约 1 小时的绝对有效期。因此保活方案不可行，必须按上节换票或重新登录。
 
 ## 复现「东苑25 534」
