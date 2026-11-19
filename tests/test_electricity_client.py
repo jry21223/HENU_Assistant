@@ -1,5 +1,8 @@
 """用合成响应检查云缴费的只读契约和错误边界。"""
 
+import io
+import json
+import sys
 import traceback
 from decimal import Decimal
 
@@ -8,12 +11,15 @@ import pytest
 
 from campus_core.electricity_client import (
     ORIGIN,
+    ROOM_ACCESS,
+    ROOM_CATALOG,
     ROOM_FIELDS,
     ROOM_STATE,
     ElectricityAuthError,
     ElectricityInputError,
     ElectricityNetworkError,
     ElectricityProtocolError,
+    main,
     query_balance,
 )
 
@@ -42,7 +48,7 @@ def success(quantity, unit="度"):
 
 
 @pytest.mark.parametrize(
-    ("quantity", "expected"), [("12.35", Decimal("12.35")), ("0", Decimal("0")), (None, None)],
+    ("quantity", "expected"), [("12.35", Decimal("12.35")), ("0", Decimal("0")), (None, None), ("-1", None)],
 )
 def test_query_balance_parses_quantity(quantity, expected):
     reading = check(success(quantity))
@@ -99,3 +105,143 @@ def test_query_balance_returns_sanitized_errors(respond, error_type, expected, o
         check(respond, **overrides)
     assert expected in str(exc_info.value)
     assert PRIVATE not in "".join(traceback.format_exception(exc_info.value))
+
+
+ADDRESS_JSON = '{"campus":"金明","building":"东苑26栋","room":"638","meter":"lighting"}'
+
+
+@pytest.mark.parametrize("stdin", [ADDRESS_JSON, "东苑26638照明", '"东苑２６６３８照明"'])
+def test_cli_address_uses_official_lighting_id(monkeypatch, tmp_path, capsys, stdin):
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({
+        "cookie": f"TEST={PRIVATE}",
+        "referer": ORIGIN + "/CloudPayment/bill/selectPayProject.do",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "directory": [{
+            "campus": "金明校区", "building": "东苑26号公寓", "floor": "6层",
+            "rooms": [{"id": "dir-aircon", "name": "638房间"}, {"id": "dir-lighting", "name": "26638房间"}],
+        }],
+    }), encoding="utf-8")
+    context.chmod(0o600)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        assert request.method == "GET"
+        assert str(request.url).split("?", 1)[0] == ROOM_STATE
+        assert dict(request.url.params) == {
+            "roomverify": "dir-lighting", "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        }
+        return success("67.36")(request)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    assert main(["--context", str(context)]) == 0
+    output = capsys.readouterr().out
+    reading, = json.loads(output)["readings"]
+    assert reading["meter"] == "lighting" and reading["quantity"] == "67.36"
+    assert (reading["campus"], reading["building"], reading["room"]) == ("金明校区", "东苑26号公寓", "638")
+    assert len(requests) == 1
+    assert PRIVATE not in output and "dir-lighting" not in output
+
+
+def test_cli_address_reports_missing_context(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(ADDRESS_JSON))
+    assert main([]) == 1
+    assert "--context" in capsys.readouterr().err
+
+
+def test_cli_address_rejects_shared_context(monkeypatch, tmp_path, capsys):
+    context = tmp_path / "shared.json"
+    context.write_text(PRIVATE, encoding="utf-8")
+    context.chmod(0o644)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(ADDRESS_JSON))
+    assert main(["--context", str(context)]) == 1
+    error = capsys.readouterr().err
+    assert "独享" in error and PRIVATE not in error
+
+
+@pytest.mark.parametrize(("text", "meters", "failures", "blocked"), [
+    ("顺河15345", ("aircon", "lighting"), (), None),
+    ("顺河15345空调和照明", ("aircon", "lighting"), (), None),
+    ("顺河15345空调", ("aircon",), (), None),
+    ("帮我查顺河15345的照明电量", ("lighting",), (), None),
+    ("顺河15345", ("aircon", "lighting"), ("aircon",), None),
+    ("顺河15345", ("aircon", "lighting"), ("lighting",), None),
+    ("顺河15345", ("aircon", "lighting"), ("aircon", "lighting"), None),
+    ("顺河15345", (), (), "未允许选房"),
+    ("顺河15345", (), (), "匹配多个"),
+])
+def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, meters, failures, blocked):
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({
+        "cookie": f"TEST={PRIVATE}",
+        "referer": ORIGIN + "/CloudPayment/bill/selectPayProject.do",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+    }), encoding="utf-8")
+    context.chmod(0o600)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    requests = []
+    queried = []
+    reading_by_meter = {"aircon": "42.18", "lighting": "12.35"}
+    rows = {
+        "1": ([{"id": "other-campus", "name": "金明校区"}, {"id": "area-from-server", "name": "明伦校区"}], {}),
+        "2": ([{"id": "other-building", "name": "铁三16号公寓"}, {"id": "build-from-server", "name": "铁三15号公寓"}],
+              {"areaid": "area-from-server"}),
+        "3": ([{"id": "floor-from-server", "name": "3层"}],
+              {"areaid": "area-from-server", "buildid": "build-from-server"}),
+        "4": ([{"id": "aircon-from-server", "name": "345房间"}, {"id": "light-from-server", "name": "15345房间"}],
+              {"areaid": "area-from-server", "buildid": "build-from-server", "levelid": "floor-from-server"}),
+    }
+
+    def handle(request):
+        url = str(request.url).split("?", 1)[0]
+        params = dict(request.url.params)
+        assert request.method == "GET"
+        requests.append(url)
+        if url == ROOM_ACCESS:
+            assert params == {"schoolCode": "school"}
+            return httpx.Response(200, json={"businessData": {"useFlag": "0" if blocked == "未允许选房" else "1"}})
+        assert blocked != "未允许选房"
+        if url == ROOM_CATALOG:
+            items, parents = rows[params["optype"]]
+            assert params == {
+                "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+                "optype": params["optype"], "areaid": "0", "buildid": "0", "levelid": "0", "unitid": "0", **parents,
+            }
+            if params["optype"] == "4" and blocked == "匹配多个":
+                items = [*items, {"id": "duplicate-from-server", "name": "15345房间"}]
+            return httpx.Response(200, json={"code": "SUCCESS", "roomlist": items})
+        assert url == ROOM_STATE and blocked is None
+        meter = {"aircon-from-server": "aircon", "light-from-server": "lighting"}[params["roomverify"]]
+        queried.append(meter)
+        if meter in failures:
+            if meter == "lighting":
+                return success("-1")(request)
+            raise httpx.ReadTimeout(PRIVATE, request=request)
+        return success(reading_by_meter[meter])(request)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    if blocked:
+        assert main(["--context", str(context)]) == 1
+        assert blocked in capsys.readouterr().err
+        assert not queried
+        return
+
+    expected = {meter: reading_by_meter[meter] for meter in meters if meter not in failures}
+    assert main(["--context", str(context)]) == (0 if expected else 1)
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert {row["meter"]: row["quantity"] for row in result["readings"]} == expected
+    assert tuple(row["meter"] for row in result.get("errors", [])) == failures
+    failure_text = {"aircon": "超时", "lighting": "未返回该表电量"}
+    assert all(failure_text[row["meter"]] in row["error"] for row in result.get("errors", []))
+    for row in result["readings"] + result.get("errors", []):
+        assert (row["campus"], row["building"], row["floor"], row["room"]) == (
+            "明伦校区", "铁三15号公寓", "3层", "345",
+        )
+    assert PRIVATE not in output and "-from-server" not in output
+    assert tuple(queried) == meters
+    assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), *([ROOM_STATE] * len(meters))]
