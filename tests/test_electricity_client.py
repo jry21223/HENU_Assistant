@@ -247,6 +247,29 @@ def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, met
     assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), *([ROOM_STATE] * len(meters))]
 
 
+def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, capsys):
+    context = tmp_path / "context.json"
+    saved = {
+        "cookie": f"TEST={PRIVATE}", "referer": ORIGIN + "/CloudPayment/bill/selectPayProject.do",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+    }
+    context.write_text(json.dumps(saved), encoding="utf-8")
+    context.chmod(0o600)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("顺河15345"))
+
+    def handle(request):
+        assert str(request.url).split("?", 1)[0] == ROOM_ACCESS
+        return httpx.Response(200, headers={"Set-Cookie": "TEST=anonymous; Path=/"}, json={
+            "returncode": "-600", "returnmsg": "云缴费平台接口返回错误:idserial为空,", "businessData": None,
+        })
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    assert main(["--context", str(context)]) == 1
+    assert "过期" in capsys.readouterr().err
+    assert json.loads(context.read_text(encoding="utf-8")) == saved
+
+
 REFERER = ORIGIN + "/CloudPayment/bill/selectPayProject.do"
 CURL = f"""curl '{ROOM_STATE}?businesstype=electricity&payProId=project&roomverify=dir-aircon&schoolcode=school' \\
   -H 'Accept: application/json' \\

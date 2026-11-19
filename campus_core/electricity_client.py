@@ -171,6 +171,9 @@ def _building_aliases(campus: str, building: str, aliases: dict[str, dict[str, s
 def _official_directory(http: httpx.Client, address: dict | str, context: dict) -> tuple[FloorDirectory, ...]:
     headers = _session_headers(context["cookie"], context["referer"])
     access = _get_json(http, ROOM_ACCESS, {"schoolCode": context["schoolcode"]}, headers)
+    # 2026-11-19 实测：会话空闲过期后返回 returncode=-600「idserial为空」。
+    if "idserial" in str(access.get("returnmsg")):
+        raise ElectricityAuthError("云缴费会话已过期，需要重新导入登录态。")
     business = access.get("businessData")
     flag = business.get("useFlag") if isinstance(business, dict) else None
     if str(flag) == "0":
