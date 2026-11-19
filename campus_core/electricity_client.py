@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import os
 import re
 import shlex
@@ -29,6 +30,9 @@ ROOM_ACCESS = f"{ORIGIN}/CloudPayment/user/checkRoomCount.do"
 ROOM_FIELDS = {"businesstype", "payProId", "roomverify", "schoolcode"}
 ADDRESS_FIELDS = {"campus", "building", "room"}
 CONTEXT_FIELDS = {"cookie", "referer", "schoolcode", "payProId", "businesstype"}
+
+# httpx 的 INFO 请求日志含完整 URL，云缴费查询参数里有电表 ID，不进宿主日志。
+logging.getLogger("httpx").addFilter(lambda record: ORIGIN not in str(record.args))
 
 
 class ElectricityError(Exception):
@@ -294,7 +298,7 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
             reading = query_balance(http, room_ref, cookie=context["cookie"], referer=context["referer"])
             if reading.quantity is None:
                 raise ElectricityProtocolError("云缴费未返回该表电量。")
-        except (ElectricityAuthError, ElectricityNetworkError, ElectricityProtocolError) as exc:
+        except (ElectricityNetworkError, ElectricityProtocolError) as exc:
             if len(meters) == 1:
                 raise
             result["error"] = str(exc)
@@ -348,6 +352,18 @@ def _merge_cookie(header: str, updates: dict[str, str]) -> str:
     return "; ".join(f"{name}={value}" for name, value in pairs.items())
 
 
+def query_saved(path: Path, address: dict | str) -> list[dict]:
+    """用私有上下文文件查询；有读数时把服务端新发的 Cookie 写回该文件。"""
+    context = _load_context(path)
+    with httpx.Client(timeout=12, trust_env=False) as http:
+        outcomes = query_address(http, address, context=context)
+        cookie = _merge_cookie(context["cookie"], {item.name: item.value for item in http.cookies.jar})
+    # ponytail: 同一文件并发查询时后写者覆盖，双方都是服务端新发的 Cookie。
+    if cookie != context["cookie"] and any("error" not in item for item in outcomes):
+        atomic_write_json(path, {**context, "cookie": cookie})
+    return outcomes
+
+
 def main(argv: list[str] | None = None) -> int:
     """从标准输入读取宿舍简写、地址 JSON 或原有的低层请求。"""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -382,21 +398,15 @@ def main(argv: list[str] | None = None) -> int:
         if is_address:
             if args.context is None:
                 raise ElectricityInputError("地址输入需要 --context 指向含有效会话和缴费项目的私有 JSON。")
-            context = _load_context(args.context)
+            outcomes = query_saved(args.context, config)
+            result = {"readings": [item for item in outcomes if "error" not in item]}
+            errors = [item for item in outcomes if "error" in item]
+            if errors:
+                result["errors"] = errors
         elif not isinstance(config, dict) or config.keys() != {"room_ref", "cookie", "referer"}:
             raise ElectricityInputError("请提供地址 JSON，或底层的 room_ref、cookie 和 referer。")
-        with httpx.Client(timeout=12, trust_env=False) as http:
-            if is_address:
-                outcomes = query_address(http, config, context=context)
-                result = {"readings": [item for item in outcomes if "error" not in item]}
-                errors = [item for item in outcomes if "error" in item]
-                if errors:
-                    result["errors"] = errors
-                # ponytail: 同一上下文并发查询时后写者覆盖，双方都是服务端新发的 Cookie；按账号分文件即可。
-                cookie = _merge_cookie(context["cookie"], {item.name: item.value for item in http.cookies.jar})
-                if result["readings"] and cookie != context["cookie"]:
-                    atomic_write_json(args.context, {**context, "cookie": cookie})
-            else:
+        else:
+            with httpx.Client(timeout=12, trust_env=False) as http:
                 result = asdict(query_balance(http, **config))
         print(json.dumps(result, default=str, ensure_ascii=False))
     except ElectricityError as exc:

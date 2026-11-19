@@ -50,7 +50,7 @@ TOOL_TITLES = {
     "yunfz_checksleep_query": "河宝查寝", "yunfz_activity_query": "河宝活动",
     "yunfz_collection_query": "河宝信息收集", "empty_classroom_query": "空教室",
     "empty_classroom_sync": "空教室数据同步", "resource_registry_query": "校园资源",
-    "resource_registry_sync": "校园资源同步", "yuketang_status": "雨课堂状态",
+    "resource_registry_sync": "校园资源同步", "electricity_query": "宿舍电费", "yuketang_status": "雨课堂状态",
     "yuketang_courses": "雨课堂课程", "yuketang_exam_list": "雨课堂考试列表",
     "yuketang_browse": "雨课堂测评列表", "yuketang_activity_show": "雨课堂测评详情",
     "yuketang_config_show": "雨课堂配置", "yuketang_set_enabled": "雨课堂开关",

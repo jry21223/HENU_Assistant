@@ -24,7 +24,7 @@
 | 宿舍地址解析 | 已实现简写和地址 JSON；默认查询双表，指定表型时查询单表；保留部分成功结果 |
 | App 与 Python 对照 | 已有北苑、东苑宿舍双表对照记录；样本范围和复现方法见实测文档 |
 | 登录态保存与服务器部署 | 已实现 cURL 导入为私有上下文、查询成功后回写 `Set-Cookie`；服务器只需文件和 Python，不运行 AVD。会话有效期与保活需求待实测 |
-| LangBot CLI 与 QQ 入口 | 待接入，真实 QQ 消息端到端待验收 |
+| LangBot CLI 与 QQ 入口 | 已接入 `electricity <宿舍>`，使用 `HENU_ELECTRICITY_CONTEXT` 指向的运营者登录态，默认仅私聊；服务入口已用真实登录态冒烟，真实 QQ 消息端到端待验收 |
 | 脱离 AVD 的持续使用 | 2026 年 11 月 19 日导入后关停 AVD，查询成功；会话有效期在测，失效后需回本地 AVD 重新导入 |
 
 历史测试数量属于对应记录的基线；修改后按本次代码重新验证，并记录实际结果。
@@ -37,8 +37,9 @@
 | 地址解析、目录匹配与表型解析 | [campus_core/electricity_meter.py](../campus_core/electricity_meter.py) |
 | 已确认的园区别名 | [campus_core/config/electricity_area_aliases.toml](../campus_core/config/electricity_area_aliases.toml) |
 | 合成查询与解析测试 | [test_electricity_client.py](../tests/test_electricity_client.py)、[test_electricity_meter.py](../tests/test_electricity_meter.py) |
+| Bot 命令与回复 | [henu_plugin/cli.py](../henu_plugin/cli.py) 的 `electricity` 分支、[henu_plugin/service.py](../henu_plugin/service.py) 的 `_electricity_query` |
 
-后续接入需要补齐：按 QQ 发送者隔离上下文文件、会话失效时提示用户重新导入、HTTPX 请求日志中的查询参数保护，以及入口到结果展示的验收。
+后续接入需要补齐：真实 QQ 消息端到端验收、会话有效期实测及是否需要保活。HTTPX 请求日志已过滤云缴费 URL；认证失效时 Bot 提示联系管理员重新导入。
 
 ## 验收与交接
 

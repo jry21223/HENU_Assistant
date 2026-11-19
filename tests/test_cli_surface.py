@@ -30,6 +30,16 @@ def test_root_help_exposes_empty_classroom_and_resource_topics() -> None:
     assert "help resource" in examples
 
 
+def test_electricity_parser_keeps_dorm_text_and_help() -> None:
+    spec = inspect_cli_command("电费 东苑26 638照明")
+    assert (spec.resolved_tool, spec.params, spec.should_preload_runtime_context) == (
+        "electricity_query", {"text": "东苑26 638照明"}, False,
+    )
+    assert inspect_cli_command("electricity").help_topic == "electricity"
+    assert "help electricity" in build_help_payload("")["examples"]
+    assert build_help_payload("electricity")["topic"] == "electricity"
+
+
 def test_empty_classroom_parser_forwards_rich_filters() -> None:
     spec = inspect_cli_command(
         "empty_classroom query --classroom-text 十号楼101 --type-code 05 "

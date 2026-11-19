@@ -60,7 +60,7 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
      --context output/private/electricity-<账号>.json
    ```
 
-3. 将代码和该文件拷到服务器。文件属主改为运行 Bot 的用户并保持 `chmod 600`，安装 `requirements.txt` 后按上文查询。
+3. 将代码和该文件拷到服务器。文件属主改为运行 Bot 的用户并保持 `chmod 600`，安装 `requirements.txt` 后按上文查询。接入 LangBot 时在插件根目录 `.env` 写 `HENU_ELECTRICITY_CONTEXT=<该文件路径>`，文件放在插件目录之外，避免被打包。所有 QQ 用户的 `electricity <宿舍>`（或「电费 东苑26 638」）都使用这份登录态，默认仅私聊可用。
 4. 查询成功时，服务端下发的 `Set-Cookie` 会并入该文件，后续请求沿用。会话失效时 CLI 退出码为 `1` 并提示重新认证，回到本地重复 1–3 步。
 
 会话有效期以及是否需要定时保活仍待实测。

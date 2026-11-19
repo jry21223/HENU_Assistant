@@ -3,7 +3,9 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
+import os
 import re
+import shlex
 import threading
 import time
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ from typing import Any, Callable
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
 import mcp_server
+from campus_core import electricity_client
 from henu_mcp import runtime as henu_runtime
 from henu_mcp.tools import server_impl
 from henu_plugin.cache import (
@@ -41,6 +44,7 @@ from henu_plugin.storage_adapter import (
 )
 from henu_plugin import yuketang_config
 from henu_plugin import bridge_client
+from henu_plugin.kit_client import ENV_FILE
 from henu_plugin.yuketang_catalog import CatalogError, RainCatalog, resolve_classroom
 from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QuizError, RainQuiz
 
@@ -140,6 +144,18 @@ def _clean_session_id(value: Any) -> str:
     return "" if text in {"", "0", "None", "none"} else text
 
 
+def _electricity_context_path() -> Path | None:
+    """运营者导入的云缴费上下文；相对路径以插件根目录为准。"""
+    value = os.environ.get("HENU_ELECTRICITY_CONTEXT", "")
+    if not value:
+        with contextlib.suppress(FileNotFoundError):
+            for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                key, sep, raw = line.partition("=")
+                if sep and key.strip() == "HENU_ELECTRICITY_CONTEXT":
+                    value = (shlex.split(raw, comments=True) or [""])[0]
+    return ENV_FILE.parent / Path(value.strip()).expanduser() if value.strip() else None
+
+
 class HenuPluginService:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
@@ -182,6 +198,7 @@ class HenuPluginService:
             "empty_classroom_sync": self._empty_classroom_sync,
             "resource_registry_query": self._resource_registry_query,
             "resource_registry_sync": self._resource_registry_sync,
+            "electricity_query": self._electricity_query,
             "yuketang_status": self._yuketang_status,
             "yuketang_courses": self._yuketang_courses,
             "yuketang_exam_list": self._yuketang_exam_list,
@@ -976,6 +993,24 @@ class HenuPluginService:
             scope=_text(params.get("scope")) or "all",
             force_refresh=_bool(params.get("force_refresh"), False),
         )
+
+    def _electricity_query(self, params: dict[str, Any]) -> dict[str, Any]:
+        path = _electricity_context_path()
+        if path is None:
+            return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
+        try:
+            outcomes = electricity_client.query_saved(path, _text(params.get("text")))
+        except electricity_client.ElectricityAuthError:
+            return {"success": False, "msg": "电费查询的登录态已失效，请联系管理员重新导入。"}
+        except electricity_client.ElectricityError as exc:
+            return {"success": False, "msg": str(exc)}
+        first = outcomes[0]
+        lines = [f"{first['campus']} {first['building']} {first['room']}"]
+        for item in outcomes:
+            kind = "空调" if item["meter"] == "aircon" else "照明"
+            lines.append(f"{kind}：{item['error']}" if "error" in item
+                         else f"{kind}：剩余 {item['quantity']} {item['unit'] or ''}".rstrip())
+        return {"success": any("error" not in item for item in outcomes), "reply_text": "\n".join(lines)}
 
     def _yuketang_config_path(self) -> Path:
         paths = get_current_user_paths()

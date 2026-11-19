@@ -308,3 +308,42 @@ def test_cli_saves_rotated_cookie_after_success(monkeypatch, tmp_path, capsys, s
     assert stored == ({**saved, "cookie": "TEST=rotated; KEEP=1; NEW=2"} if status == 200 else saved)
     assert context.stat().st_mode & 0o777 == 0o600
     assert "rotated" not in "".join(capsys.readouterr())
+
+
+@pytest.mark.parametrize("status", [200, 403])
+def test_bot_command_uses_operator_context(monkeypatch, tmp_path, caplog, status):
+    from henu_plugin.service import HenuPluginService
+
+    context = tmp_path / "operator.json"
+    context.write_text(json.dumps({
+        "cookie": f"TEST={PRIVATE}", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "directory": [{
+            "campus": "金明校区", "building": "东苑26号公寓", "floor": "6层",
+            "rooms": [{"id": "dir-aircon", "name": "638房间"}, {"id": "dir-lighting", "name": "26638房间"}],
+        }],
+    }), encoding="utf-8")
+    context.chmod(0o600)
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(context))
+
+    def handle(request):
+        if status != 200:
+            return httpx.Response(status)
+        quantity = {"dir-aircon": "42.18", "dir-lighting": "12.35"}[request.url.params["roomverify"]]
+        return success(quantity)(request)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    caplog.set_level("INFO", logger="httpx")
+    result = HenuPluginService(tmp_path)._henu_cli({"command": "electricity 东苑26 638"})
+    if status == 200:
+        assert result["success"] is True
+        assert result["reply_text"] == "金明校区 东苑26号公寓 638\n空调：剩余 42.18 度\n照明：剩余 12.35 度"
+    else:
+        assert result["success"] is False and "重新导入" in result["msg"]
+    assert "dir-" not in json.dumps(result, ensure_ascii=False) and PRIVATE not in json.dumps(result)
+    assert not [record for record in caplog.records if "dir-" in record.getMessage()]
+
+    monkeypatch.delenv("HENU_ELECTRICITY_CONTEXT")
+    monkeypatch.setattr("henu_plugin.service.ENV_FILE", tmp_path / "missing.env")
+    assert "未配置" in HenuPluginService(tmp_path)._henu_cli({"command": "electricity 东苑26 638"})["msg"]
