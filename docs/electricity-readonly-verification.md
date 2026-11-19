@@ -65,7 +65,33 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
 
 会话有效期以及是否需要定时保活仍待实测。
 
-2026 年 11 月 19 日按上述 1–2 步从已登录的本地 AVD 导入，查询「东苑26 638」双表成功。随后关停 AVD，同一文件再次查询成功，读数一致。两次查询均未收到新的 `Set-Cookie`，文件未改写。会话 Cookie 含 `SESSION`、`sid`、`standardH5_token` 等项。之后按每小时一次查询。19:06 的查询已失效，距上次成功查询不足 1 小时。`checkRoomCount.do` 返回 `returncode="-600"`、`returnmsg` 含「idserial为空」，同时下发新的匿名 Cookie；`getRoom.do` 返回非 JSON。CLI 和 Bot 将这一返回识别为会话过期，提示重新导入。每小时一次不足以保活；更短间隔能否延长会话、是否另有绝对时长，仍待重新导入后实测。
+2026 年 11 月 19 日按上述 1–2 步从已登录的本地 AVD 导入，查询「东苑26 638」双表成功。随后关停 AVD，同一文件再次查询成功，读数一致。两次查询均未收到新的 `Set-Cookie`，文件未改写。会话 Cookie 含 `SESSION`、`sid`、`standardH5_token` 等项。之后按每小时一次查询。19:06 的查询已失效，距上次成功查询不足 1 小时。`checkRoomCount.do` 返回 `returncode="-600"`、`returnmsg` 含「idserial为空」，同时下发新的匿名 Cookie；`getRoom.do` 返回非 JSON。CLI 和 Bot 将这一返回识别为会话过期，提示重新导入。
+
+## 会话过期与自动续期实测
+
+2026 年 11 月 19 日 20 时重新导入后的各 Cookie 客户端到期时间：
+
+| Cookie | 域 | 到期 |
+| --- | --- | --- |
+| `SESSION` | `h5cloud.17wanxiao.com` | 会话级，无固定到期 |
+| `sid`、`standardH5_token` | `.17wanxiao.com` | 约 1 个月 |
+| `scanHost`、`schoolid`、`schoolName` | `.17wanxiao.com` | 约 5 年 |
+
+`SESSION` 是会话级 Cookie，过期由服务端决定。相同 Cookie 值在 19:06 被拒，说明服务端按空闲时间判定。
+
+尝试只用长寿命 Cookie 换发新会话，结果如下。每次请求都移除 `SESSION`，保留 `sid`、`standardH5_token` 等：
+
+| 请求 | 结果 |
+| --- | --- |
+| 回放 App 入口页 `/CloudPayment/bill/type.do` | HTTP 200，下发新的 `SESSION`；用它调 `checkRoomCount.do` 仍为 `-600 idserial为空` |
+| 新 `SESSION` 再打开入口页 | 同上 |
+| 新 `SESSION` 打开带 `payProId` 参数的 `selectPayProject.do` | HTTP 200，仍为 `-600` |
+
+结论：长寿命 Cookie 单独不能换来可用的云缴费会话，新下发的 `SESSION` 是匿名会话。可用会话只能来自 App 原生登录链路，本仓库不复刻该链路。
+
+`python -m campus_core.electricity_client --refresh --context <文件>` 保留为诊断命令：只有服务端确认会话可用时才写回文件，否则不改动。
+
+随后改为每 10 分钟查询一次，观察持续使用能否让 `SESSION` 一直有效。
 
 ## 复现「东苑25 534」
 

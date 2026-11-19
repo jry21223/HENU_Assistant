@@ -168,9 +168,10 @@ def _building_aliases(campus: str, building: str, aliases: dict[str, dict[str, s
     return tuple(alias for alias, official in scope.items() if _normalize(official) == numbered[0])
 
 
-def _official_directory(http: httpx.Client, address: dict | str, context: dict) -> tuple[FloorDirectory, ...]:
-    headers = _session_headers(context["cookie"], context["referer"])
-    access = _get_json(http, ROOM_ACCESS, {"schoolCode": context["schoolcode"]}, headers)
+def _room_access(http: httpx.Client, context: dict, cookie: str) -> None:
+    """选房权限接口同时是会话是否仍被识别的探针。"""
+    access = _get_json(http, ROOM_ACCESS, {"schoolCode": context["schoolcode"]},
+                       _session_headers(cookie, context["referer"]))
     # 2026-11-19 实测：会话空闲过期后返回 returncode=-600「idserial为空」。
     if "idserial" in str(access.get("returnmsg")):
         raise ElectricityAuthError("云缴费会话已过期，需要重新导入登录态。")
@@ -180,6 +181,11 @@ def _official_directory(http: httpx.Client, address: dict | str, context: dict) 
         raise ElectricityAuthError("云缴费暂未允许选房，请核对会话或查询额度。")
     if type(flag) not in (str, int) or not str(flag).isdigit():
         raise ElectricityProtocolError("云缴费未返回选房权限状态。")
+
+
+def _official_directory(http: httpx.Client, address: dict | str, context: dict) -> tuple[FloorDirectory, ...]:
+    _room_access(http, context, context["cookie"])
+    headers = _session_headers(context["cookie"], context["referer"])
 
     def level(optype: str, **parents: str) -> tuple[RoomOption, ...]:
         data = _get_json(http, ROOM_CATALOG, {
@@ -367,12 +373,51 @@ def query_saved(path: Path, address: dict | str) -> list[dict]:
     return outcomes
 
 
+def _drop_cookies(header: str, names: set[str]) -> str:
+    return "; ".join(
+        part for part in (item.strip() for item in header.split(";"))
+        if part and part.partition("=")[0].strip() not in names
+    )
+
+
+def refresh_saved(path: Path) -> dict:
+    """丢掉 SESSION，用剩余的长寿命 Cookie 重新打开缴费页，看服务端是否换发可用会话。"""
+    context = _load_context(path)
+    cookie = _drop_cookies(context["cookie"], {"SESSION"})
+    with httpx.Client(timeout=12, trust_env=False) as http:
+        page = http.get(context["referer"], headers={"Cookie": cookie}, follow_redirects=False)
+        jar = {item.name: item.value for item in http.cookies.jar}
+        report = {"page_status": page.status_code, "issued": sorted(jar)}
+        # 页面状态不能单独判定：实测入口页返回 500 时仍下发新的 SESSION，以选房接口为准。
+        if "SESSION" not in jar:
+            return report | {"recognized": False}
+        updated = _merge_cookie(cookie, jar)
+        try:
+            _room_access(http, context, updated)
+        except ElectricityError as exc:
+            return report | {"recognized": False, "reason": str(exc)}
+    # 只在服务端确实认这份会话时才写回，避免把匿名 Cookie 存成登录态。
+    atomic_write_json(path, {**context, "cookie": updated})
+    return report | {"recognized": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     """从标准输入读取宿舍简写、地址 JSON 或原有的低层请求。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", type=Path, help="含有效授权会话及缴费项目的私有 JSON 文件")
     parser.add_argument("--import-curl", action="store_true", help="从标准输入的 getRoomState.do cURL 写入 --context")
+    parser.add_argument("--refresh", action="store_true", help="用上下文里的长寿命 Cookie 尝试换发新会话")
     args = parser.parse_args(argv)
+    if args.refresh:
+        try:
+            if args.context is None:
+                raise ElectricityInputError("--refresh 需要 --context。")
+            report = refresh_saved(args.context)
+        except ElectricityError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(json.dumps(report, ensure_ascii=False))
+        return 0 if report["recognized"] else 1
     if args.import_curl:
         try:
             if args.context is None:

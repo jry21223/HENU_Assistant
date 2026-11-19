@@ -270,6 +270,39 @@ def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, cap
     assert json.loads(context.read_text(encoding="utf-8")) == saved
 
 
+@pytest.mark.parametrize("status", [200, 302])
+def test_refresh_uses_long_lived_cookie_without_session(monkeypatch, tmp_path, capsys, status):
+    from campus_core.electricity_client import refresh_saved
+
+    context = tmp_path / "context.json"
+    saved = {
+        "cookie": "SESSION=old; standardH5_token=long-lived", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+    }
+    context.write_text(json.dumps(saved), encoding="utf-8")
+    context.chmod(0o600)
+    seen = []
+
+    def handle(request):
+        seen.append(str(request.url).split("?", 1)[0])
+        if str(request.url).split("?", 1)[0] == REFERER:
+            assert request.headers["Cookie"] == "standardH5_token=long-lived"
+            if status != 200:
+                return httpx.Response(status, headers={"Location": REFERER})
+            return httpx.Response(200, headers={"Set-Cookie": "SESSION=fresh; Path=/"}, text="页面")
+        assert request.headers["Cookie"] == "standardH5_token=long-lived; SESSION=fresh"
+        return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    report = refresh_saved(context)
+    assert report["recognized"] is (status == 200)
+    assert report["issued"] == (["SESSION"] if status == 200 else [])
+    assert seen == [REFERER, ROOM_ACCESS] if status == 200 else [REFERER]
+    stored = json.loads(context.read_text(encoding="utf-8"))
+    assert stored == ({**saved, "cookie": "standardH5_token=long-lived; SESSION=fresh"} if status == 200 else saved)
+
+
 REFERER = ORIGIN + "/CloudPayment/bill/selectPayProject.do"
 CURL = f"""curl '{ROOM_STATE}?businesstype=electricity&payProId=project&roomverify=dir-aircon&schoolcode=school' \\
   -H 'Accept: application/json' \\
