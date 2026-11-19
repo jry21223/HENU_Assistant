@@ -46,7 +46,24 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
 
 `readings` 分列成功读数，`errors` 分列失败表型和原因。一块失败时保留另一块结果。上下文可额外提供 `directory`，沿用已授权楼层快照。原有 `room_ref`、`cookie`、`referer` 输入仍受支持。
 
-官方 APP 已分别点选 `345房间` 和 `15345房间`，均显示剩余电量，页面传入查询的两个目录 ID 不同。CLI 合成验收覆盖原样输入、点名单表、地址歧义、单块和双块失败。服务端登录与真实 QQ 消息端到端仍待接入。
+官方 APP 已分别点选 `345房间` 和 `15345房间`，均显示剩余电量，页面传入查询的两个目录 ID 不同。CLI 合成验收覆盖原样输入、点名单表、地址歧义、单块和双块失败。真实 QQ 消息端到端仍待接入。
+
+## 保存登录态并部署到服务器
+
+本地 AVD 只负责取得会话。服务器读取私有上下文文件后直接发 HTTP 请求，不运行 AVD。
+
+1. 在本地 AVD 的官方 App「用电支出」查询一间已授权房间。Chrome 打开 `chrome://inspect`，进入该 WebView 的 DevTools → Network，右键 `getRoomState.do`，选 Copy → Copy as cURL (bash)。
+2. 经剪贴板管道导入，命令不进 shell 历史。生成的文件权限为 `0600`；重新导入只替换会话和项目字段，保留 `directory`。
+
+   ```bash
+   pbpaste | python -m campus_core.electricity_client --import-curl \
+     --context output/private/electricity-<账号>.json
+   ```
+
+3. 将代码和该文件拷到服务器。文件属主改为运行 Bot 的用户并保持 `chmod 600`，安装 `requirements.txt` 后按上文查询。
+4. 查询成功时，服务端下发的 `Set-Cookie` 会并入该文件，后续请求沿用。会话失效时 CLI 退出码为 `1` 并提示重新认证，回到本地重复 1–3 步。
+
+会话有效期以及是否需要定时保活仍待实测。
 
 ## 复现「东苑25 534」
 

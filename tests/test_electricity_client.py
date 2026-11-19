@@ -245,3 +245,66 @@ def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, met
     assert PRIVATE not in output and "-from-server" not in output
     assert tuple(queried) == meters
     assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), *([ROOM_STATE] * len(meters))]
+
+
+REFERER = ORIGIN + "/CloudPayment/bill/selectPayProject.do"
+CURL = f"""curl '{ROOM_STATE}?businesstype=electricity&payProId=project&roomverify=dir-aircon&schoolcode=school' \\
+  -H 'Accept: application/json' \\
+  -b 'TEST={PRIVATE}; KEEP=1' \\
+  -H 'Referer: {REFERER}?payProId=project' \\
+  -H 'X-Requested-With: XMLHttpRequest' \\
+  --compressed"""
+
+
+def test_cli_import_curl_saves_private_context(monkeypatch, tmp_path, capsys):
+    context = tmp_path / "private" / "context.json"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CURL))
+    assert main(["--context", str(context), "--import-curl"]) == 0
+    assert context.stat().st_mode & 0o777 == 0o600
+    data = json.loads(context.read_text(encoding="utf-8"))
+    assert data == {
+        "cookie": f"TEST={PRIVATE}; KEEP=1", "referer": REFERER + "?payProId=project",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+    }
+    assert PRIVATE not in "".join(capsys.readouterr())
+
+    # 重新导入只换会话，保留已有目录快照。
+    context.write_text(json.dumps({**data, "cookie": "OLD=1", "directory": []}), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CURL))
+    assert main(["--context", str(context), "--import-curl"]) == 0
+    assert json.loads(context.read_text(encoding="utf-8")) == {**data, "directory": []}
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CURL.replace("getRoomState", "getRoom")))
+    assert main(["--context", str(context), "--import-curl"]) == 1
+    assert "getRoomState.do" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("status", [200, 403])
+def test_cli_saves_rotated_cookie_after_success(monkeypatch, tmp_path, capsys, status):
+    context = tmp_path / "context.json"
+    saved = {
+        "cookie": f"TEST={PRIVATE}; KEEP=1", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "directory": [{
+            "campus": "金明校区", "building": "东苑26号公寓", "floor": "6层",
+            "rooms": [{"id": "dir-aircon", "name": "638房间"}, {"id": "dir-lighting", "name": "26638房间"}],
+        }],
+    }
+    context.write_text(json.dumps(saved), encoding="utf-8")
+    context.chmod(0o600)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("东苑26638照明"))
+
+    def handle(request):
+        assert request.headers["Cookie"] == saved["cookie"]
+        headers = [("Set-Cookie", "TEST=rotated; Path=/"), ("Set-Cookie", "NEW=2; Path=/")]
+        if status != 200:
+            return httpx.Response(status, headers=headers)
+        return httpx.Response(200, headers=headers, json={"returncode": "100", "quantity": "1", "quantityunit": "度"})
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    assert main(["--context", str(context)]) == (0 if status == 200 else 1)
+    stored = json.loads(context.read_text(encoding="utf-8"))
+    assert stored == ({**saved, "cookie": "TEST=rotated; KEEP=1; NEW=2"} if status == 200 else saved)
+    assert context.stat().st_mode & 0o777 == 0o600
+    assert "rotated" not in "".join(capsys.readouterr())

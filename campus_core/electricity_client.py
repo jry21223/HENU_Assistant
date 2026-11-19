@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import stat
 import sys
 import tomllib
@@ -11,10 +12,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
+from .atomic_io import atomic_write_json
 from .electricity_meter import (
     FloorDirectory, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
     matches_area, resolve_meter_text, resolve_meters, split_meter_text,
@@ -314,11 +316,57 @@ def _load_context(path: Path) -> dict:
         raise ElectricityInputError("无法读取云缴费上下文 JSON。") from None
 
 
+def _import_curl(text: str) -> dict:
+    """从 DevTools「Copy as cURL」的 getRoomState.do 请求取出会话和缴费项目。"""
+    try:
+        args = shlex.split(text.replace("\\\n", " "))
+    except ValueError:
+        raise ElectricityInputError("无法解析 cURL 命令。") from None
+    headers = {}
+    for flag, value in zip(args, args[1:]):
+        if flag in ("-H", "--header"):
+            name, _, header = value.partition(":")
+            headers[name.strip().lower()] = header.strip()
+        elif flag in ("-b", "--cookie"):
+            headers["cookie"] = value
+    url = next((arg for arg in args if arg.startswith(ROOM_STATE + "?")), "")
+    params = dict(parse_qsl(urlsplit(url).query))
+    context = {
+        "cookie": headers.get("cookie"), "referer": headers.get("referer"),
+        **{key: params.get(key) for key in ("schoolcode", "payProId", "businesstype")},
+    }
+    if any(not isinstance(value, str) or not value.strip() for value in context.values()):
+        raise ElectricityInputError("请复制 getRoomState.do 请求的 cURL，需含 Cookie、Referer 和缴费项目参数。")
+    _session_headers(context["cookie"], context["referer"])
+    return context
+
+
+def _merge_cookie(header: str, updates: dict[str, str]) -> str:
+    """把服务端 Set-Cookie 并入 Cookie 头，保留原有顺序。"""
+    pairs = dict(part.strip().partition("=")[::2] for part in header.split(";") if part.strip())
+    pairs.update(updates)
+    return "; ".join(f"{name}={value}" for name, value in pairs.items())
+
+
 def main(argv: list[str] | None = None) -> int:
     """从标准输入读取宿舍简写、地址 JSON 或原有的低层请求。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", type=Path, help="含有效授权会话及缴费项目的私有 JSON 文件")
+    parser.add_argument("--import-curl", action="store_true", help="从标准输入的 getRoomState.do cURL 写入 --context")
     args = parser.parse_args(argv)
+    if args.import_curl:
+        try:
+            if args.context is None:
+                raise ElectricityInputError("--import-curl 需要 --context 指定保存位置。")
+            context = _import_curl(sys.stdin.read())
+            if args.context.exists():
+                context = {**_load_context(args.context), **context}
+            atomic_write_json(args.context, context)
+        except ElectricityError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(f"已保存云缴费登录态：{args.context}", file=sys.stderr)
+        return 0
     try:
         raw = sys.stdin.read().strip()
         config = json.loads(raw)
@@ -344,6 +392,10 @@ def main(argv: list[str] | None = None) -> int:
                 errors = [item for item in outcomes if "error" in item]
                 if errors:
                     result["errors"] = errors
+                # ponytail: 同一上下文并发查询时后写者覆盖，双方都是服务端新发的 Cookie；按账号分文件即可。
+                cookie = _merge_cookie(context["cookie"], {item.name: item.value for item in http.cookies.jar})
+                if result["readings"] and cookie != context["cookie"]:
+                    atomic_write_json(args.context, {**context, "cookie": cookie})
             else:
                 result = asdict(query_balance(http, **config))
         print(json.dumps(result, default=str, ensure_ascii=False))
