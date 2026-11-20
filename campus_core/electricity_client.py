@@ -200,7 +200,7 @@ def _room_access(http: httpx.Client, context: dict, cookie: str) -> None:
     flag = business.get("useFlag") if isinstance(business, dict) else None
     if str(flag) == "0":
         raise ElectricityAccessDenied("云缴费暂未允许选房或查询，请稍后再试或核对查询额度。")
-    if type(flag) not in (str, int) or not str(flag).isdigit():
+    if str(flag) != "1":
         raise ElectricityProtocolError("云缴费未返回选房权限状态。")
 
 
@@ -445,6 +445,17 @@ def _exchange_get(http: httpx.Client, url, **kwargs) -> httpx.Response:
         raise ElectricityNetworkError("无法连接云缴费换票接口。") from None
 
 
+def _exchange_destination(base: httpx.URL, location: str) -> httpx.URL:
+    origin = httpx.URL(ORIGIN)
+    try:
+        target = base.join(location)
+    except httpx.InvalidURL:
+        raise ElectricityProtocolError("云缴费换票跳转地址无效。") from None
+    if (target.scheme, target.host, target.port) != (origin.scheme, origin.host, origin.port) or target.userinfo:
+        raise ElectricityProtocolError("云缴费换票跳转超出原站点。")
+    return target
+
+
 def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) -> dict:
     """用校区会话换云缴费 SESSION；recognized 为真时附带新 Cookie。"""
     if not session_id:
@@ -455,14 +466,20 @@ def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) 
     }, headers={"Cookie": base, **EXCHANGE_HEADERS}, follow_redirects=False)
     jar = {item.name: item.value for item in http.cookies.jar}
     report = {"page_status": page.status_code, "issued": sorted(jar)}
-    location = page.headers.get("location")
-    if "SESSION" not in jar or not location:
+    if not jar.get("SESSION") or not page.has_redirect_location:
         return report | {"recognized": False}
     merged = _merge_jar(base, http.cookies.jar)
-    # 跟随 302 完成换票，再确认服务端认这次会话。
-    page = _exchange_get(http, httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
-                         follow_redirects=True)
-    merged = _merge_jar(merged, http.cookies.jar)
+    current = httpx.URL(PAY_EXCHANGE)
+    for _ in range(3):
+        current = _exchange_destination(current, page.headers["location"])
+        page = _exchange_get(http, current, headers={"Cookie": merged}, follow_redirects=False)
+        merged = _merge_jar(base, http.cookies.jar)
+        if not page.has_redirect_location:
+            break
+    else:
+        raise ElectricityProtocolError("云缴费换票跳转次数超限。")
+    if page.status_code != 200 or not any(c.name == "SESSION" and c.value for c in http.cookies.jar):
+        return report | {"recognized": False, "follow_status": page.status_code}
     try:
         _room_access(http, context, merged)
     except ElectricityAuthError as exc:

@@ -49,3 +49,23 @@ def test_exchange_network_error_is_wrapped():
     with httpx.Client(transport=httpx.MockTransport(boom)) as http:
         with pytest.raises(ElectricityNetworkError, match="无法连接云缴费换票接口"):
             _exchange_cookie(http, _context(), "session")
+
+
+def test_exchange_origin_policy_and_same_origin_hop_limit():
+    from campus_core.electricity_client import ElectricityProtocolError, _exchange_destination
+
+    base = httpx.URL(PAY_EXCHANGE)
+    assert _exchange_destination(base, "/result") == httpx.URL(f"{ORIGIN}/result")
+    for unrelated in ("http://example.invalid", "https://example.invalid", base.copy_with(port=443)):
+        with pytest.raises(ElectricityProtocolError):
+            _exchange_destination(base, str(unrelated))
+
+    requests = []
+    def redirect(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"Set-Cookie": "SESSION=synthetic; Path=/", "Location": "/result"})
+
+    with httpx.Client(transport=httpx.MockTransport(redirect)) as http:
+        with pytest.raises(ElectricityProtocolError, match="跳转次数超限"):
+            _exchange_cookie(http, _context(), "synthetic-session")
+    assert len(requests) == 4
