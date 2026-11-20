@@ -8,6 +8,19 @@
 - `captures/`：两份 `.sanitized.har`，请求头与参数值已替换为 `<redacted>`。
 - `evidence/`：脱敏的请求/响应形态、TLS 对照、VM 状态等记录。
 
+## 文档导航
+
+| 文档 | 用途 |
+| --- | --- |
+| [electricity-api.md](docs/electricity-api.md) | 云缴费只读接口契约、请求参数、APP/Python 对照样本 |
+| [roomverify-resolution.md](docs/roomverify-resolution.md) | 空调表与照明表的目录匹配规则、`roomverify` 取值 |
+| [protocol-audit.md](docs/protocol-audit.md) | 原生登录协议（密钥交换、报文封装、签名、续期）静态审计 |
+| [analysis.md](docs/analysis.md) | 环境、证书信任、早期登录排障记录 |
+| [auth-handoff-plan.md](docs/auth-handoff-plan.md) | 早期 TLS 排障计划与当时的结论，仅作历史参考 |
+| [astra-review-feat-electricity.md](docs/astra-review-feat-electricity.md) | 功能分支的一次代码评审记录 |
+
+当前实现与验收状态以仓库内 [电费实测说明](../electricity-readonly-verification.md) 和 [协作说明](../electricity-readonly-collaboration.md) 为准；本目录保留原始研究证据。
+
 ## 未收录
 
 以下仍只在本机 `output/wmxy-electricity/`，不进入 Git：

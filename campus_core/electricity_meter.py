@@ -1,13 +1,30 @@
 """从官方房间目录选空调表或照明表。适用于已确认分表的楼栋。"""
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 import re
 import unicodedata
-from typing import Literal
+from typing import Literal, Sequence
 
 
 class MeterLookupError(ValueError):
-    pass
+    def __init__(self, message: str, candidates: tuple["LookupCandidate", ...] = (), *,
+                 reason: str = "missing"):
+        super().__init__(message)
+        self.candidates = candidates
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class LookupCandidate:
+    """查不到或多处匹配时给用户的近似选项，command_text 可直接再查。"""
+
+    campus: str
+    building: str
+    room: str
+    command_text: str
+    floor: str | None = None
+    meter: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +107,95 @@ def matches_area(place: str, campus: str, stem: str, aliases: tuple[str, ...]) -
     )
 
 
+def _similarity(place: str, names: Sequence[str]) -> float:
+    scored = 0.0
+    for name in names:
+        if not name:
+            continue
+        scored = max(scored, SequenceMatcher(None, place, name).ratio())
+        if len(name) >= 2 and (name in place or place in name):
+            scored = max(scored, 0.85)
+    return scored
+
+
+def candidates_from_directory(
+    directory: tuple[FloorDirectory, ...], text: str, *, limit: int = 3,
+) -> tuple[LookupCandidate, ...]:
+    """多处匹配时直接用已拉到的楼层/房间给候选，不再多发请求。"""
+    try:
+        place, code, meter = split_meter_text(text)
+    except MeterLookupError:
+        return ()
+    result, seen = [], set()
+    for entry in directory:
+        numbered = _numbered_building(entry.building)
+        if numbered is None:
+            continue
+        stem, _ = numbered
+        if not matches_area(place, entry.campus, stem, entry.aliases):
+            continue
+        if code not in {_room_label(room.name) for room in entry.rooms}:
+            continue
+        key = (entry.campus, entry.building, entry.floor, code)
+        if key in seen:
+            continue
+        seen.add(key)
+        short_campus = _normalize(entry.campus).removesuffix("校区")
+        result.append(LookupCandidate(
+            campus=entry.campus, building=entry.building, room=code, floor=entry.floor, meter=meter,
+            command_text=f"{short_campus} {_building(entry.building)} {code}",
+        ))
+        if len(result) == limit:
+            break
+    return tuple(result)
+
+
+def suggest_targets(
+    buildings: Sequence[tuple[str, str, tuple[str, ...]]], text: str, *, limit: int = 3,
+) -> tuple[LookupCandidate, ...]:
+    """按园区相似度和楼号前缀，给出 building+room 候选（不做额外网络请求）。"""
+    try:
+        place, code, meter = split_meter_text(text)
+    except MeterLookupError:
+        return ()
+    place = _normalize(place)
+    scored = []
+    for campus, building, aliases in buildings:
+        numbered = _numbered_building(building)
+        if numbered is None:
+            continue
+        stem, prefix = numbered
+        names = [_area(stem), _area(_normalize(campus)), _normalize(campus).removesuffix("校区"),
+                 *(_area(_normalize(alias)) for alias in aliases)]
+        score = _similarity(place, names)
+        if code.startswith(prefix) and len(code) > len(prefix):
+            score += 0.5
+            room = code[len(prefix):]
+        elif code == prefix:
+            continue
+        else:
+            score += 0.1
+            room = code
+        if not room:
+            continue
+        short_campus = _normalize(campus).removesuffix("校区")
+        command = f"{short_campus} {_building(building)} {room}".strip()
+        scored.append((score, LookupCandidate(
+            campus=campus, building=building, room=room, floor=None, meter=meter, command_text=command,
+        )))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    seen, result = set(), []
+    for _, candidate in scored:
+        key = (candidate.campus, candidate.building, candidate.room)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(candidate)
+        if len(result) == limit:
+            break
+    return tuple(result)
+
+
 def resolve_meter_text(
     directory: tuple[FloorDirectory, ...], text: str, *, require_pair: bool = False,
 ) -> tuple[ResolvedMeter, ...]:
@@ -108,9 +214,9 @@ def resolve_meter_text(
         matches.extend((entry, prefix, labels) for label in labels if label == code)
 
     if not matches:
-        raise MeterLookupError("官方目录未收录该园区的这个编号，请更新目录或核对编号。")
+        raise MeterLookupError("官方目录未收录该园区的这个编号，请更新目录或核对编号。", reason="no_match")
     if len(matches) != 1:
-        raise MeterLookupError("该编号匹配多个目录项，请补校区、楼栋或楼层。")
+        raise MeterLookupError("该编号匹配多个目录项，请补校区、楼栋或楼层。", reason="ambiguous")
     entry, prefix, labels = matches[0]
     room = code.removeprefix(prefix)
     if room != code and room not in labels:
@@ -146,7 +252,7 @@ def resolve_meters(
         and (floor is None or _floor(entry.floor) == _floor(floor))
     ]
     if not floors:
-        raise MeterLookupError("官方目录中未匹配到该校区、楼栋或楼层。")
+        raise MeterLookupError("官方目录中未匹配到该校区、楼栋或楼层。", reason="no_match")
     numbered_building = _numbered_building(floors[0].building)
     if numbered_building is None:
         raise MeterLookupError("官方楼栋没有唯一楼号，无法按分表规则匹配。")
@@ -172,9 +278,9 @@ def resolve_meters(
             matches.append(options)
 
     if not matches:
-        raise MeterLookupError("官方目录里没有匹配的房间或电表。")
+        raise MeterLookupError("官方目录里没有匹配的房间或电表。", reason="no_match")
     if len(matches) > 1:
-        raise MeterLookupError("多个楼层有匹配项，请补楼层。")
+        raise MeterLookupError("多个楼层有匹配项，请补楼层。", reason="ambiguous")
     options = matches[0]
     if len({item.roomverify for item in options.values()}) != len(options):
         raise MeterLookupError("空调和照明指向同一目录 ID，请核对表型。")

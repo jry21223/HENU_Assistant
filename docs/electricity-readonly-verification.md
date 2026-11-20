@@ -142,6 +142,25 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 
 `sessionId` 的有效期尚未测出；失效后需要重新从 App 取一次。
 
+## 查不到或多处匹配时的候选建议
+
+文本与官方目录对不上、或同一编号命中多处时，不再只回一句错误，而是拉取官方校区/楼栋目录，按园区相似度和楼号前缀给出 3 个“楼栋+房号”候选，编号列出：
+
+```text
+$ printf '东区26 638\n' | python -m campus_core.electricity_client --context <ctx>
+官方目录未收录该园区的这个编号，请更新目录或核对编号。
+1. 金明 东苑26 638
+2. 金明 南苑2 6638
+3. 明伦 仁和2 6638
+```
+
+用户回复编号后按对应文本重查即可（LLM 工具结果里同时有 `candidates` 字段）。实现要点：
+
+- 纯匹配在 `campus_core/electricity_meter.py::suggest_targets()`，无网络请求。
+- 多处匹配时直接用已拉到的楼层目录生成候选（`candidates_from_directory()`），不额外请求。
+- 查不到时才补拉 `getRoom.do` 的校区、楼栋两级；认证/网络错误原样上抛，不会被候选逻辑吞掉。
+- 缺信息（没说楼栋/房号）仍直接追问，不给候选。
+
 ### 受阻的路线
 
 | 尝试 | 结果 |

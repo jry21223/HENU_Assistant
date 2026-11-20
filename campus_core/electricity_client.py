@@ -22,6 +22,7 @@ from .wmxy_auth import AuthError, exchange_secret, login_and_refresh
 from .electricity_meter import (
     FloorDirectory, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
     matches_area, resolve_meter_text, resolve_meters, split_meter_text,
+    candidates_from_directory, suggest_targets,
 )
 
 ORIGIN = "https://h5cloud.17wanxiao.com:18443"
@@ -48,6 +49,14 @@ class ElectricityError(Exception):
 
 class ElectricityInputError(ElectricityError):
     pass
+
+
+class ElectricityLookupError(ElectricityInputError):
+    """查不到或多处匹配；candidates 为可直接再查的近似选项。"""
+
+    def __init__(self, message: str, candidates=()):
+        super().__init__(message)
+        self.candidates = tuple(candidates)
 
 
 class ElectricityAuthError(ElectricityError):
@@ -190,21 +199,32 @@ def _room_access(http: httpx.Client, context: dict, cookie: str) -> None:
         raise ElectricityProtocolError("云缴费未返回选房权限状态。")
 
 
+def _level(http: httpx.Client, context: dict, optype: str, **parents: str) -> tuple[RoomOption, ...]:
+    data = _get_json(http, ROOM_CATALOG, {
+        "schoolcode": context["schoolcode"], "payProId": context["payProId"],
+        "businesstype": context["businesstype"], "optype": optype,
+        "areaid": "0", "buildid": "0", "levelid": "0", "unitid": "0", **parents,
+    }, _session_headers(context["cookie"], context["referer"]))
+    if data.get("code") != "SUCCESS":
+        raise ElectricityProtocolError("云缴费官方目录查询失败。")
+    return _room_options(data.get("roomlist"))
+
+
+def _catalog(http: httpx.Client, context: dict) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """只拉校区与楼栋，用于失败时的近似建议。"""
+    aliases = _area_aliases()
+    rows = []
+    for campus in _level(http, context, "1"):
+        for building in _level(http, context, "2", areaid=campus.id):
+            if _numbered_building(building.name) is None:
+                continue
+            rows.append((campus.name, building.name, _building_aliases(campus.name, building.name, aliases)))
+    return tuple(rows)
+
+
 def _official_directory(http: httpx.Client, address: dict | str, context: dict) -> tuple[FloorDirectory, ...]:
     _room_access(http, context, context["cookie"])
-    headers = _session_headers(context["cookie"], context["referer"])
-
-    def level(optype: str, **parents: str) -> tuple[RoomOption, ...]:
-        data = _get_json(http, ROOM_CATALOG, {
-            "schoolcode": context["schoolcode"], "payProId": context["payProId"],
-            "businesstype": context["businesstype"], "optype": optype,
-            "areaid": "0", "buildid": "0", "levelid": "0", "unitid": "0", **parents,
-        }, headers)
-        if data.get("code") != "SUCCESS":
-            raise ElectricityProtocolError("云缴费官方目录查询失败。")
-        return _room_options(data.get("roomlist"))
-
-    campuses = level("1")
+    campuses = _level(http, context, "1")
     candidates = []
     if isinstance(address, str):
         place, code, _ = split_meter_text(address)
@@ -217,7 +237,7 @@ def _official_directory(http: httpx.Client, address: dict | str, context: dict) 
             campus_key = _normalize(campus.name).removesuffix("校区")
             if scoped and campus_key not in scoped:
                 continue
-            for building in level("2", areaid=campus.id):
+            for building in _level(http, context, "2", areaid=campus.id):
                 numbered = _numbered_building(building.name)
                 if numbered is None:
                     continue
@@ -234,7 +254,7 @@ def _official_directory(http: httpx.Client, address: dict | str, context: dict) 
         for campus in campuses:
             if _normalize(campus.name).removesuffix("校区") != campus_key:
                 continue
-            for building in level("2", areaid=campus.id):
+            for building in _level(http, context, "2", areaid=campus.id):
                 if _building(building.name) == building_key:
                     candidates.append((campus, building, (), ""))
         requested_floor = address.get("floor")
@@ -242,11 +262,11 @@ def _official_directory(http: httpx.Client, address: dict | str, context: dict) 
     directory = []
     for campus, building, nicknames, _ in candidates:
         parents = {"areaid": campus.id, "buildid": building.id}
-        for floor in level("3", **parents):
+        for floor in _level(http, context, "3", **parents):
             if requested_floor is not None and _floor(floor.name) != _floor(requested_floor):
                 continue
             directory.append(FloorDirectory(
-                campus.name, building.name, floor.name, level("4", **parents, levelid=floor.id), nicknames,
+                campus.name, building.name, floor.name, _level(http, context, "4", **parents, levelid=floor.id), nicknames,
             ))
     return tuple(directory)
 
@@ -289,6 +309,7 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
         raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
 
     live = "directory" not in context
+    directory: tuple[FloorDirectory, ...] = ()
     try:
         if isinstance(address, str):
             split_meter_text(address)
@@ -301,7 +322,15 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
         else:
             meters = resolve_meters(directory, **address, require_pair=live)
     except MeterLookupError as exc:
-        raise ElectricityInputError(str(exc)) from None
+        candidates = ()
+        # 只对“查不到/多处匹配”给近似选项；缺信息等仍按原样报错。
+        if live and isinstance(address, str) and exc.reason in {"no_match", "ambiguous"}:
+            # 认证/网络错误要原样上抛，不能被候选逻辑吞掉。
+            if directory:
+                candidates = candidates_from_directory(directory, address)
+            else:
+                candidates = suggest_targets(_catalog(http, context), address)
+        raise ElectricityLookupError(str(exc), candidates) from None
     results = []
     for meter in meters:
         room_ref = meter.query_params(
@@ -518,6 +547,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, default=str, ensure_ascii=False))
     except ElectricityError as exc:
         print(exc, file=sys.stderr)
+        for index, candidate in enumerate(getattr(exc, "candidates", ()), 1):
+            print(f"{index}. {candidate.command_text}", file=sys.stderr)
         return 1
     return 1 if is_address and not result["readings"] else 0
 

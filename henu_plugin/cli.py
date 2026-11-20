@@ -227,7 +227,8 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "summary": "只读查询宿舍空调、照明剩余电量，使用管理员导入的云缴费登录态。",
             "commands": ["electricity <园区楼号 房号>[空调|照明]"],
             "examples": ["electricity 东苑26 638", "electricity 东苑26638照明", "electricity 顺河15345空调"],
-            "tips": ["未指定表型时空调、照明都查。", "照明表也可写成楼号接房号，例如 26638。"],
+            "tips": ["未指定表型时空调、照明都查。", "照明表也可写成楼号接房号，例如 26638。",
+                     "查不到或多处匹配时会给出最接近的宿舍候选，回复编号即可。"],
         }
 
     if normalized == "preferences":

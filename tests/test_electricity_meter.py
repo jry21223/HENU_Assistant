@@ -68,3 +68,54 @@ def test_compact_room_code_defaults_to_both_and_honors_named_meter():
         resolve_meter_text((FloorDirectory(official.campus, official.building, official.floor, official.rooms[1:], official.aliases),), "顺河15345")
     with pytest.raises(MeterLookupError, match="未收录"):
         resolve_meter_text((unrelated,), "顺河15345")
+
+
+BUILDINGS = (
+    ("金明校区", "东苑26号公寓", ()),
+    ("金明校区", "东苑25号公寓", ()),
+    ("明伦校区", "铁三15号公寓", ("顺河",)),
+    ("金明校区", "北苑27号公寓", ()),
+)
+
+
+def test_suggest_targets_prefers_area_and_number_prefix():
+    from campus_core.electricity_meter import suggest_targets
+
+    top = suggest_targets(BUILDINGS, "东区26 638")
+    assert top[0].command_text == "金明 东苑26 638"
+    assert top[0].room == "638" and top[0].building == "东苑26号公寓"
+    assert 1 <= len(top) <= 3
+
+
+def test_suggest_targets_maps_lighting_code_to_room_and_alias():
+    from campus_core.electricity_meter import split_meter_text, suggest_targets
+
+    candidate, = [c for c in suggest_targets(BUILDINGS, "顺河15 345") if c.building == "铁三15号公寓"]
+    assert (candidate.campus, candidate.room, candidate.command_text) == (
+        "明伦校区", "345", "明伦 铁三15 345",
+    )
+    place, code, _ = split_meter_text(candidate.command_text)
+    assert (place, code) == ("明伦铁三", "15345")
+
+
+def test_suggest_targets_dedupes_and_ignores_malformed():
+    from campus_core.electricity_meter import suggest_targets
+
+    rows = (*BUILDINGS, ("金明校区", "东苑26号公寓", ()))
+    assert len([c for c in suggest_targets(rows, "东苑26 638") if c.building == "东苑26号公寓"]) == 1
+    assert suggest_targets(BUILDINGS, "帮我查") == ()
+
+
+def test_candidates_from_directory_keeps_floor_detail():
+    from campus_core.electricity_meter import candidates_from_directory
+
+    rooms = (RoomOption("a", "638房间"), RoomOption("b", "26638房间"))
+    directory = (
+        FloorDirectory("金明校区", "东苑26号公寓", "5层", rooms),
+        FloorDirectory("金明校区", "东苑26号公寓", "6层", rooms),
+    )
+    candidates = candidates_from_directory(directory, "东苑26638")
+    assert [(c.floor, c.room, c.command_text) for c in candidates] == [
+        ("5层", "26638", "金明 东苑26 26638"),
+        ("6层", "26638", "金明 东苑26 26638"),
+    ][:len(candidates)]

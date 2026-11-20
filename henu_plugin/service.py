@@ -1000,6 +1000,18 @@ class HenuPluginService:
             return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
         try:
             outcomes = electricity_client.query_saved(path, _text(params.get("text")))
+        except electricity_client.ElectricityLookupError as exc:
+            lines = [str(exc)]
+            lines += [f"{index}. {candidate.command_text}"
+                      for index, candidate in enumerate(exc.candidates, 1)]
+            if exc.candidates:
+                lines.append("回复编号，或直接发正确写法。")
+            return {
+                "success": False, "msg": str(exc), "reply_text": "\n".join(lines),
+                "candidates": [{"campus": item.campus, "building": item.building, "room": item.room,
+                                "floor": item.floor, "meter": item.meter, "command_text": item.command_text}
+                               for item in exc.candidates],
+            }
         except electricity_client.ElectricityAuthError:
             return {"success": False, "msg": "电费查询的登录态已失效，请联系管理员重新导入。"}
         except electricity_client.ElectricityError as exc:
