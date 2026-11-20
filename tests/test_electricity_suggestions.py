@@ -46,11 +46,11 @@ def test_unknown_place_returns_candidates_without_floor_fetch():
         with pytest.raises(ElectricityLookupError, match="未收录") as exc_info:
             query_address(http, "东区26 638", context=_context())
     candidates = exc_info.value.candidates
-    assert candidates and candidates[0].command_text == "金明 东苑26 638"
+    assert candidates and candidates[0].command_text == "金明校区 东苑26 638"
     assert not [item for item in seen if item[1] in ("3", "4")]
 
 
-def test_multi_match_reuses_fetched_directory():
+def test_duplicate_meters_in_one_floor_cannot_be_disambiguated():
     seen = []
 
     def handle(request):
@@ -70,9 +70,9 @@ def test_multi_match_reuses_fetched_directory():
         return httpx.Response(200, json={"code": "SUCCESS", "roomlist": rows})
 
     with _client(handle) as http:
-        with pytest.raises(ElectricityLookupError, match="匹配多个") as exc_info:
+        with pytest.raises(ElectricityLookupError, match="重复电表项") as exc_info:
             query_address(http, "顺河15345", context=_context())
-    assert [candidate.floor for candidate in exc_info.value.candidates] == ["3层"]
+    assert not exc_info.value.candidates
     assert len(seen) == 5
 
 

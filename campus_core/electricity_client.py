@@ -20,9 +20,8 @@ import httpx
 from .atomic_io import atomic_write_json, file_transaction
 from .wmxy_auth import AuthError, exchange_secret, login_and_refresh
 from .electricity_meter import (
-    FloorDirectory, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
-    matches_area, resolve_meter_text, resolve_meters, split_meter_text,
-    candidates_from_directory, suggest_targets,
+    FloorDirectory, MeterAddress, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
+    matches_area, parse_meter_text, resolve_meter_text, resolve_meters, suggest_targets,
 )
 
 ORIGIN = "https://h5cloud.17wanxiao.com:18443"
@@ -228,32 +227,24 @@ def _catalog(http: httpx.Client, context: dict) -> tuple[tuple[str, str, tuple[s
     return tuple(rows)
 
 
-def _official_directory(http: httpx.Client, address: dict | str, context: dict) -> tuple[FloorDirectory, ...]:
+def _official_directory(http: httpx.Client, address: dict | MeterAddress, context: dict) -> tuple[FloorDirectory, ...]:
     _room_access(http, context, context["cookie"])
     campuses = _level(http, context, "1")
     candidates = []
-    if isinstance(address, str):
-        place, code, _ = split_meter_text(address)
+    if isinstance(address, MeterAddress):
         aliases = _area_aliases()
-        scoped = {
+        scoped = {address.campus} if address.campus is not None else {
             campus for campus, names in aliases.items()
-            if any(matches_area(place, campus, official, (alias,)) for alias, official in names.items())
+            if any(matches_area(address.place, campus, official, (alias,)) for alias, official in names.items())
         }
         for campus in campuses:
-            campus_key = _normalize(campus.name).removesuffix("校区")
-            if scoped and campus_key not in scoped:
+            if scoped and _normalize(campus.name).removesuffix("校区") not in scoped:
                 continue
             for building in _level(http, context, "2", areaid=campus.id):
-                numbered = _numbered_building(building.name)
-                if numbered is None:
-                    continue
-                stem, prefix = numbered
                 nicknames = _building_aliases(campus.name, building.name, aliases)
-                if matches_area(place, campus.name, stem, nicknames):
-                    candidates.append((campus, building, nicknames, prefix))
-        prefixed = [item for item in candidates if code.startswith(item[3]) and len(code) > len(item[3])]
-        candidates = prefixed or candidates
-        requested_floor = None
+                if address.matches_building(campus.name, building.name, nicknames):
+                    candidates.append((campus, building, nicknames))
+        requested_floor = address.floor
     else:
         campus_key = _normalize(address["campus"]).removesuffix("校区")
         building_key = _building(address["building"])
@@ -262,11 +253,11 @@ def _official_directory(http: httpx.Client, address: dict | str, context: dict) 
                 continue
             for building in _level(http, context, "2", areaid=campus.id):
                 if _building(building.name) == building_key:
-                    candidates.append((campus, building, (), ""))
+                    candidates.append((campus, building, ()))
         requested_floor = address.get("floor")
 
     directory = []
-    for campus, building, nicknames, _ in candidates:
+    for campus, building, nicknames in candidates:
         parents = {"areaid": campus.id, "buildid": building.id}
         for floor in _level(http, context, "3", **parents):
             if requested_floor is not None and _floor(floor.name) != _floor(requested_floor):
@@ -296,9 +287,9 @@ def _imported_directory(entries: object, aliases: dict[str, dict[str, str]]) -> 
     return tuple(directory)
 
 
-def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> list[dict]:
+def query_address(http: httpx.Client, address: dict | str | MeterAddress, *, context: dict) -> list[dict]:
     """用官方目录定位电表，逐表返回读数或脱敏错误。"""
-    if not isinstance(address, str) and (
+    if not isinstance(address, (str, MeterAddress)) and (
         not isinstance(address, dict)
         or not ADDRESS_FIELDS <= address.keys() <= ADDRESS_FIELDS | {"meter", "floor"}
         or any(not isinstance(address[key], str) or not address[key].strip() for key in ADDRESS_FIELDS)
@@ -314,16 +305,17 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
     ):
         raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
 
+
     live = "directory" not in context
     directory: tuple[FloorDirectory, ...] = ()
     try:
         if isinstance(address, str):
-            split_meter_text(address)
+            address = parse_meter_text(address)
         directory = (
             _official_directory(http, address, context)
-            if live else _imported_directory(context["directory"], _area_aliases() if isinstance(address, str) else {})
+            if live else _imported_directory(context["directory"], _area_aliases() if isinstance(address, MeterAddress) else {})
         )
-        if isinstance(address, str):
+        if isinstance(address, MeterAddress):
             meters = resolve_meter_text(directory, address, require_pair=live)
         else:
             meters = resolve_meters(directory, **address, require_pair=live)
@@ -331,14 +323,9 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
             # 导入目录也要先探测会话，过期时才会触发自动换票。
             _room_access(http, context, context["cookie"])
     except MeterLookupError as exc:
-        candidates = ()
-        # 只对“查不到/多处匹配”给近似选项；缺信息等仍按原样报错。
-        if live and isinstance(address, str) and exc.reason in {"no_match", "ambiguous"}:
-            # 认证/网络错误要原样上抛，不能被候选逻辑吞掉。
-            if directory:
-                candidates = candidates_from_directory(directory, address)
-            else:
-                candidates = suggest_targets(_catalog(http, context), address)
+        candidates = exc.candidates
+        if live and isinstance(address, MeterAddress) and exc.reason == "no_match" and not directory:
+            candidates = suggest_targets(_catalog(http, context), address)
         raise ElectricityLookupError(str(exc), candidates) from None
     results = []
     for meter in meters:
@@ -411,7 +398,7 @@ def _merge_jar(header: str, jar) -> str:
     return _merge_cookie(header, {item.name: item.value for item in jar})
 
 
-def _query_once(context: dict, address: dict | str) -> tuple[list[dict], str]:
+def _query_once(context: dict, address: dict | MeterAddress) -> tuple[list[dict], str]:
     with httpx.Client(timeout=12, trust_env=False) as http:
         outcomes = query_address(http, address, context=context)
         cookie = _merge_jar(context["cookie"], http.cookies.jar)
@@ -420,6 +407,11 @@ def _query_once(context: dict, address: dict | str) -> tuple[list[dict], str]:
 
 def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True) -> list[dict]:
     """用私有上下文文件查询；会话过期时先 pay.do 换票重试一次，有读数时回写 Cookie。"""
+    if isinstance(address, str):
+        try:
+            address = parse_meter_text(address)
+        except MeterLookupError as exc:
+            raise ElectricityLookupError(str(exc)) from None
     # 整个读-改-写放进文件锁，避免把其它进程轮换出的 token/session 覆盖回旧值。
     with file_transaction(path):
         context = _load_context(path)
@@ -549,11 +541,6 @@ def main(argv: list[str] | None = None) -> int:
         raw = sys.stdin.read().strip()
         config = json.loads(raw)
     except ValueError:
-        try:
-            split_meter_text(raw)
-        except MeterLookupError:
-            print("请输入宿舍简写或有效 JSON。", file=sys.stderr)
-            return 1
         config = raw
     try:
         is_address = isinstance(config, str) or (isinstance(config, dict) and bool(ADDRESS_FIELDS & config.keys()))

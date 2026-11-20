@@ -82,20 +82,20 @@ def test_suggest_targets_prefers_area_and_number_prefix():
     from campus_core.electricity_meter import suggest_targets
 
     top = suggest_targets(BUILDINGS, "东区26 638")
-    assert top[0].command_text == "金明 东苑26 638"
+    assert top[0].command_text == "金明校区 东苑26 638"
     assert top[0].room == "638" and top[0].building == "东苑26号公寓"
     assert 1 <= len(top) <= 3
 
 
 def test_suggest_targets_maps_lighting_code_to_room_and_alias():
-    from campus_core.electricity_meter import split_meter_text, suggest_targets
+    from campus_core.electricity_meter import parse_meter_text, suggest_targets
 
     candidate, = [c for c in suggest_targets(BUILDINGS, "顺河15 345") if c.building == "铁三15号公寓"]
     assert (candidate.campus, candidate.room, candidate.command_text) == (
-        "明伦校区", "345", "明伦 铁三15 345",
+        "明伦校区", "345", "明伦校区 铁三15 345",
     )
-    place, code, _ = split_meter_text(candidate.command_text)
-    assert (place, code) == ("明伦铁三", "15345")
+    parsed = parse_meter_text(candidate.command_text)
+    assert (parsed.campus, parsed.place, parsed.building_number, parsed.number) == ("明伦", "铁三", "15", "345")
 
 
 def test_suggest_targets_dedupes_and_ignores_malformed():
@@ -106,16 +106,28 @@ def test_suggest_targets_dedupes_and_ignores_malformed():
     assert suggest_targets(BUILDINGS, "帮我查") == ()
 
 
-def test_candidates_from_directory_keeps_floor_detail():
-    from campus_core.electricity_meter import candidates_from_directory
+@pytest.mark.parametrize("text", ("测试苑11 101", "测试苑11号楼101室"))
+def test_explicit_building_never_matches_neighbor(text):
+    neighbor = FloorDirectory("甲校区", "测试苑1号公寓", "1层", (
+        RoomOption("neighbor-air", "1101房间"), RoomOption("neighbor-light", "11101房间"),
+    ))
+    with pytest.raises(MeterLookupError, match="未收录"):
+        resolve_meter_text((neighbor,), text, require_pair=True)
 
-    rooms = (RoomOption("a", "638房间"), RoomOption("b", "26638房间"))
-    directory = (
-        FloorDirectory("金明校区", "东苑26号公寓", "5层", rooms),
-        FloorDirectory("金明校区", "东苑26号公寓", "6层", rooms),
-    )
-    candidates = candidates_from_directory(directory, "东苑26638")
-    assert [(c.floor, c.room, c.command_text) for c in candidates] == [
-        ("5层", "26638", "金明 东苑26 26638"),
-        ("6层", "26638", "金明 东苑26 26638"),
-    ][:len(candidates)]
+
+def test_distinct_floor_candidates_round_trip_selected_meter():
+    directory = (floor, FloorDirectory("甲校区", "测试苑12号公寓", "7层", (
+        RoomOption("seven-air", "418房间"), RoomOption("seven-light", "12418房间"),
+    )))
+    with pytest.raises(MeterLookupError, match="匹配多个") as exc_info:
+        resolve_meter_text(directory, "测试苑12418照明", require_pair=True)
+    candidates = exc_info.value.candidates
+    assert [(c.room, c.floor) for c in candidates] == [("418", "6层"), ("418", "7层")]
+    resolved = [resolve_meter_text(directory, c.command_text, require_pair=True) for c in candidates]
+    assert [[m.roomverify for m in meters] for meters in resolved] == [["opaque-light"], ["seven-light"]]
+
+
+def test_explicit_campus_cannot_match_another_campus_building_with_same_prefix():
+    neighbor = FloorDirectory("乙校区", "甲校区测试苑12号公寓", "6层", floor.rooms)
+    resolved = resolve_meter_text((neighbor, floor), "甲校区 测试苑12 418照明 --floor 6")
+    assert [meter.campus for meter in resolved] == ["甲校区"]

@@ -171,7 +171,7 @@ def test_cli_address_rejects_shared_context(monkeypatch, tmp_path, capsys):
     ("顺河15345", ("aircon", "lighting"), ("lighting",), None),
     ("顺河15345", ("aircon", "lighting"), ("aircon", "lighting"), None),
     ("顺河15345", (), (), "未允许选房"),
-    ("顺河15345", (), (), "匹配多个"),
+    ("顺河15345", (), (), "重复电表项"),
 ])
 def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, meters, failures, blocked):
     context = tmp_path / "context.json"
@@ -205,12 +205,14 @@ def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, met
             return httpx.Response(200, json={"businessData": {"useFlag": "0" if blocked == "未允许选房" else "1"}})
         assert blocked != "未允许选房"
         if url == ROOM_CATALOG:
+            if params["optype"] == "3" and params["buildid"] == "other-building":
+                return httpx.Response(200, json={"code": "SUCCESS", "roomlist": []})
             items, parents = rows[params["optype"]]
             assert params == {
                 "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
                 "optype": params["optype"], "areaid": "0", "buildid": "0", "levelid": "0", "unitid": "0", **parents,
             }
-            if params["optype"] == "4" and blocked == "匹配多个":
+            if params["optype"] == "4" and blocked == "重复电表项":
                 items = [*items, {"id": "duplicate-from-server", "name": "15345房间"}]
             return httpx.Response(200, json={"code": "SUCCESS", "roomlist": items})
         assert url == ROOM_STATE and blocked is None
@@ -244,7 +246,7 @@ def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, met
         )
     assert PRIVATE not in output and "-from-server" not in output
     assert tuple(queried) == meters
-    assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), *([ROOM_STATE] * len(meters))]
+    assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 5), *([ROOM_STATE] * len(meters))]
 
 
 def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, capsys):

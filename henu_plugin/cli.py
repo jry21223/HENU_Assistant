@@ -154,7 +154,7 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
                 should_preload_runtime_context=False, is_help=True, help_topic="electricity")
         text = " ".join(argv[1:]).strip()
         if not text:
-            return _error_spec(raw, "电费命令: electricity <园区楼号 房号>[空调|照明]，例如 electricity 东苑26 638",
+            return _error_spec(raw, "电费命令: electricity <园区楼号 房号>[空调|照明] [--floor 楼层号]，例如 electricity 东苑26 638",
                                help_topic="electricity")
         return CliCommandSpec(raw=raw, argv=argv, resolved_tool="electricity_query", params={"text": text},
             action="查电费", should_preload_runtime_context=False)
@@ -228,7 +228,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
         return {
             "topic": normalized,
             "summary": "只读查询宿舍空调、照明剩余电量，使用管理员导入的云缴费登录态。",
-            "commands": ["electricity <园区楼号 房号>[空调|照明]"],
+            "commands": ["electricity <园区楼号 房号>[空调|照明] [--floor 楼层号]"],
             "examples": ["electricity 东苑26 638", "electricity 东苑26638照明", "electricity 顺河15345空调"],
             "tips": ["未指定表型时空调、照明都查。", "照明表也可写成楼号接房号，例如 26638。",
                      "查不到或多处匹配时会给出最接近的宿舍候选，回复编号即可。"],
