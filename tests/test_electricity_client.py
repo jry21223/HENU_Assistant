@@ -133,14 +133,14 @@ def test_cli_address_uses_official_lighting_id(monkeypatch, tmp_path, capsys, st
         assert dict(request.url.params) == {
             "roomverify": "dir-lighting", "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
         }
-        return success("67.36")(request)
+        return success("18.42")(request)
 
     client = httpx.Client
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
     assert main(["--context", str(context)]) == 0
     output = capsys.readouterr().out
     reading, = json.loads(output)["readings"]
-    assert reading["meter"] == "lighting" and reading["quantity"] == "67.36"
+    assert reading["meter"] == "lighting" and reading["quantity"] == "18.42"
     assert (reading["campus"], reading["building"], reading["room"]) == ("金明校区", "东苑26号公寓", "638")
     assert len(requests) == 1
     assert PRIVATE not in output and "dir-lighting" not in output

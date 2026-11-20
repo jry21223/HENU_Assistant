@@ -13,15 +13,14 @@
 | 成功响应 | HTTP 200，JSON `returncode` 为字符串 `"100"` |
 | 剩余电量 | `quantity` 为数值字符串，`quantityunit` 为单位字符串 |
 
-`roomverify` 是所选表项的官方目录 `id`。金明东苑 26 号公寓双表取值已用 APP 目录实测。[取值与 Bot 解析](roomverify-resolution.md) 响应另含 `returnmsg`、`subCode`、`subMsg`、`canbuy`、`description`、`custparams`。样本的 `quantity` 为 `"182.25"`，单位为 `"度"`，`canbuy` 为 `"true"`。页面「缴费金额」是用户输入项，响应没有金额余额字段，原型将 `currency_balance` 表达为 `null`。
+`roomverify` 是所选表项的官方目录 `id`。金明东苑 26 号公寓双表取值已用 APP 目录实测。[取值与 Bot 解析](roomverify-resolution.md) 响应另含 `returnmsg`、`subCode`、`subMsg`、`canbuy`、`description`、`custparams`。单位样本为 `"度"`，`canbuy` 为 `"true"`。页面「缴费金额」是用户输入项，响应没有金额余额字段，原型将 `currency_balance` 表达为 `null`。
 
 ## 实测对照
 
-| 账号历史记录 | APP 读数 | 宿主机 Python |
-|---|---:|---|
-| 金明 · 东苑 26 号公寓 638 · 空调表 | 182.25 度 | 两组对照均为 182.25 度 |
-| 金明 · 东苑 26 号公寓 638 · 照明表 | 67.36 度 | — |
-| 明伦 · 铁三 16 号公寓 2 楼 247 · 照明表 | 269.40 度 | 新版 CLI 一组对照为 269.40 度 |
+| 表型 | APP | 宿主机 Python |
+|---|---|---|
+| 空调表 | 成功 | 两组读数与单位一致 |
+| 照明表 | 两组成功 | 其中一组读数与单位一致 |
 
 APP 三个条目均由 `GET getRoomState.do` 返回 HTTP 200 和 `returncode="100"`。金明空调表重新选择同一历史条目时会再次发送查询。其两次 Python 请求发送前已移除本次 WebView 调试转发，AVD 当时仍运行。
 

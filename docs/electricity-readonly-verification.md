@@ -13,7 +13,7 @@
 
 本次属于正常会话下的单宿舍双表样本，查询时 AVD 仍运行。QQ Bot 入口已接入（默认仅私聊），真实 QQ 消息端到端待验收。
 
-**当前结论（2026-11-20）**：`SESSION` 约 1 小时绝对有效期，保活不可行；会话过期由 `pay.do` 换票自动续上，换票失败再用 token 续期，全程不需要 App/AVD。设备身份已解决，首次登录用 `ops/wmxy-login.py` 完成。下文较早的小节保留当时的实测过程，个别“待验”结论以本段和文末为准。
+**当前结论（2026-11-20）**：`SESSION` 约 1 小时绝对有效期，保活不可行；会话过期由 `pay.do` 换票自动续上，换票失败再用 token 续期，全程不需要 App/AVD。设备身份已解决，首次先用官方会话导入缴费项目，再用 `ops/wmxy-login.py` 为该文件补齐续期信息。下文较早的小节保留当时的实测过程，个别“待验”结论以本段和文末为准。
 
 ## 从宿舍地址查询
 
@@ -55,14 +55,14 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
 本地 AVD 只负责取得会话。服务器读取私有上下文文件后直接发 HTTP 请求，不运行 AVD。
 
 1. 在本地 AVD 的官方 App「用电支出」查询一间已授权房间。Chrome 打开 `chrome://inspect`，进入该 WebView 的 DevTools → Network，右键 `getRoomState.do`，选 Copy → Copy as cURL (bash)。
-2. 经剪贴板管道导入，命令不进 shell 历史。生成的文件权限为 `0600`；重新导入只替换会话和项目字段，保留 `directory`。
+2. 经剪贴板管道导入，命令不进 shell 历史。生成的文件权限为 `0600`；重新导入替换会话和项目字段。学校、缴费项目或业务类型变化时清除旧 `directory`。
 
    ```bash
    pbpaste | python -m campus_core.electricity_client --import-curl \
      --context output/private/electricity-<账号>.json
    ```
 
-3. 将代码和该文件拷到服务器。文件属主改为运行 Bot 的用户并保持 `chmod 600`，安装 `requirements.txt` 后按上文查询。接入 LangBot 时在插件根目录 `.env` 写 `HENU_ELECTRICITY_CONTEXT=<该文件路径>`，文件放在插件目录之外，避免被打包。所有 QQ 用户的 `electricity <宿舍>`（或「电费 东苑26 638」）都使用这份登录态，默认仅私聊可用。
+3. 将代码和该文件拷到服务器。文件属主改为运行 Bot 的用户并保持 `chmod 600`，安装 `requirements.txt` 后按上文查询。接入 LangBot 时在插件根目录 `.env` 写 `HENU_ELECTRICITY_CONTEXT=<该文件路径>`，文件放在插件目录之外，避免被打包。所有可私聊 Bot 的用户共用这份运营会话。单次查询预算 20 秒，已有电费在跑时立即提示稍后再试。QQ 只读查询不加载个人 Storage。
 4. 查询成功时，服务端下发的 `Set-Cookie` 会并入该文件，后续请求沿用。会话失效时 CLI 退出码为 `1` 并提示重新认证，回到本地重复 1–3 步。
 
 会话有效期以及是否需要定时保活仍待实测。
@@ -106,7 +106,7 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 
 - `token` 正确时返回 **302**，`Set-Cookie: SESSION=...`；跟随 `Location` 后，`checkRoomCount.do` 返回 `returncode=100`、`useFlag=1`。
 - `token` 错误（登录 token 或过期的 sessionId）时返回 HTTP 200 + 「出错啦」页面，不下发可用会话。
-- 用换到的会话查询「东苑26 638」：空调 169.25 度、照明 61.76 度；随后**关停 AVD**，同一会话再次查询仍成功。
+- 用换到的会话查询同一间获授权宿舍，两块表均返回读数；随后**关停 AVD**，同一会话再次查询仍成功。
 - 之前从 `sid` Cookie 反解出的 sessionId 与 App 当前会话不一致（该 Cookie 已被 H5 覆盖或过期），这是前几组实验失败的原因。
 
 `sessionId` 只能来自 App 原生链路：`exchangeSecretkey.action` 返回的 `session`。`custom_id` 来自登录响应的 `LoginUserResult.getCustomId()`。两者都需由原生登录客户端获取；`--refresh` 从上下文读取 `session_id`、`custom_id`，换票成功后写回 `SESSION`。
@@ -140,28 +140,20 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 2. 将两者写入上下文的 `session_id`、`custom_id`，或直接调用 `pay.do` 换取 `SESSION`。
 3. `query_saved()` 遇到会话过期时，会自动用 `pay.do` 重试一次；`--refresh` 可单独触发。
 
-实测结果：`pay.do` 返回 302 并下发 `SESSION`，查询「东苑26 638」得空调 169.25、照明 60.76；关停 AVD 后同一上下文继续查询成功。上下文字段：`cookie`、`referer`、`schoolcode`、`payProId`、`businesstype`、`session_id`、`custom_id`。
+实测结果：`pay.do` 返回 302 并下发 `SESSION`，查询同一间获授权宿舍获得两块表读数；关停 AVD 后同一上下文继续查询成功。上下文字段：`cookie`、`referer`、`schoolcode`、`payProId`、`businesstype`、`session_id`、`custom_id`。
 
 `sessionId` 的有效期尚未测出；失效后需要重新从 App 取一次。
 
 ## 查不到或多处匹配时的候选建议
 
-文本与官方目录对不上、或同一编号命中多处时，不再只回一句错误，而是拉取官方校区/楼栋目录，按园区相似度和楼号前缀给出 3 个“楼栋+房号”候选，编号列出：
+显式楼号与房号分开匹配。紧凑房号继续支持，正式查询前须在官方目录里唯一定位。多层同号时给出带楼层的候选，原先指定的表型随命令保留。以下为合成示例：
 
 ```text
-$ printf '东区26 638\n' | python -m campus_core.electricity_client --context <ctx>
-官方目录未收录该园区的这个编号，请更新目录或核对编号。
-1. 金明 东苑26 638
-2. 金明 南苑2 6638
-3. 明伦 仁和2 6638
+1. 示例校区 示例苑26 101照明 --floor 5
+2. 示例校区 示例苑26 101照明 --floor 6
 ```
 
-用户回复编号后按对应文本重查即可（LLM 工具结果里同时有 `candidates` 字段）。实现要点：
-
-- 纯匹配在 `campus_core/electricity_meter.py::suggest_targets()`，无网络请求。
-- 多处匹配时直接用已拉到的楼层目录生成候选（`candidates_from_directory()`），不额外请求。
-- 查不到时才补拉 `getRoom.do` 的校区、楼栋两级；认证/网络错误原样上抛，不会被候选逻辑吞掉。
-- 缺信息（没说楼栋/房号）仍直接追问，不给候选。
+用户回复编号后按对应命令重查。只有楼栋相似的建议仍需核验房号。同一楼层有重复电表项时提示核对目录。
 
 ### 受阻的路线
 
@@ -194,7 +186,7 @@ $ printf '东区26 638\n' | python -m campus_core.electricity_client --context <
 | --- | --- |
 | 用 App 的设备身份密码登录 | 成功，无验证码 |
 | `type=3` 续期 | 成功，返回 42 字符新 token |
-| 人为把会话改坏（旧 `SESSION` + 假 `session_id`）后查询 | 自动续期 + 换票，仍返回空调 169.25 度 |
+| 人为把会话改坏（旧 `SESSION` + 假 `session_id`）后查询 | 自动续期 + 换票，仍返回空调读数 |
 | 关停 AVD 后查询 | 成功 |
 
 补充：短信登录接口是 `cam_iface46/gainMatrixCaptcha543.action`（`confirm:true` 才真正下发）。验证码与申请设备绑定，App 申请的码不能用于其它 `deviceId`。
@@ -209,12 +201,7 @@ $ printf '东区26 638\n' | python -m campus_core.electricity_client --context <
 
 2026 年 11 月 19 日，在 APP 的「全部应用 → 缴费 → 用电支出」选择金明东苑 25 号公寓 5 层。分别查 `534房间` 空调表和 `25534房间` 照明表。移除 WebView 调试转发后，宿主机以同一有效会话调用 `query_address()`，传入原样文本 `东苑25 534`。两块读数及单位都与 APP 一致。会话和原始表 ID 仅在内存传递。
 
-查询链经过以下函数。
-
-1. [`electricity_client.main()`](../campus_core/electricity_client.py#L317) 读取标准输入和 `--context`。[`electricity_meter.split_meter_text()`](../campus_core/electricity_meter.py#L70) 得到园区 `东苑`、编号 `25534`、未指定表型。
-2. [`electricity_client._official_directory()`](../campus_core/electricity_client.py#L165) 先查 `checkRoomCount.do`，再用 `getRoom.do` 的 `optype=1/2/3/4` 依次查校区、楼栋、楼层和房间。用官方楼号和同层配对表项确定地址。
-3. [`electricity_meter.resolve_meter_text()`](../campus_core/electricity_meter.py#L93) 和 [`resolve_meters()`](../campus_core/electricity_meter.py#L124) 选定对应的两个目录项。`ResolvedMeter.query_params()` 将各自目录项 `id` 传为 `roomverify`。[`electricity_client.query_balance()`](../campus_core/electricity_client.py#L105) 调 `getRoomState.do`。
-4. [`electricity_client.query_address()`](../campus_core/electricity_client.py#L251) 汇总各表读数和原因，CLI 将结果分到 `readings` 和 `errors`。
+解析器保留输入的楼号和实际房号，客户端用选房检查和官方目录定位表项，再按目录 ID 查询。CLI 将成功读数放入 `readings`，失败原因放入 `errors`。
 
 在本机功能工作树，使用项目 Python 环境和从自己已授权会话取得的上下文文件。将 `CONTEXT` 换成私有文件的实际路径。保持上下文不含 `directory`，以复现在线选房。
 
@@ -224,7 +211,7 @@ PY=/Users/mac/Desktop/kit_assistant/HENU_Assistant/output/review-198dc2d/.venv/b
 CONTEXT=/path/to/private-context.json
 chmod 600 "$CONTEXT"
 
-"$PY" -B -c 'from campus_core.electricity_meter import split_meter_text; print(split_meter_text("东苑25 534"))'
+"$PY" -B -c 'from campus_core.electricity_meter import parse_meter_text; print(parse_meter_text("东苑25 534"))'
 printf '%s\n' '东苑25 534' | "$PY" -B -m campus_core.electricity_client --context "$CONTEXT"
 printf '%s\n' '东苑25 534照明' | "$PY" -B -m campus_core.electricity_client --context "$CONTEXT"
 "$PY" -B -m pytest -q -p no:cacheprovider \
