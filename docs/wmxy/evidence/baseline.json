@@ -1,0 +1,29 @@
+{
+  "recorded_at": "2026-11-17T13:55:06.191988+08:00",
+  "apk": {
+    "filename": "完美校园5.8.19.apk",
+    "sha256": "fd450ff247e78ba9a01c4d3a5a9669d09876765a6afdf9be633a49487aa3ea74",
+    "size": 70873347,
+    "package": "com.newcapec.mobile.ncp",
+    "version": "5.8.19",
+    "min_sdk": 24,
+    "target_sdk": 30
+  },
+  "scope": {
+    "campus": "金明",
+    "route": [
+      "缴费",
+      "用电支出",
+      "选择房间"
+    ],
+    "runtime_loaded_dex_authorized": true,
+    "pinning_bypass_authorized": false,
+    "payment_authorized": false
+  },
+  "versions": {
+    "adb": "Android Debug Bridge version 1.0.41\nVersion 37.0.1-15733141\nInstalled as /opt/homebrew/bin/adb\nRunning on Darwin 27.2.0 (arm64)",
+    "jadx": "1.5.6",
+    "apktool": "3.0.3",
+    "mitmproxy": "Mitmproxy: 12.2.3 binary\nPython:    3.14.4\nOpenSSL:   OpenSSL 3.5.5 27 Jan 2026\nPlatform:  macOS-27.2.1-arm64-arm-64bit-Mach-O"
+  }
+}

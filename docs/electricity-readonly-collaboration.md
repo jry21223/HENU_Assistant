@@ -13,7 +13,7 @@
    ```
 
    本机功能工作树位于主仓库的 `output/worktrees/electricity-readonly/`，主工作树当前承载 `langbot-plugin`。电费改动在功能工作树内完成。
-2. 阅读[实测与使用说明](electricity-readonly-verification.md)，区分已有对照记录与尚待验收的能力。
+2. 阅读[实测与使用说明](electricity-readonly-verification.md)，区分已有对照记录与尚待验收的能力。协议审计、脱敏抓包和证据已收录在 [docs/wmxy/](wmxy/README.md)，原始反编译源码与私有数据仍只在本机 `output/wmxy-electricity/`。
 3. 开工时在协作消息中写清本次目标、预计修改文件和验收方式。多人或多个 Agent 并行时，各用独立工作树和任务分支；修改范围重叠时先协调归属，再集成提交。
 
 ## 当前进度

@@ -1,0 +1,9 @@
+{"phase":"verify","surface":"official-app","meter":"aircon","status":200,"cached":false,"businessSuccess":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify","surface":"official-app","meter":"lighting","status":200,"cached":false,"businessSuccess":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify","surface":"official-app","meter":"aircon","status":200,"cached":false,"businessSuccess":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify","surface":"verified-git-python","meter":"aircon","matches_app":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify","surface":"official-app","meter":"lighting","status":200,"cached":false,"businessSuccess":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify","surface":"verified-git-python","meter":"lighting","matches_app":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify-avd-off","surface":"official-app","meter":"aircon","status":200,"cached":false,"businessSuccess":true,"hasQuantity":true,"unit":"度"}
+{"phase":"verify-avd-off","surface":"test-avd","at":"2026-11-18T09:23:10.153Z","state":"stopped"}
+{"phase":"verify-avd-off","surface":"verified-git-python","at":"2026-11-18T09:23:11.274Z","avd":"stopped","success":true,"meter":"aircon","matches_app":true,"hasQuantity":true,"unit":"度"}

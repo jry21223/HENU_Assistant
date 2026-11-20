@@ -1,0 +1,56 @@
+{
+  "observed_at": "2026-11-17T14:49:25.750227+00:00",
+  "device": "emulator-5580",
+  "android_proxy": ":0",
+  "block_dialog": false,
+  "password_input_focused": true,
+  "credentials_submitted": true,
+  "matched_stack_lines": {},
+  "login_submissions": 1,
+  "post_error_samples": [
+    {
+      "guest_timestamp": "11-17 22:50:30.268",
+      "error": "java.lang.Exception: Not Found",
+      "stages": [
+        "DefaultHttpsNetRequest.request",
+        "AbstractNetRequestProcess.post",
+        "LoginBeforeNetRequestImpl.postProcess"
+      ]
+    },
+    {
+      "guest_timestamp": "11-17 22:50:30.269",
+      "error": "java.lang.Exception: Not Found",
+      "stages": [
+        "DefaultHttpsNetRequest.request",
+        "AbstractNetRequestProcess.post",
+        "LoginBeforeNetRequestImpl.postProcess"
+      ]
+    },
+    {
+      "guest_timestamp": "11-17 22:50:30.269",
+      "error": "java.lang.Exception: Not Found",
+      "stages": [
+        "DefaultHttpsNetRequest.request",
+        "AbstractNetRequestProcess.post",
+        "LoginBeforeNetRequestImpl.postProcess"
+      ]
+    }
+  ],
+  "reached_electricity_page": false,
+  "capture_created": false,
+  "native_webview_devtools_list_reachable": true,
+  "native_webview_page_count": 0,
+  "final_ui_labels": [
+    "正在登录"
+  ],
+  "retry": {
+    "trace_file": "login-retry-request.json",
+    "password_login_submitted": false,
+    "dialog": "安全环境未配置成功，请稍后再试",
+    "observed_error_labels": [
+      "Not Allowed",
+      "Not Found"
+    ],
+    "numeric_http_status_recorded": false
+  }
+}
