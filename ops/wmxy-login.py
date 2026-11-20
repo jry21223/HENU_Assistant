@@ -46,13 +46,25 @@ def main() -> int:
             session = exchange_secret(http)
             user = login_password(http, account=account, password=password, session=session, device=device)
             custom = str(user.get("customId") or "")
-            page = http.get(PAY_EXCHANGE, params={"customerId": custom or "1", "token": session.session,
-                                                  **EXCHANGE_PARAMS},
-                            headers=EXCHANGE_HEADERS, follow_redirects=False)
-            if page.headers.get("location"):
-                http.get(httpx.URL(PAY_EXCHANGE).join(page.headers["location"]),
-                         headers=EXCHANGE_HEADERS, follow_redirects=True)
-            cookie = _merge_cookie("", {c.name: c.value for c in http.cookies.jar})
+            # 先落盘 token：登录会轮换旧 token，后续换票失败也不能丢。
+            atomic_write_json(args.context, {
+                **context, "session_id": session.session, "custom_id": custom,
+                "login_token": str(user.get("token") or ""), "user_id": str(user.get("id") or ""),
+                "login_name": str(user.get("mobile") or account), "device_id": device_info["id"],
+                "device_model": device["telephoneModel"], "device_product": device["shebeixinghao"],
+                "device_release": device["telephoneInfo"],
+            })
+            try:
+                page = http.get(PAY_EXCHANGE, params={"customerId": custom or "1", "token": session.session,
+                                                      **EXCHANGE_PARAMS},
+                                headers=EXCHANGE_HEADERS, follow_redirects=False)
+                if page.headers.get("location"):
+                    http.get(httpx.URL(PAY_EXCHANGE).join(page.headers["location"]),
+                             headers=EXCHANGE_HEADERS, follow_redirects=True)
+                cookie = _merge_cookie("", {c.name: c.value for c in http.cookies.jar})
+            except httpx.HTTPError:
+                print("登录成功但换票失败，token 已保存，稍后可重试查询。", file=sys.stderr)
+                return 0
     except AuthError as exc:
         print(exc, file=sys.stderr)
         return 1

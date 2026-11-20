@@ -1,6 +1,6 @@
 # 电费只读功能协作说明
 
-适用于 `feat/electricity-readonly`，目标交付形态为 LangBot 插件。以下进度核对于 2026 年 11 月 19 日，代码基线为 `415f041`。
+适用于 `feat/electricity-readonly`，目标交付形态为 LangBot 插件。以下进度核对于 2026 年 11 月 20 日，代码基线以当前 HEAD 为准。
 
 ## 接手入口
 
@@ -23,11 +23,11 @@
 | 只读查询核心 | 已实现有效云缴费会话下的目录查询、选表与剩余电量查询 |
 | 宿舍地址解析 | 已实现简写和地址 JSON；默认查询双表，指定表型时查询单表；保留部分成功结果。查不到或多处匹配时给出 3 个近似候选 |
 | App 与 Python 对照 | 已有北苑、东苑宿舍双表对照记录；样本范围和复现方法见实测文档 |
-| 登录态保存与服务器部署 | 已实现 cURL 导入为私有上下文、有读数时合并服务端新发的 Cookie。服务器可在 AVD 关停后查询，限于导入会话仍有效时 |
+| 登录态保存与服务器部署 | 已实现 cURL 导入为私有上下文、有读数时合并服务端新发的 Cookie；也可用 `ops/wmxy-login.py` 一次性登录生成完整上下文 |
 | 自动续期 | 已打通：App 设备身份 + token 续期（`type=3`）+ `pay.do` 换票，过期自动重试。实测人为破坏会话后仍能自动恢复 |
 | 从 App 取会话 | 已可由 token 续期自动产生会话，日常无需 App；首次需 App 的 `deviceId` 与一次登录 |
 | LangBot CLI 与 QQ 入口 | 已接入 `electricity <宿舍>`，使用 `HENU_ELECTRICITY_CONTEXT` 指向的运营者登录态，默认仅私聊；真实 QQ 消息端到端待验收 |
-| 脱离 AVD 的持续使用 | 关停 AVD 后查询成功，但 `SESSION` 约有 1 小时绝对有效期（每 10 分钟使用也不能延长）。长期运行依赖 `pay.do` 换票，需约每小时一次 |
+| 脱离 AVD 的持续使用 | 关停 AVD 后查询成功。`SESSION` 约 1 小时绝对有效期，过期由 `query_saved()` 自动换票，不需要定时任务 |
 
 历史测试数量属于对应记录的基线；修改后按本次代码重新验证，并记录实际结果。
 
@@ -47,7 +47,7 @@
 
 11 月 19 日 20–21 时的续期实验：长寿命 Cookie 不能换发可用会话；真正的换票接口是 `GET /CloudPayment/user/pay.do?token=<校区 sessionId>&customerId=<customId>`，`token` 正确时 302 下发可用 `SESSION`。已用该会话查询成功，并在关停 AVD 后重复查询。[实测记录](electricity-readonly-verification.md#自动续期paydo-换票2026-11-19-实测通过)
 
-因此下一步只剩获取 `sessionId`（`exchangeSecretkey.action`）与 `custom_id`（登录响应），即原生登录客户端；拿到后 `--refresh` 即可全自动续期。
+11 月 20 日已补齐原生登录与 token 续期：`campus_core/wmxy_auth.py` 用 App 的 `deviceId` 完成密码登录（不再要验证码），`type=3` 续期返回新 token；`refresh_saved()` 先换票、失败再用 token 续期并重换，`query_saved()` 过期自动重试。人为破坏会话后仍能自动恢复，无需 App 常驻。[全自动续期实测](electricity-readonly-verification.md#全自动续期2026-11-20-打通)
 
 ## 修改入口
 

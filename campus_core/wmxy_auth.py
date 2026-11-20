@@ -48,8 +48,13 @@ def _des(data: bytes, key: str, *, decrypt: bool = False) -> bytes:
     """DESede/CBC 加 PKCS5 填充，对应 Java 的 PKCS5Padding。"""
     cipher = DES3.new(key.encode("utf-8")[:24], DES3.MODE_CBC, IV)
     if decrypt:
+        if not data:
+            raise ValueError("empty ciphertext")
         padded = cipher.decrypt(data)
-        return padded[:-padded[-1]]
+        pad = padded[-1]
+        if not 1 <= pad <= 8 or pad > len(padded):
+            raise ValueError("invalid PKCS5 padding")
+        return padded[:-pad]
     pad = 8 - len(data) % 8
     return cipher.encrypt(data + bytes([pad]) * pad)
 

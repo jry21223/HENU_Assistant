@@ -149,6 +149,9 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
     if head in {"resource", "资源", "registry"}:
         return _parse_resource(raw, argv)
     if head in {"electricity", "电费", "电量"}:
+        if len(argv) > 1 and argv[1].lower() in {"help", "-h", "--help"}:
+            return CliCommandSpec(raw=raw, argv=argv, resolved_tool=None, params={}, action="help",
+                should_preload_runtime_context=False, is_help=True, help_topic="electricity")
         text = " ".join(argv[1:]).strip()
         if not text:
             return _error_spec(raw, "电费命令: electricity <园区楼号 房号>[空调|照明]，例如 electricity 东苑26 638",
@@ -634,7 +637,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help yunfz"]
+            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help electricity", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
         if topic == "schedule":
@@ -671,6 +674,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
 
     resolved_tool = spec.resolved_tool or ""
     success = bool(result.get("success")) if isinstance(result, dict) else False
+    if resolved_tool == "electricity_query":
+        return ["electricity 东苑26 638", "help electricity"] if success else ["help electricity"]
     if resolved_tool == "grade_query":
         commands = ["grade list", "grade gpa"]
         if isinstance(result, dict) and result.get("has_next"):

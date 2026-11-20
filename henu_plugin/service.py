@@ -51,6 +51,7 @@ from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QuizError, RainQuiz
 
 _RUNTIME_STATE_LOCK = threading.RLock()
 _CURRENT_IDENTITY: threading.local = threading.local()
+_ELECTRICITY_COOLDOWN: dict[str, float] = {}
 
 
 @dataclass(frozen=True)
@@ -352,7 +353,11 @@ class HenuPluginService:
 
         try:
             _CURRENT_IDENTITY.value = identity
-            with self._activate_user_storage(paths):
+            # 电费查询是只读、用环境变量里的运营者上下文，不碰用户 Storage；
+            # 放进全局锁会串行阻塞所有用户的工具调用。
+            storage = (contextlib.nullcontext() if tool_name == "electricity_query"
+                       else self._activate_user_storage(paths))
+            with storage:
                 result = handler(params or {})
         except Exception as exc:
             return {"success": False, "msg": f"{tool_name} 执行异常: {exc}"}
@@ -998,6 +1003,14 @@ class HenuPluginService:
         path = _electricity_context_path()
         if path is None:
             return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
+        # ponytail: 进程内简单冷却；多实例部署时各自计数。
+        openid = self._current_openid()
+        if openid:
+            now = time.monotonic()
+            last = _ELECTRICITY_COOLDOWN.get(openid, 0.0)
+            if now - last < 10:
+                return {"success": False, "msg": "查询太快，请 10 秒后再试。"}
+            _ELECTRICITY_COOLDOWN[openid] = now
         try:
             outcomes = electricity_client.query_saved(path, _text(params.get("text")))
         except electricity_client.ElectricityLookupError as exc:

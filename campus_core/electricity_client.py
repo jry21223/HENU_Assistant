@@ -17,7 +17,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
-from .atomic_io import atomic_write_json
+from .atomic_io import atomic_write_json, file_transaction
 from .wmxy_auth import AuthError, exchange_secret, login_and_refresh
 from .electricity_meter import (
     FloorDirectory, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
@@ -41,6 +41,8 @@ CONTEXT_EXTRAS = {"directory", "session_id", "custom_id", "login_token", "user_i
 
 # httpx 的 INFO 请求日志含完整 URL，云缴费查询参数里有电表 ID，不进宿主日志。
 logging.getLogger("httpx").addFilter(lambda record: ORIGIN not in str(record.args))
+# httpcore 的 DEBUG 会打印响应头（含 Set-Cookie）。
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 class ElectricityError(Exception):
@@ -61,6 +63,10 @@ class ElectricityLookupError(ElectricityInputError):
 
 class ElectricityAuthError(ElectricityError):
     pass
+
+
+class ElectricityAccessDenied(ElectricityError):
+    """服务端暂未允许选房或额度受限；不是登录失效，不要触发 token 轮换。"""
 
 
 class ElectricityNetworkError(ElectricityError):
@@ -194,7 +200,7 @@ def _room_access(http: httpx.Client, context: dict, cookie: str) -> None:
     business = access.get("businessData")
     flag = business.get("useFlag") if isinstance(business, dict) else None
     if str(flag) == "0":
-        raise ElectricityAuthError("云缴费暂未允许选房，请核对会话或查询额度。")
+        raise ElectricityAccessDenied("云缴费暂未允许选房或查询，请稍后再试或核对查询额度。")
     if type(flag) not in (str, int) or not str(flag).isdigit():
         raise ElectricityProtocolError("云缴费未返回选房权限状态。")
 
@@ -321,6 +327,9 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
             meters = resolve_meter_text(directory, address, require_pair=live)
         else:
             meters = resolve_meters(directory, **address, require_pair=live)
+        if not live and context.get("session_id"):
+            # 导入目录也要先探测会话，过期时才会触发自动换票。
+            _room_access(http, context, context["cookie"])
     except MeterLookupError as exc:
         candidates = ()
         # 只对“查不到/多处匹配”给近似选项；缺信息等仍按原样报错。
@@ -398,28 +407,33 @@ def _merge_cookie(header: str, updates: dict[str, str]) -> str:
     return "; ".join(f"{name}={value}" for name, value in pairs.items())
 
 
+def _merge_jar(header: str, jar) -> str:
+    return _merge_cookie(header, {item.name: item.value for item in jar})
+
+
 def _query_once(context: dict, address: dict | str) -> tuple[list[dict], str]:
     with httpx.Client(timeout=12, trust_env=False) as http:
         outcomes = query_address(http, address, context=context)
-        cookie = _merge_cookie(context["cookie"], {item.name: item.value for item in http.cookies.jar})
+        cookie = _merge_jar(context["cookie"], http.cookies.jar)
     return outcomes, cookie
 
 
 def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True) -> list[dict]:
     """用私有上下文文件查询；会话过期时先 pay.do 换票重试一次，有读数时回写 Cookie。"""
-    context = _load_context(path)
-    try:
-        outcomes, cookie = _query_once(context, address)
-    except ElectricityAuthError:
-        if not auto_refresh or not context.get("session_id"):
-            raise
-        if not refresh_saved(path)["recognized"]:
-            raise
+    # 整个读-改-写放进文件锁，避免把其它进程轮换出的 token/session 覆盖回旧值。
+    with file_transaction(path):
         context = _load_context(path)
-        outcomes, cookie = _query_once(context, address)
-    # ponytail: 同一文件并发查询时后写者覆盖，双方都是服务端新发的 Cookie。
-    if cookie != context["cookie"] and any("error" not in item for item in outcomes):
-        atomic_write_json(path, {**context, "cookie": cookie})
+        try:
+            outcomes, cookie = _query_once(context, address)
+        except ElectricityAuthError:
+            if not auto_refresh or not context.get("session_id"):
+                raise
+            if not refresh_saved(path)["recognized"]:
+                raise
+            context = _load_context(path)
+            outcomes, cookie = _query_once(context, address)
+        if cookie != context["cookie"] and any("error" not in item for item in outcomes):
+            atomic_write_json(path, {**context, "cookie": cookie})
     return outcomes
 
 
@@ -430,12 +444,21 @@ def _drop_cookies(header: str, names: set[str]) -> str:
     )
 
 
+def _exchange_get(http: httpx.Client, url, **kwargs) -> httpx.Response:
+    try:
+        return http.get(url, **kwargs)
+    except httpx.TimeoutException:
+        raise ElectricityNetworkError("云缴费换票超时。") from None
+    except httpx.RequestError:
+        raise ElectricityNetworkError("无法连接云缴费换票接口。") from None
+
+
 def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) -> dict:
     """用校区会话换云缴费 SESSION；recognized 为真时附带新 Cookie。"""
     if not session_id:
         return {"page_status": None, "issued": [], "recognized": False, "reason": "缺少 session_id。"}
     base = _drop_cookies(context["cookie"], {"SESSION"})
-    page = http.get(PAY_EXCHANGE, params={
+    page = _exchange_get(http, PAY_EXCHANGE, params={
         "customerId": str(context.get("custom_id") or "1"), "token": session_id, **EXCHANGE_PARAMS,
     }, headers={"Cookie": base, **EXCHANGE_HEADERS}, follow_redirects=False)
     jar = {item.name: item.value for item in http.cookies.jar}
@@ -443,14 +466,14 @@ def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) 
     location = page.headers.get("location")
     if "SESSION" not in jar or not location:
         return report | {"recognized": False}
-    merged = _merge_cookie(base, jar)
+    merged = _merge_jar(base, http.cookies.jar)
     # 跟随 302 完成换票，再确认服务端认这次会话。
-    page = http.get(httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
-                    follow_redirects=True)
-    merged = _merge_cookie(merged, {item.name: item.value for item in http.cookies.jar})
+    page = _exchange_get(http, httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
+                         follow_redirects=True)
+    merged = _merge_jar(merged, http.cookies.jar)
     try:
         _room_access(http, context, merged)
-    except ElectricityError as exc:
+    except ElectricityAuthError as exc:
         return report | {"recognized": False, "reason": str(exc)}
     return report | {"recognized": True, "follow_status": page.status_code, "cookie": merged}
 
@@ -462,30 +485,33 @@ def _login_device(context: dict) -> dict:
 
 def refresh_saved(path: Path) -> dict:
     """换票：先用现有 session_id；不可用时用 token 续期得到新会话，再换一次。"""
-    context = _load_context(path)
-    with httpx.Client(timeout=12, trust_env=False) as http:
-        report = _exchange_cookie(http, context, context.get("session_id"))
-        if report["recognized"]:
-            cookie = report.pop("cookie")
-            atomic_write_json(path, {**context, "cookie": cookie})
-            return report
-        if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
-            return report
-        try:
-            session, user = login_and_refresh(
-                http, token=context["login_token"], user_id=context["user_id"],
-                user_name=context["login_name"], device=_login_device(context))
-        except (AuthError, ValueError) as exc:
-            return report | {"recognized": False, "reason": str(exc)}
-        # 续期会轮换 token，先落盘再换票。
-        context = {**context, "login_token": str(user.get("token") or context["login_token"]),
-                   "session_id": session.session,
-                   "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
-        atomic_write_json(path, context)
-        report = _exchange_cookie(http, context, context["session_id"]) | {"token_refreshed": True}
-        if report["recognized"]:
-            cookie = report.pop("cookie")
-            atomic_write_json(path, {**context, "cookie": cookie})
+    with file_transaction(path):
+        context = _load_context(path)
+        with httpx.Client(timeout=12, trust_env=False) as http:
+            report = _exchange_cookie(http, context, context.get("session_id"))
+            if report["recognized"]:
+                cookie = report.pop("cookie")
+                atomic_write_json(path, {**context, "cookie": cookie})
+                return report
+            if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
+                return report
+            try:
+                # 登录走独立 client：认证域 host-only Cookie 不能混进云缴费 Cookie。
+                with httpx.Client(timeout=12, trust_env=False) as auth_http:
+                    session, user = login_and_refresh(
+                        auth_http, token=context["login_token"], user_id=context["user_id"],
+                        user_name=context["login_name"], device=_login_device(context))
+            except (AuthError, ValueError) as exc:
+                return report | {"recognized": False, "reason": str(exc)}
+            # 续期会轮换 token，先落盘再换票。
+            context = {**context, "login_token": str(user.get("token") or context["login_token"]),
+                       "session_id": session.session,
+                       "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
+            atomic_write_json(path, context)
+            report = _exchange_cookie(http, context, context["session_id"]) | {"token_refreshed": True}
+            if report["recognized"]:
+                cookie = report.pop("cookie")
+                atomic_write_json(path, {**context, "cookie": cookie})
     return report
 
 
