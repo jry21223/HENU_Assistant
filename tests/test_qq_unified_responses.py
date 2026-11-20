@@ -550,3 +550,91 @@ def test_runtime_restart_during_a_prepared_map_has_an_explicit_fallback(harness)
         assert ctx.event.reply and '已过期' in ctx.event.reply[0]['text']
         assert '已展示' not in ctx.event.reply[0]['text']
     asyncio.run(run())
+
+
+def test_electricity_never_queues_or_blocks_another_users_schedule(harness, monkeypatch, tmp_path):
+    from threading import Event
+
+    from campus_core import electricity_client
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+    from henu_plugin.storage_adapter import PluginStorageAdapter
+
+    started, release = Event(), Event()
+    storage_users = []
+    load_all = PluginStorageAdapter.load_all
+
+    async def track_storage(adapter):
+        storage_users.append(adapter._storage_key)
+        return await load_all(adapter)
+
+    def query(path, address, **kwargs):
+        started.set()
+        assert release.wait(4)
+        return [{"campus": "示例", "building": "示例苑", "room": "101",
+                 "meter": "lighting", "quantity": 12, "unit": "度"}]
+
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "context.json"))
+    monkeypatch.setattr(electricity_client, "query_saved", query)
+    monkeypatch.setattr(PluginStorageAdapter, "_shared_temp_dir", tmp_path)
+    monkeypatch.setattr(PluginStorageAdapter, "load_all", track_storage)
+    service = HardenedHenuPluginService(tmp_path)
+    service._tool_dispatch["schedule_query"] = lambda params: week_payload()
+    h = harness
+    h.plugin.service = service
+    bob = Session(launcher_type=LauncherTypes.PERSON, launcher_id="bob", sender_id="bob")
+    h.variables[2] = h.variables[3] = {"henu_sender_id": "bob", "henu_launcher_id": "bob"}
+
+    async def run():
+        command = {"command": "electricity 示例苑12 101照明"}
+        first = asyncio.create_task(h.tool.call(command, h.session, 1))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            assert storage_users == []
+            busy = await asyncio.wait_for(h.tool.call(command, bob, 2), 1)
+            assert busy["error_code"] == "electricity_busy"
+            schedule = await asyncio.wait_for(h.tool.call({"command": "schedule week"}, bob, 3), 1)
+            assert schedule["success"]
+            assert storage_users == ["bob"]
+        finally:
+            release.set()
+            result = await first
+        assert result["success"] and "12 度" in result["reply_text"]
+
+    asyncio.run(run())
+
+
+def test_electricity_timeout_keeps_worker_slot_until_it_exits(harness, monkeypatch, tmp_path):
+    from threading import Event
+
+    from campus_core import electricity_client
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    started, release = Event(), Event()
+
+    def slow_query(path, address, **kwargs):
+        started.set()
+        assert release.wait(4)
+        return [{"campus": "示例", "building": "示例苑", "room": "101",
+                 "meter": "lighting", "quantity": 12, "unit": "度"}]
+
+    monkeypatch.setattr(service_module, "_ELECTRICITY_QUERY_SECONDS", 0.1)
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "context.json"))
+    monkeypatch.setattr(electricity_client, "query_saved", slow_query)
+    h = harness
+    h.plugin.service = HardenedHenuPluginService(tmp_path)
+
+    async def run():
+        command = {"command": "electricity 示例苑12 101照明"}
+        try:
+            result = await h.tool.call(command, h.session, 1)
+            assert started.is_set() and result["error_code"] == "electricity_timeout"
+            result = await h.tool.call(command, h.session, 2)
+            assert result["error_code"] == "electricity_busy"
+        finally:
+            release.set()
+            # A sentinel runs after the electricity worker's done callbacks.
+            await asyncio.wrap_future(service_module._ELECTRICITY_WORKER.submit(lambda: None))
+
+    asyncio.run(run())

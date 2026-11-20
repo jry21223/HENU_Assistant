@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import hashlib
@@ -8,6 +9,7 @@ import re
 import shlex
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -25,12 +27,14 @@ from henu_plugin.cache import (
     SCHEDULE_CACHE,
     SEMINAR_QUERY_CACHE,
     SERVER_TIME_CACHE,
+    TTLCache,
     get_cache_stats,
     invalidate_account_cache,
     invalidate_schedule_cache,
     invalidate_user_cache,
 )
 from henu_plugin.cli import (
+    CliCommandSpec,
     build_help_payload,
     build_next_commands,
     inspect_cli_command,
@@ -51,7 +55,11 @@ from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QuizError, RainQuiz
 
 _RUNTIME_STATE_LOCK = threading.RLock()
 _CURRENT_IDENTITY: threading.local = threading.local()
-_ELECTRICITY_COOLDOWN: dict[str, float] = {}
+_ELECTRICITY_COOLDOWN = TTLCache[bool](default_ttl=10)
+# ponytail: 一个运营会话共用一个工作线程。实例内忙时直接退回，避免占用课表线程。
+_ELECTRICITY_WORKER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="electricity")
+_ELECTRICITY_SLOT = threading.BoundedSemaphore(1)
+_ELECTRICITY_QUERY_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -353,11 +361,7 @@ class HenuPluginService:
 
         try:
             _CURRENT_IDENTITY.value = identity
-            # 电费查询是只读、用环境变量里的运营者上下文，不碰用户 Storage；
-            # 放进全局锁会串行阻塞所有用户的工具调用。
-            storage = (contextlib.nullcontext() if tool_name == "electricity_query"
-                       else self._activate_user_storage(paths))
-            with storage:
+            with self._activate_user_storage(paths):
                 result = handler(params or {})
         except Exception as exc:
             return {"success": False, "msg": f"{tool_name} 执行异常: {exc}"}
@@ -511,7 +515,10 @@ class HenuPluginService:
                 "next_commands": ["help"],
             }
 
-        result = handler(spec.params)
+        return self._cli_result(spec, handler(spec.params), safe_command)
+
+    @staticmethod
+    def _cli_result(spec: CliCommandSpec, result: Any, safe_command: str) -> dict[str, Any]:
         if not isinstance(result, dict):
             result = {
                 "success": False,
@@ -999,20 +1006,42 @@ class HenuPluginService:
             force_refresh=_bool(params.get("force_refresh"), False),
         )
 
-    def _electricity_query(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def run_electricity_cli(self, spec: CliCommandSpec, session: provider_session.Session,
+                                  identity_hint: dict[str, Any]) -> dict[str, Any]:
+        identity = self._resolve_identity(session, identity_hint)
+        if identity.launcher_type != "person":
+            return {"success": False, "error_code": "private_reply_required", "msg": "请在私聊中查询电量。"}
+        if not _ELECTRICITY_SLOT.acquire(blocking=False):
+            return {"success": False, "error_code": "electricity_busy", "msg": "电费查询正忙，请稍后再试。"}
+
+        deadline = time.monotonic() + _ELECTRICITY_QUERY_SECONDS
+        try:
+            future = _ELECTRICITY_WORKER.submit(
+                self._electricity_query, spec.params, deadline=deadline, openid=identity.qq,
+            )
+        except RuntimeError:
+            _ELECTRICITY_SLOT.release()
+            return {"success": False, "msg": "电费服务暂不可用，请稍后再试。"}
+        # 等工作线程实际退出才放行下一笔，不能由 QQ 等待超时触发放行。
+        future.add_done_callback(lambda _: _ELECTRICITY_SLOT.release())
+        try:
+            result = await asyncio.wait_for(asyncio.wrap_future(future), max(0, deadline - time.monotonic()))
+        except TimeoutError:
+            result = {"success": False, "error_code": "electricity_timeout", "msg": "电费查询超时，请稍后再试。"}
+        except Exception:
+            result = {"success": False, "msg": "电费查询暂时失败，请稍后再试。"}
+        return self._cli_result(spec, result, redact_cli_command(spec.raw))
+
+    def _electricity_query(self, params: dict[str, Any], *, deadline: float | None = None,
+                           openid: str = "") -> dict[str, Any]:
         path = _electricity_context_path()
         if path is None:
             return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
-        # ponytail: 进程内简单冷却；多实例部署时各自计数。
-        openid = self._current_openid()
-        if openid:
-            now = time.monotonic()
-            last = _ELECTRICITY_COOLDOWN.get(openid, 0.0)
-            if now - last < 10:
-                return {"success": False, "msg": "查询太快，请 10 秒后再试。"}
-            _ELECTRICITY_COOLDOWN[openid] = now
+        openid = openid or self._current_openid()
+        if openid and _ELECTRICITY_COOLDOWN.get(openid):
+            return {"success": False, "msg": "查询太快，请 10 秒后再试。"}
         try:
-            outcomes = electricity_client.query_saved(path, _text(params.get("text")))
+            outcomes = electricity_client.query_saved(path, _text(params.get("text")), deadline=deadline)
         except electricity_client.ElectricityLookupError as exc:
             lines = [str(exc)]
             lines += [f"{index}. {candidate.command_text}"
@@ -1035,7 +1064,10 @@ class HenuPluginService:
             kind = "空调" if item["meter"] == "aircon" else "照明"
             lines.append(f"{kind}：{item['error']}" if "error" in item
                          else f"{kind}：剩余 {item['quantity']} {item['unit'] or ''}".rstrip())
-        return {"success": any("error" not in item for item in outcomes), "reply_text": "\n".join(lines)}
+        success = any("error" not in item for item in outcomes)
+        if success and openid:
+            _ELECTRICITY_COOLDOWN.set(openid, True)
+        return {"success": success, "reply_text": "\n".join(lines)}
 
     def _yuketang_config_path(self) -> Path:
         paths = get_current_user_paths()

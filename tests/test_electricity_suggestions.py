@@ -101,7 +101,7 @@ def test_service_reply_lists_candidates(monkeypatch, tmp_path):
         LookupCandidate("金明校区", "东苑25号公寓", "638", "金明 东苑25 638"),
     )
 
-    def fake_query(path, text):
+    def fake_query(path, text, *, deadline=None):
         raise electricity_client.ElectricityLookupError("官方目录未收录该园区的这个编号。", candidates)
 
     monkeypatch.setattr(electricity_client, "query_saved", fake_query)

@@ -70,6 +70,12 @@ class HenuCli(BaseHenuTool):
 
         clean_command, inline_token = split_confirm_token(raw_command)
         spec = inspect_cli_command(clean_command)
+        if spec.resolved_tool == "electricity_query":
+            service = getattr(self.plugin, "service", None)
+            if service is None:
+                return {"success": False, "msg": "插件服务未初始化"}
+            result = await service.run_electricity_cli(spec, session, identity_hint)
+            return await self._finish_delivery(result, {"command": clean_command}, session, query_id)
         if spec.resolved_tool == "grade_query" and str(getattr(session.launcher_type, "value", session.launcher_type)) != "person":
             return {"success": False, "error_code": "private_reply_required", "msg": "个人成绩只能在私聊查询。", "reply_text": "个人成绩只能在私聊查询。"}
 

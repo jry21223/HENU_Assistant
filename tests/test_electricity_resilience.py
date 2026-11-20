@@ -35,7 +35,7 @@ def test_access_denied_does_not_trigger_refresh(monkeypatch, tmp_path):
                     '"businesstype":"b","session_id":"sess"}' % (ORIGIN + "/CloudPayment/bill/selectPayProject.do"),
                     encoding="utf-8")
     path.chmod(0o600)
-    monkeypatch.setattr(ec, "_query_once", lambda context, address: (_ for _ in ()).throw(
+    monkeypatch.setattr(ec, "_query_once", lambda context, address, deadline: (_ for _ in ()).throw(
         ElectricityAccessDenied("云缴费暂未允许选房或查询。")))
     monkeypatch.setattr(ec, "refresh_saved", lambda p: pytest.fail("受限不应触发换票"))
     with pytest.raises(ElectricityAccessDenied):
@@ -158,6 +158,31 @@ def test_reimport_waits_for_refresh_and_keeps_latest_token(monkeypatch, tmp_path
         assert pending_import.result() == 0
     saved = json.loads(path.read_text())
     assert saved["cookie"] == "SESSION=imported" and saved["login_token"] == "new-token"
+
+
+def test_request_budget_stops_later_requests_and_shrinks_timeout(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+
+    path = tmp_path / "context.json"
+    atomic_write_json(path, _context())
+    clock = [100.0]
+    monkeypatch.setattr(ec, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert request.extensions["timeout"]["read"] == 2.0
+        clock[0] += 3
+        return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(respond), **kw))
+    with pytest.raises(ElectricityNetworkError, match="超时"):
+        ec.query_saved(path, "示例苑26 638", deadline=102.0)
+    assert len(requests) == 1
 
 
 def test_exchange_origin_policy_and_same_origin_hop_limit():

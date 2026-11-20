@@ -8,6 +8,7 @@ import re
 import shlex
 import stat
 import sys
+import time
 import tomllib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -406,14 +407,31 @@ def _merge_jar(header: str, jar) -> str:
     return _merge_cookie(header, {item.name: item.value for item in jar})
 
 
-def _query_once(context: dict, address: dict | MeterAddress) -> tuple[list[dict], str]:
-    with httpx.Client(timeout=12, trust_env=False) as http:
+def _seconds_left(deadline: float | None, cap: float) -> float:
+    if deadline is None:
+        return cap
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ElectricityNetworkError("电费查询超时，请稍后再试。")
+    return min(cap, remaining)
+
+
+def _http_client(deadline: float | None) -> httpx.Client:
+    def apply_budget(request: httpx.Request) -> None:
+        request.extensions["timeout"] = httpx.Timeout(_seconds_left(deadline, 12)).as_dict()
+
+    return httpx.Client(timeout=12, trust_env=False, event_hooks={"request": [apply_budget]})
+
+
+def _query_once(context: dict, address: dict | MeterAddress, deadline: float | None = None) -> tuple[list[dict], str]:
+    with _http_client(deadline) as http:
         outcomes = query_address(http, address, context=context)
         cookie = _merge_jar(context["cookie"], http.cookies.jar)
     return outcomes, cookie
 
 
-def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True) -> list[dict]:
+def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True,
+                deadline: float | None = None) -> list[dict]:
     """用私有上下文文件查询；会话过期时先 pay.do 换票重试一次，有读数时回写 Cookie。"""
     if isinstance(address, str):
         try:
@@ -421,17 +439,17 @@ def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True) -
         except MeterLookupError as exc:
             raise ElectricityLookupError(str(exc)) from None
     # 整个读-改-写放进文件锁，避免把其它进程轮换出的 token/session 覆盖回旧值。
-    with file_transaction(path):
+    with file_transaction(path, timeout=_seconds_left(deadline, 30)):
         context = _load_context(path)
         try:
-            outcomes, cookie = _query_once(context, address)
+            outcomes, cookie = _query_once(context, address, deadline)
         except ElectricityAuthError:
             if not auto_refresh or not context.get("session_id"):
                 raise
-            if not refresh_saved(path)["recognized"]:
+            if not refresh_saved(path, deadline=deadline)["recognized"]:
                 raise
             context = _load_context(path)
-            outcomes, cookie = _query_once(context, address)
+            outcomes, cookie = _query_once(context, address, deadline)
         if cookie != context["cookie"] and any("error" not in item for item in outcomes):
             atomic_write_json(path, {**context, "cookie": cookie})
     return outcomes
@@ -500,12 +518,12 @@ def _login_device(context: dict) -> dict:
             "shebeixinghao": context.get("device_product"), "telephoneInfo": context.get("device_release")}
 
 
-def refresh_saved(path: Path) -> dict:
+def refresh_saved(path: Path, *, deadline: float | None = None) -> dict:
     """换票：先用现有 session_id；不可用时用 token 续期得到新会话，再换一次。"""
-    with file_transaction(path):
+    with file_transaction(path, timeout=_seconds_left(deadline, 30)):
         context = _load_context(path)
         validate_context(context)
-        with httpx.Client(timeout=12, trust_env=False) as http:
+        with _http_client(deadline) as http:
             report = _exchange_cookie(http, context, context.get("session_id"))
         if report["recognized"]:
             cookie = report.pop("cookie")
@@ -515,7 +533,7 @@ def refresh_saved(path: Path) -> dict:
             return report
         try:
             # 认证域和两次云缴费换票分别用独立 Cookie jar。
-            with httpx.Client(timeout=12, trust_env=False) as auth_http:
+            with _http_client(deadline) as auth_http:
                 session, user = login_and_refresh(
                     auth_http, token=context["login_token"], user_id=context["user_id"],
                     user_name=context["login_name"], device=_login_device(context))
@@ -526,7 +544,7 @@ def refresh_saved(path: Path) -> dict:
                    "session_id": session.session,
                    "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
         atomic_write_json(path, context)
-        with httpx.Client(timeout=12, trust_env=False) as http:
+        with _http_client(deadline) as http:
             report = _exchange_cookie(http, context, context["session_id"]) | {"token_refreshed": True}
         if report["recognized"]:
             cookie = report.pop("cookie")
