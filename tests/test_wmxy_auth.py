@@ -17,8 +17,12 @@ from campus_core.wmxy_auth import (
     AuthError,
     exchange_secret,
     login_password,
+    login_sms,
     login_token,
+    send_sms_code,
 )
+
+SEND_URL = "https://app.17wanxiao.com/campus/cam_iface46/gainMatrixCaptcha543.action"
 
 KEY = "0123456789abcdef01234567"
 SESSION = "synthetic-session"
@@ -41,6 +45,16 @@ def make_server(user, *, bad_sign=False, seen=None, failure=None):
             payload = json.dumps({"key": KEY, "session": SESSION}).encode()
             sealed = public.encrypt(payload, padding.PKCS1v15())
             return httpx.Response(200, content=base64.encodebytes(sealed))
+
+        if request.url == httpx.URL(SEND_URL):
+            assert request.headers["campusSign"] == hashlib.sha256(request.content).hexdigest()
+            outer = json.loads(request.content)
+            inner = json.loads(des(base64.b64decode(outer["data"]), decrypt=True))
+            if seen is not None:
+                seen.append({"send": inner})
+            body = json.dumps({"code_": "0", "message_": "sent"}, separators=(",", ":")).encode()
+            return httpx.Response(200, content=body,
+                                  headers={"campusSign": hashlib.sha256(body).hexdigest()})
 
         assert request.url == httpx.URL(LOGIN_URL)
         assert request.headers["Content-Type"] == "application/text"
@@ -111,3 +125,26 @@ def test_device_id_is_always_sent():
         login_token(http, user_id="1", user_name="u", token="old",
                     session=session, device={"deviceId": "fixed-device"})
     assert seen[0]["deviceId"] == "fixed-device"
+
+
+def test_sms_code_is_requested_for_given_device():
+    seen = []
+    with run(make_server({"token": "t"}, seen=seen)) as http:
+        session = exchange_secret(http)
+        result = send_sms_code(http, mobile="13800000000", session=session,
+                               device={"deviceId": "my-device"})
+    assert result["code_"] == "0"
+    assert seen[0]["send"] == {"action": "registAndLogin", "confirm": True,
+                               "deviceId": "my-device", "mobile": "13800000000", "type": "sms"}
+
+
+def test_sms_login_sends_type_2_without_password():
+    seen = []
+    with run(make_server({"token": "t-2", "customId": "817", "id": 1}, seen=seen)) as http:
+        session = exchange_secret(http)
+        user = login_sms(http, mobile="13800000000", code="123456", session=session,
+                         device={"deviceId": "my-device"})
+    assert user["token"] == "t-2"
+    inner = seen[0]
+    assert inner["type"] == "2" and inner["sms"] == "123456" and inner["userName"] == "13800000000"
+    assert inner["deviceId"] == "my-device" and "password" not in inner

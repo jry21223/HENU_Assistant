@@ -146,13 +146,39 @@ Header: X-Requested-With: com.newcapec.mobile.ncp
 
 | 尝试 | 结果 |
 | --- | --- |
-| 用账号密码登录（`type=1`） | `code 5`「您正在新设备上使用完美校园，请使用验证码进行验证登录」 |
+| 用账号密码登录（`type=1`，随机 `deviceId`） | `code 5`「您正在新设备上使用完美校园」；改用 App 的 `deviceId` 后成功 |
 | `type=3` 续期，随机 `deviceId` | `code 100600`「登录失效」，token 与登录设备绑定 |
 | Frida 读取 App 的 `deviceId` | 注入主进程超时（加固拦截）；WebView 进程无 Java 运行时 |
 | 从 logcat 猜 `deviceId` | 13 个 UUID 候选全部失败 |
 | 解密 App 偏好文件 | 内容为加密二进制，未做进一步破解 |
 
 结论：完全无人值守仍差“App 设备身份”这一块。可行的替代是从 App 的 JS 桥取 `sessionId`，之后服务器只用 `pay.do` 续期。
+
+## 全自动续期（2026-11-20 打通）
+
+设备身份这一块已经解决，不再需要短信或 App 常驻：
+
+1. **读取 App 的 `deviceId`**：主进程注入此前超时是 SELinux 拦截。`setenforce 0` 后，用 `frida_tools` 的 `java` 桥调用 `DeviceUtils.getDeviceId()` 即可只读取回（36 字符 UUID）。App 的实际机型是 `sdk_gphone_arm64`、Android 11。
+2. **用 App 的设备身份做密码登录**（`type=1`）：携带该 `deviceId`、`telephoneModel`、`shebeixinghao`、`telephoneInfo` 后，服务端视为已知设备，**不再要求验证码**，直接返回 token 和 `customId`。
+3. **`type=3` token 续期**：携带同一设备身份即可成功，返回新 token。续期会轮换旧 token。
+4. **`pay.do` 换票**：用会话换 `SESSION`，随后查询电费。
+
+上下文新增字段：`login_token`、`user_id`、`login_name`、`session_id`、`custom_id`、`device_id`、`device_model`、`device_product`、`device_release`。
+
+`refresh_saved()` 现在的顺序是：先用现有 `session_id` 换票；失败则用 token 续期得到新会话，再换票。`query_saved()` 遇到会话过期会自动重试一次。
+
+实测：
+
+| 场景 | 结果 |
+| --- | --- |
+| 用 App 的设备身份密码登录 | 成功，无验证码 |
+| `type=3` 续期 | 成功，返回 42 字符新 token |
+| 人为把会话改坏（旧 `SESSION` + 假 `session_id`）后查询 | 自动续期 + 换票，仍返回空调 169.25 度 |
+| 关停 AVD 后查询 | 成功 |
+
+补充：短信登录接口是 `cam_iface46/gainMatrixCaptcha543.action`（`confirm:true` 才真正下发）。验证码与申请设备绑定，App 申请的码不能用于其它 `deviceId`。
+
+注意：token 与 App 的设备身份绑定，机器人续期会轮换 token，App 的原生登录随之失效；电费 H5 页在会话有效期内不受影响。
 
 随后改为每 10 分钟查询一次，观察持续使用能否让 `SESSION` 一直有效。20:15–21:05 连续 6 次成功，21:15 仍失效（距导入约 71 分钟）；上一轮 18:04 导入、19:06 失效（约 62 分钟）。持续使用不能延长会话，`SESSION` 有约 1 小时的绝对有效期。因此保活方案不可行，必须按上节换票或重新登录。
 

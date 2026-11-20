@@ -117,6 +117,35 @@ def _post_login(http: httpx.Client, session: CampusSession, inner: dict, *, root
     return _open(response, session)
 
 
+def _post_enveloped(http: httpx.Client, session: CampusSession, method: str, inner: dict,
+                    *, root: str = AUTH_ROOT) -> dict:
+    """同封装的其他登录前接口；成功返回外层 JSON，data 已解密为 data_plain。"""
+    body, sign = _envelope(inner, session)
+    try:
+        response = http.post(root + method, content=body,
+                             headers={"Content-Type": "application/text", "campusSign": sign})
+    except httpx.RequestError:
+        raise AuthError("无法连接完美校园接口。") from None
+    if response.status_code != 200:
+        raise AuthError(f"接口返回 HTTP {response.status_code}。")
+    if response.headers.get("campusSign", "").lower() != hashlib.sha256(response.content).hexdigest():
+        raise AuthError("接口响应签名不匹配。")
+    try:
+        outer = response.json()
+    except ValueError:
+        raise AuthError("接口响应无法解析。") from None
+    code = outer.get("code_", outer.get("code"))
+    if str(code or "0") != "0" and outer.get("result_", outer.get("result")) is not True:
+        raise AuthError(f"{outer.get('message_') or outer.get('message') or '接口失败。'}（code {code}）")
+    if outer.get("data"):
+        try:
+            outer["data_plain"] = json.loads(
+                _des(base64.b64decode(outer["data"]), session.key, decrypt=True).decode("utf-8"))
+        except (ValueError, KeyError):
+            pass
+    return outer
+
+
 def _device_fields(device: dict | None) -> dict:
     fields = {**DEFAULT_DEVICE, **(device or {})}
     # 实测缺少 deviceId 时服务端直接 500；调用方应传入固定值以保持设备一致。
@@ -145,6 +174,29 @@ def login_token(http: httpx.Client, *, user_id: str, user_name: str, token: str,
         raise AuthError("续期需要 token、userId 和 userName。")
     inner = {**_device_fields(device), "type": "3", "userId": str(user_id),
              "userName": user_name, "token": token}
+    return _post_login(http, session, inner).get("user") or {}
+
+
+SMS_SEND_METHOD = "cam_iface46/gainMatrixCaptcha543.action"
+
+
+def send_sms_code(http: httpx.Client, *, mobile: str, session: CampusSession,
+                  device: dict | None = None, action: str = "registAndLogin",
+                  root: str = AUTH_ROOT) -> dict:
+    """向账号绑定手机发送登录验证码。实测：confirm=true 才真正下发。"""
+    if not mobile.strip():
+        raise AuthError("需要手机号。")
+    inner = {"action": action, "confirm": True, "deviceId": _device_fields(device)["deviceId"],
+             "mobile": mobile.strip(), "type": "sms"}
+    return _post_enveloped(http, session, SMS_SEND_METHOD, inner, root=root)
+
+
+def login_sms(http: httpx.Client, *, mobile: str, code: str, session: CampusSession,
+              device: dict | None = None) -> dict:
+    """短信验证码登录（type=2），成功后设备与该账号绑定。"""
+    if not mobile.strip() or not code.strip():
+        raise AuthError("需要手机号和验证码。")
+    inner = {**_device_fields(device), "type": "2", "userName": mobile.strip(), "sms": code.strip()}
     return _post_login(http, session, inner).get("user") or {}
 
 

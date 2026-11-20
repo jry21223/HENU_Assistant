@@ -331,6 +331,46 @@ def test_query_saved_without_session_id_raises(monkeypatch, tmp_path):
         query_saved(context, {"campus": "金明", "building": "东苑26栋", "room": "638"})
 
 
+def test_refresh_falls_back_to_token_login(monkeypatch, tmp_path):
+    import campus_core.electricity_client as ec
+    from campus_core.wmxy_auth import CampusSession
+
+    context = tmp_path / "context.json"
+    saved = {
+        "cookie": "SESSION=stale; sid=x", "referer": REFERER,
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "session_id": "stale-session", "custom_id": "817", "login_token": "old-token",
+        "user_id": "12345", "login_name": "138****", "device_id": "app-device",
+    }
+    context.write_text(json.dumps(saved), encoding="utf-8")
+    context.chmod(0o600)
+
+    def handle(request):
+        url = str(request.url).split("?", 1)[0]
+        if url == ec.PAY_EXCHANGE and "token" in dict(request.url.params):
+            if dict(request.url.params)["token"] != "fresh-session":
+                return httpx.Response(200, text="出错啦")
+            return httpx.Response(302, headers={"Set-Cookie": "SESSION=fresh; Path=/",
+                                                "Location": ec.PAY_EXCHANGE + "?step=2"})
+        if url == ec.PAY_EXCHANGE:
+            return httpx.Response(200, text="ok")
+        assert url == ec.ROOM_ACCESS
+        return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
+
+    def fake_refresh(http, *, token, user_id, user_name, device=None):
+        assert (token, user_id, user_name, device["deviceId"]) == ("old-token", "12345", "138****", "app-device")
+        return CampusSession("0123456789abcdef01234567", "fresh-session"), {"token": "new-token", "customId": "817"}
+
+    monkeypatch.setattr(ec, "login_and_refresh", fake_refresh)
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs))
+    report = ec.refresh_saved(context)
+    assert report["recognized"] is True and report["token_refreshed"] is True
+    stored = json.loads(context.read_text(encoding="utf-8"))
+    assert stored["login_token"] == "new-token" and stored["session_id"] == "fresh-session"
+    assert "SESSION=fresh" in stored["cookie"]
+
+
 @pytest.mark.parametrize("status", [302, 200])
 def test_refresh_exchanges_session_id_for_paydo_cookie(monkeypatch, tmp_path, status):
     from campus_core.electricity_client import PAY_EXCHANGE, refresh_saved

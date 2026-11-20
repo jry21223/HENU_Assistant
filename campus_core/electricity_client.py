@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 
 from .atomic_io import atomic_write_json
+from .wmxy_auth import AuthError, exchange_secret, login_and_refresh
 from .electricity_meter import (
     FloorDirectory, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
     matches_area, resolve_meter_text, resolve_meters, split_meter_text,
@@ -34,6 +35,8 @@ EXCHANGE_HEADERS = {"X-Requested-With": "com.newcapec.mobile.ncp"}
 ROOM_FIELDS = {"businesstype", "payProId", "roomverify", "schoolcode"}
 ADDRESS_FIELDS = {"campus", "building", "room"}
 CONTEXT_FIELDS = {"cookie", "referer", "schoolcode", "payProId", "businesstype"}
+CONTEXT_EXTRAS = {"directory", "session_id", "custom_id", "login_token", "user_id", "login_name",
+                  "device_id", "device_model", "device_product", "device_release"}
 
 # httpx 的 INFO 请求日志含完整 URL，云缴费查询参数里有电表 ID，不进宿主日志。
 logging.getLogger("httpx").addFilter(lambda record: ORIGIN not in str(record.args))
@@ -280,7 +283,7 @@ def query_address(http: httpx.Client, address: dict | str, *, context: dict) -> 
     if (
         not isinstance(context, dict)
         or not CONTEXT_FIELDS <= context.keys()
-        or not context.keys() <= CONTEXT_FIELDS | {"directory", "session_id", "custom_id"}
+        or not context.keys() <= CONTEXT_FIELDS | CONTEXT_EXTRAS
         or any(not isinstance(context[field], str) or not context[field].strip() for field in CONTEXT_FIELDS)
     ):
         raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
@@ -398,33 +401,63 @@ def _drop_cookies(header: str, names: set[str]) -> str:
     )
 
 
-def refresh_saved(path: Path) -> dict:
-    """用上下文里的校区 sessionId 通过 pay.do 换发云缴费会话；只有可用时才写回。"""
-    context = _load_context(path)
-    session_id = context.get("session_id")
-    if not isinstance(session_id, str) or not session_id.strip():
-        raise ElectricityInputError("上下文缺少 session_id，无法刷新会话。")
+def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) -> dict:
+    """用校区会话换云缴费 SESSION；recognized 为真时附带新 Cookie。"""
+    if not session_id:
+        return {"page_status": None, "issued": [], "recognized": False, "reason": "缺少 session_id。"}
     base = _drop_cookies(context["cookie"], {"SESSION"})
+    page = http.get(PAY_EXCHANGE, params={
+        "customerId": str(context.get("custom_id") or "1"), "token": session_id, **EXCHANGE_PARAMS,
+    }, headers={"Cookie": base, **EXCHANGE_HEADERS}, follow_redirects=False)
+    jar = {item.name: item.value for item in http.cookies.jar}
+    report = {"page_status": page.status_code, "issued": sorted(jar)}
+    location = page.headers.get("location")
+    if "SESSION" not in jar or not location:
+        return report | {"recognized": False}
+    merged = _merge_cookie(base, jar)
+    # 跟随 302 完成换票，再确认服务端认这次会话。
+    page = http.get(httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
+                    follow_redirects=True)
+    merged = _merge_cookie(merged, {item.name: item.value for item in http.cookies.jar})
+    try:
+        _room_access(http, context, merged)
+    except ElectricityError as exc:
+        return report | {"recognized": False, "reason": str(exc)}
+    return report | {"recognized": True, "follow_status": page.status_code, "cookie": merged}
+
+
+def _login_device(context: dict) -> dict:
+    return {"deviceId": context.get("device_id", ""), "telephoneModel": context.get("device_model"),
+            "shebeixinghao": context.get("device_product"), "telephoneInfo": context.get("device_release")}
+
+
+def refresh_saved(path: Path) -> dict:
+    """换票：先用现有 session_id；不可用时用 token 续期得到新会话，再换一次。"""
+    context = _load_context(path)
     with httpx.Client(timeout=12, trust_env=False) as http:
-        page = http.get(PAY_EXCHANGE, params={
-            "customerId": str(context.get("custom_id") or "1"), "token": session_id, **EXCHANGE_PARAMS,
-        }, headers={"Cookie": base, **EXCHANGE_HEADERS}, follow_redirects=False)
-        jar = {item.name: item.value for item in http.cookies.jar}
-        report = {"page_status": page.status_code, "issued": sorted(jar)}
-        location = page.headers.get("location")
-        if "SESSION" not in jar or not location:
-            return report | {"recognized": False}
-        merged = _merge_cookie(base, jar)
-        # 跟随 302 完成换票，再确认服务端认这次会话。
-        page = http.get(httpx.URL(PAY_EXCHANGE).join(location), headers={"Cookie": merged},
-                        follow_redirects=True)
-        merged = _merge_cookie(merged, {item.name: item.value for item in http.cookies.jar})
+        report = _exchange_cookie(http, context, context.get("session_id"))
+        if report["recognized"]:
+            cookie = report.pop("cookie")
+            atomic_write_json(path, {**context, "cookie": cookie})
+            return report
+        if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
+            return report
         try:
-            _room_access(http, context, merged)
-        except ElectricityError as exc:
+            session, user = login_and_refresh(
+                http, token=context["login_token"], user_id=context["user_id"],
+                user_name=context["login_name"], device=_login_device(context))
+        except (AuthError, ValueError) as exc:
             return report | {"recognized": False, "reason": str(exc)}
-    atomic_write_json(path, {**context, "cookie": merged})
-    return report | {"recognized": True, "follow_status": page.status_code}
+        # 续期会轮换 token，先落盘再换票。
+        context = {**context, "login_token": str(user.get("token") or context["login_token"]),
+                   "session_id": session.session,
+                   "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
+        atomic_write_json(path, context)
+        report = _exchange_cookie(http, context, context["session_id"]) | {"token_refreshed": True}
+        if report["recognized"]:
+            cookie = report.pop("cookie")
+            atomic_write_json(path, {**context, "cookie": cookie})
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
