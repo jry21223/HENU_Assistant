@@ -51,6 +51,115 @@ def test_exchange_network_error_is_wrapped():
             _exchange_cookie(http, _context(), "session")
 
 
+def test_reimport_invalidates_directory_when_project_changes(monkeypatch, tmp_path):
+    import io
+    import json
+    import sys
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+
+    path = tmp_path / "context.json"
+    atomic_write_json(path, {**_context(), "directory": [], "login_token": "previous-token"})
+    imported = {**_context(), "payProId": "new-project"}
+    monkeypatch.setattr(sys, "stdin", io.StringIO("synthetic import"))
+    monkeypatch.setattr(ec, "_import_curl", lambda text: imported)
+    assert ec.main(["--context", str(path), "--import-curl"]) == 0
+    actual = json.loads(path.read_text())
+    assert actual == {**imported, "login_token": "previous-token"}
+
+
+def test_wmxy_login_validates_project_and_keeps_old_cookie_on_exchange_failure(monkeypatch, tmp_path):
+    import json
+    import runpy
+    import sys
+    from types import SimpleNamespace
+
+    from campus_core.atomic_io import atomic_write_json
+
+    main = runpy.run_path(str(Path(__file__).parents[1] / "ops" / "wmxy-login.py"))["main"]
+    path = tmp_path / "context.json"
+    device = tmp_path / "device.json"
+    atomic_write_json(device, {"id": "test-device"})
+    monkeypatch.setenv("WMXY_ACCOUNT", "synthetic")
+    monkeypatch.setenv("WMXY_PASSWORD", "synthetic")
+    monkeypatch.setattr(sys, "argv", ["wmxy-login", "--context", str(path), "--device", str(device)])
+    logins = []
+    exchange_secret = lambda http: logins.append("login") or SimpleNamespace(session="new-session")
+    monkeypatch.setitem(main.__globals__, "exchange_secret", exchange_secret)
+    monkeypatch.setitem(main.__globals__, "login_password", lambda *args, **kwargs: {
+        "token": "new-token", "id": "test-user", "customId": "test-customer",
+    })
+    requests = []
+    def reject_exchange(request):
+        requests.append(request.url.path)
+        return httpx.Response(503)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(reject_exchange), **kw))
+    atomic_write_json(path, {"cookie": "TEST=old"})
+    assert main() == 1
+    assert logins == requests == []
+    assert json.loads(path.read_text()) == {"cookie": "TEST=old"}
+
+    atomic_write_json(path, _context())
+    assert main() == 1
+    assert len(logins) == len(requests) == 1
+    saved = json.loads(path.read_text())
+    assert saved["cookie"] == _context()["cookie"] and saved["login_token"] == "new-token"
+
+
+def test_reimport_waits_for_refresh_and_keeps_latest_token(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import io
+    import json
+    import sys
+    from threading import Event
+    from types import SimpleNamespace
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+
+    path = tmp_path / "context.json"
+    atomic_write_json(path, {
+        **_context(), "session_id": "stale", "login_token": "old-token",
+        "user_id": "synthetic", "login_name": "synthetic", "device_id": "synthetic",
+    })
+    rotating, finish, importing, imported = Event(), Event(), Event(), Event()
+
+    def rotate_token(http, **kwargs):
+        rotating.set()
+        assert finish.wait(2)
+        return SimpleNamespace(session="fresh"), {"token": "new-token"}
+
+    def parse_import(text):
+        importing.set()
+        return {**_context(), "cookie": "SESSION=imported"}
+
+    def import_context():
+        result = ec.main(["--context", str(path), "--import-curl"])
+        imported.set()
+        return result
+
+    monkeypatch.setattr(ec, "login_and_refresh", rotate_token)
+    monkeypatch.setattr(ec, "_exchange_cookie", lambda http, context, session_id: {"recognized": False})
+    monkeypatch.setattr(ec, "_import_curl", parse_import)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("synthetic"))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending_refresh = pool.submit(ec.refresh_saved, path)
+        try:
+            assert rotating.wait(1)
+            pending_import = pool.submit(import_context)
+            assert importing.wait(1)
+            assert not imported.wait(0.1)
+        finally:
+            finish.set()
+        assert not pending_refresh.result()["recognized"]
+        assert pending_import.result() == 0
+    saved = json.loads(path.read_text())
+    assert saved["cookie"] == "SESSION=imported" and saved["login_token"] == "new-token"
+
+
 def test_exchange_origin_policy_and_same_origin_hop_limit():
     from campus_core.electricity_client import ElectricityProtocolError, _exchange_destination
 

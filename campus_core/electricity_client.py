@@ -18,7 +18,7 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 
 from .atomic_io import atomic_write_json, file_transaction
-from .wmxy_auth import AuthError, exchange_secret, login_and_refresh
+from .wmxy_auth import AuthError, login_and_refresh
 from .electricity_meter import (
     FloorDirectory, MeterAddress, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
     matches_area, parse_meter_text, resolve_meter_text, resolve_meters, suggest_targets,
@@ -34,7 +34,8 @@ EXCHANGE_PARAMS = {"UAinfo": "wanxiao", "systemType": "Android", "versioncode": 
 EXCHANGE_HEADERS = {"X-Requested-With": "com.newcapec.mobile.ncp"}
 ROOM_FIELDS = {"businesstype", "payProId", "roomverify", "schoolcode"}
 ADDRESS_FIELDS = {"campus", "building", "room"}
-CONTEXT_FIELDS = {"cookie", "referer", "schoolcode", "payProId", "businesstype"}
+PROJECT_FIELDS = {"schoolcode", "payProId", "businesstype"}
+CONTEXT_FIELDS = PROJECT_FIELDS | {"cookie", "referer"}
 CONTEXT_EXTRAS = {"directory", "session_id", "custom_id", "login_token", "user_id", "login_name",
                   "device_id", "device_model", "device_product", "device_release"}
 
@@ -287,6 +288,17 @@ def _imported_directory(entries: object, aliases: dict[str, dict[str, str]]) -> 
     return tuple(directory)
 
 
+def validate_context(context: object) -> None:
+    if (
+        not isinstance(context, dict)
+        or not CONTEXT_FIELDS <= context.keys()
+        or not context.keys() <= CONTEXT_FIELDS | CONTEXT_EXTRAS
+        or any(not isinstance(context[field], str) or not context[field].strip() for field in CONTEXT_FIELDS)
+    ):
+        raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
+    _session_headers(context["cookie"], context["referer"])
+
+
 def query_address(http: httpx.Client, address: dict | str | MeterAddress, *, context: dict) -> list[dict]:
     """用官方目录定位电表，逐表返回读数或脱敏错误。"""
     if not isinstance(address, (str, MeterAddress)) and (
@@ -297,14 +309,7 @@ def query_address(http: httpx.Client, address: dict | str | MeterAddress, *, con
         or (address.get("floor") is not None and not isinstance(address["floor"], str))
     ):
         raise ElectricityInputError("地址需要 campus、building、room，可选 meter、floor。")
-    if (
-        not isinstance(context, dict)
-        or not CONTEXT_FIELDS <= context.keys()
-        or not context.keys() <= CONTEXT_FIELDS | CONTEXT_EXTRAS
-        or any(not isinstance(context[field], str) or not context[field].strip() for field in CONTEXT_FIELDS)
-    ):
-        raise ElectricityInputError("云缴费上下文缺少有效会话和项目字段。")
-
+    validate_context(context)
 
     live = "directory" not in context
     directory: tuple[FloorDirectory, ...] = ()
@@ -357,7 +362,10 @@ def _load_context(path: Path) -> dict:
             info = os.fstat(file.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
                 raise ElectricityInputError("云缴费上下文必须是本人独享的普通文件，例如权限 0600。")
-            return json.load(file)
+            context = json.load(file)
+            if not isinstance(context, dict):
+                raise ElectricityInputError("云缴费上下文必须是 JSON 对象。")
+            return context
     except (OSError, ValueError):
         raise ElectricityInputError("无法读取云缴费上下文 JSON。") from None
 
@@ -496,31 +504,33 @@ def refresh_saved(path: Path) -> dict:
     """换票：先用现有 session_id；不可用时用 token 续期得到新会话，再换一次。"""
     with file_transaction(path):
         context = _load_context(path)
+        validate_context(context)
         with httpx.Client(timeout=12, trust_env=False) as http:
             report = _exchange_cookie(http, context, context.get("session_id"))
-            if report["recognized"]:
-                cookie = report.pop("cookie")
-                atomic_write_json(path, {**context, "cookie": cookie})
-                return report
-            if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
-                return report
-            try:
-                # 登录走独立 client：认证域 host-only Cookie 不能混进云缴费 Cookie。
-                with httpx.Client(timeout=12, trust_env=False) as auth_http:
-                    session, user = login_and_refresh(
-                        auth_http, token=context["login_token"], user_id=context["user_id"],
-                        user_name=context["login_name"], device=_login_device(context))
-            except (AuthError, ValueError) as exc:
-                return report | {"recognized": False, "reason": str(exc)}
-            # 续期会轮换 token，先落盘再换票。
-            context = {**context, "login_token": str(user.get("token") or context["login_token"]),
-                       "session_id": session.session,
-                       "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
-            atomic_write_json(path, context)
+        if report["recognized"]:
+            cookie = report.pop("cookie")
+            atomic_write_json(path, {**context, "cookie": cookie})
+            return report
+        if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
+            return report
+        try:
+            # 认证域和两次云缴费换票分别用独立 Cookie jar。
+            with httpx.Client(timeout=12, trust_env=False) as auth_http:
+                session, user = login_and_refresh(
+                    auth_http, token=context["login_token"], user_id=context["user_id"],
+                    user_name=context["login_name"], device=_login_device(context))
+        except (AuthError, ValueError):
+            return report | {"recognized": False, "reason": "完美校园登录态续期失败。"}
+        # 续期会轮换 token，先落盘再换票。
+        context = {**context, "login_token": str(user.get("token") or context["login_token"]),
+                   "session_id": session.session,
+                   "custom_id": str(user.get("customId") or context.get("custom_id") or "")}
+        atomic_write_json(path, context)
+        with httpx.Client(timeout=12, trust_env=False) as http:
             report = _exchange_cookie(http, context, context["session_id"]) | {"token_refreshed": True}
-            if report["recognized"]:
-                cookie = report.pop("cookie")
-                atomic_write_json(path, {**context, "cookie": cookie})
+        if report["recognized"]:
+            cookie = report.pop("cookie")
+            atomic_write_json(path, {**context, "cookie": cookie})
     return report
 
 
@@ -539,6 +549,9 @@ def main(argv: list[str] | None = None) -> int:
         except ElectricityError as exc:
             print(exc, file=sys.stderr)
             return 1
+        except OSError:
+            print("暂时无法读写云缴费上下文。", file=sys.stderr)
+            return 1
         print(json.dumps(report, ensure_ascii=False))
         return 0 if report["recognized"] else 1
     if args.import_curl:
@@ -546,11 +559,18 @@ def main(argv: list[str] | None = None) -> int:
             if args.context is None:
                 raise ElectricityInputError("--import-curl 需要 --context 指定保存位置。")
             context = _import_curl(sys.stdin.read())
-            if args.context.exists():
-                context = {**_load_context(args.context), **context}
-            atomic_write_json(args.context, context)
+            with file_transaction(args.context):
+                if args.context.exists():
+                    previous = _load_context(args.context)
+                    if any(previous.get(key) != context[key] for key in PROJECT_FIELDS):
+                        previous.pop("directory", None)
+                    context = {**previous, **context}
+                atomic_write_json(args.context, context)
         except ElectricityError as exc:
             print(exc, file=sys.stderr)
+            return 1
+        except OSError:
+            print("暂时无法读写云缴费上下文。", file=sys.stderr)
             return 1
         print(f"已保存云缴费登录态：{args.context}", file=sys.stderr)
         return 0
@@ -579,6 +599,9 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         for index, candidate in enumerate(getattr(exc, "candidates", ()), 1):
             print(f"{index}. {candidate.command_text}", file=sys.stderr)
+        return 1
+    except OSError:
+        print("暂时无法读写云缴费上下文。", file=sys.stderr)
         return 1
     return 1 if is_address and not result["readings"] else 0
 
