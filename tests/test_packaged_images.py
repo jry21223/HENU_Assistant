@@ -1,4 +1,5 @@
-"""实际发布包必须独立携带图片渲染资源，不能借用源码目录。"""
+"""实际发布包必须携带运行所需的图片资源和电费配置。"""
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,10 +27,24 @@ def test_lbp_package_renders_images_without_source_assets(tmp_path):
             "HENUUI-coverage.data", "HENUUI-OFL.txt", "classroom-plans.data",
             "HENUUI-Regular.ttf", "HENUUI-Medium.ttf", "HENUUI-Bold.ttf",
         )}
+        required.add("campus_core/config/electricity_area_aliases.toml")
         assert required <= set(archive.namelist())
+        evidence_dir = "docs/wmxy/evidence"
+        for filename in ("electricity-other-rooms.jsonl", "electricity-room-catalog.jsonl",
+                         "electricity-webview-requests.jsonl"):
+            for line in archive.read(f"{evidence_dir}/{filename}").splitlines():
+                row = json.loads(line)
+                for section in ("reading", "response"):
+                    assert row.get(section, {}).get("quantity") in (None, "<redacted>")
+        capture = json.loads(archive.read("docs/wmxy/captures/electricity-room-query.sanitized.har"))
+        for entry in capture["log"]["entries"]:
+            content = entry["response"]["content"].get("text")
+            if content:
+                assert json.loads(content).get("quantity") in (None, "<redacted>")
         archive.extractall(extracted)
     subprocess.run([sys.executable, "-I", "-c", """
 import io
+import json
 from pathlib import Path
 import sys
 from PIL import Image, ImageDraw

@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "request",
+    "method": "POST",
+    "url": "https://app.59wanmei.com/campus/cam_iface46/exchangeSecretkey.action"
+  },
+  {
+    "phase": "error",
+    "url": "https://app.59wanmei.com/campus/cam_iface46/exchangeSecretkey.action",
+    "status": null,
+    "label": "Not Allowed",
+    "elapsed_ms": 3440
+  },
+  {
+    "phase": "request",
+    "method": "POST",
+    "url": "https://app.17wanxiao.com/campus/cam_iface46/exchangeSecretkey.action"
+  },
+  {
+    "phase": "error",
+    "url": "https://app.17wanxiao.com/campus/cam_iface46/exchangeSecretkey.action",
+    "status": null,
+    "label": "Not Found",
+    "elapsed_ms": 6697
+  }
+]

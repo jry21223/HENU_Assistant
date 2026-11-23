@@ -148,6 +148,16 @@ def inspect_cli_command(command: Any) -> CliCommandSpec:
         return _parse_empty_classroom(raw, argv)
     if head in {"resource", "资源", "registry"}:
         return _parse_resource(raw, argv)
+    if head in {"electricity", "电费", "电量"}:
+        if len(argv) > 1 and argv[1].lower() in {"help", "-h", "--help"}:
+            return CliCommandSpec(raw=raw, argv=argv, resolved_tool=None, params={}, action="help",
+                should_preload_runtime_context=False, is_help=True, help_topic="electricity")
+        text = " ".join(argv[1:]).strip()
+        if not text:
+            return _error_spec(raw, "电费命令: electricity <园区楼号 房号>[空调|照明] [--floor 楼层号]，例如 electricity 东苑26 638",
+                               help_topic="electricity")
+        return CliCommandSpec(raw=raw, argv=argv, resolved_tool="electricity_query", params={"text": text},
+            action="查电费", should_preload_runtime_context=False)
     if head in {"yuketang", "雨课堂"}:
         return _parse_yuketang(raw, argv)
 
@@ -184,6 +194,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "seminar rooms --date 2026-03-30 --start 14:00 --end 16:00 --members 4",
                 "empty_classroom query --week 1 --day-of-week 1 --period 1",
                 "resource search 十号楼101",
+                "electricity 东苑26 638",
                 "yunfz leave list",
                 "yunfz signin list",
                 "yuketang status",
@@ -202,6 +213,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "help seminar",
                 "help empty_classroom",
                 "help resource",
+                "help electricity",
                 "help yunfz",
                 "help yuketang",
             ],
@@ -210,6 +222,17 @@ def build_help_payload(topic: str) -> dict[str, Any]:
                 "参数值包含空格时要加引号。",
                 "不确定参数时，不要一次展开全部，先进入更窄的 help 主题。",
             ],
+        }
+
+    if normalized == "electricity":
+        return {
+            "topic": normalized,
+            "summary": "只读查询宿舍空调、照明剩余电量，使用管理员导入的云缴费登录态。",
+            "commands": ["electricity <园区楼号 房号>[空调|照明] [--floor 楼层号]"],
+            "examples": ["electricity 东苑26 638", "electricity 东苑26638照明", "electricity 顺河15345空调"],
+            "tips": ["金明和明伦已确认分表的楼栋默认查双表。龙子湖查官方目录的单项读数，表型待确认。",
+                     "已确认分表的楼栋支持楼号接房号，例如 26638。",
+                     "查不到或多处匹配时会给出宿舍候选，复制电费命令重查。"],
         }
 
     if normalized == "preferences":
@@ -615,7 +638,7 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
     if spec.is_help:
         topic = spec.help_topic
         if not topic:
-            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help yunfz"]
+            return ["help account", "help schedule", "help course", "help library", "help seminar", "help empty_classroom", "help resource", "help electricity", "help yunfz"]
         if topic == "account":
             return ["account status", "help account set"]
         if topic == "schedule":
@@ -638,6 +661,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
             return ["empty_classroom query --week 1 --day-of-week 1 --period 1", "empty_classroom campuses"]
         if topic == "resource":
             return ["resource search 十号楼101", "resource stats"]
+        if topic == "electricity":
+            return ["electricity 东苑26 638"]
         if topic == "yunfz":
             return ["yunfz leave list", "yunfz signin list", "yunfz checksleep list"]
         if topic == "yuketang":
@@ -650,6 +675,8 @@ def build_next_commands(spec: CliCommandSpec, result: dict[str, Any] | None = No
 
     resolved_tool = spec.resolved_tool or ""
     success = bool(result.get("success")) if isinstance(result, dict) else False
+    if resolved_tool == "electricity_query":
+        return ["electricity 东苑26 638", "help electricity"] if success else ["help electricity"]
     if resolved_tool == "grade_query":
         commands = ["grade list", "grade gpa"]
         if isinstance(result, dict) and result.get("has_next"):

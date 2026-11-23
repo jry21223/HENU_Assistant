@@ -1,0 +1,11 @@
+{
+  "serial": "emulator-5580",
+  "avd": "wmxy30",
+  "disk_free_gib": 22.49,
+  "sys.boot_completed": "1",
+  "ro.build.version.sdk": "30",
+  "ro.product.cpu.abi": "arm64-v8a",
+  "ro.build.type": "userdebug",
+  "ro.debuggable": "1",
+  "uid": "2000"
+}

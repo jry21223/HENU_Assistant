@@ -550,3 +550,228 @@ def test_runtime_restart_during_a_prepared_map_has_an_explicit_fallback(harness)
         assert ctx.event.reply and '已过期' in ctx.event.reply[0]['text']
         assert '已展示' not in ctx.event.reply[0]['text']
     asyncio.run(run())
+
+
+def test_electricity_never_queues_or_blocks_another_users_schedule(harness, monkeypatch, tmp_path):
+    from threading import Event
+
+    from campus_core import electricity_client
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+    from henu_plugin.storage_adapter import PluginStorageAdapter
+
+    started, release = Event(), Event()
+    storage_users = []
+    load_all = PluginStorageAdapter.load_all
+
+    async def track_storage(adapter):
+        storage_users.append(adapter._storage_key)
+        return await load_all(adapter)
+
+    def query(path, address, **kwargs):
+        started.set()
+        assert release.wait(4)
+        return [{"campus": "示例", "building": "示例苑", "room": "101",
+                 "meter": "lighting", "quantity": 12, "unit": "度"}]
+
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "context.json"))
+    monkeypatch.setattr(electricity_client, "query_saved", query)
+    monkeypatch.setattr(PluginStorageAdapter, "_shared_temp_dir", tmp_path)
+    monkeypatch.setattr(PluginStorageAdapter, "load_all", track_storage)
+    service = HardenedHenuPluginService(tmp_path)
+    service._tool_dispatch["schedule_query"] = lambda params: week_payload()
+    h = harness
+    h.plugin.service = service
+    bob = Session(launcher_type=LauncherTypes.PERSON, launcher_id="bob", sender_id="bob")
+    h.variables[2] = h.variables[3] = {"henu_sender_id": "bob", "henu_launcher_id": "bob"}
+
+    async def run():
+        command = {"command": "electricity 示例苑12 101照明"}
+        first = asyncio.create_task(h.tool.call(command, h.session, 1))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            assert storage_users == []
+            busy = await asyncio.wait_for(h.tool.call(command, bob, 2), 1)
+            assert busy["error_code"] == "electricity_busy"
+            schedule = await asyncio.wait_for(h.tool.call({"command": "schedule week"}, bob, 3), 1)
+            assert schedule["success"]
+            assert storage_users == ["bob"]
+        finally:
+            release.set()
+            result = await first
+        assert result["success"] and "12 度" in result["reply_text"]
+
+    asyncio.run(run())
+
+
+def test_electricity_timeout_keeps_worker_slot_until_it_exits(harness, monkeypatch, tmp_path):
+    from threading import Event
+
+    from campus_core import electricity_client
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    started, release = Event(), Event()
+
+    def slow_query(path, address, **kwargs):
+        started.set()
+        assert release.wait(4)
+        return [{"campus": "示例", "building": "示例苑", "room": "101",
+                 "meter": "lighting", "quantity": 12, "unit": "度"}]
+
+    monkeypatch.setattr(service_module, "_ELECTRICITY_QUERY_SECONDS", 0.1)
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "context.json"))
+    monkeypatch.setattr(electricity_client, "query_saved", slow_query)
+    h = harness
+    h.plugin.service = HardenedHenuPluginService(tmp_path)
+
+    async def run():
+        command = {"command": "electricity 示例苑12 101照明"}
+        try:
+            result = await h.tool.call(command, h.session, 1)
+            assert started.is_set() and result["error_code"] == "electricity_timeout"
+            result = await h.tool.call(command, h.session, 2)
+            assert result["error_code"] == "electricity_busy"
+        finally:
+            release.set()
+            # A sentinel runs after the electricity worker's done callbacks.
+            await asyncio.wrap_future(service_module._ELECTRICITY_WORKER.submit(lambda: None))
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("text", "kind", "sender", "expected"), [
+    ("电费 示例苑12 101照明", "person", "alice", "12 度"),
+    ("帮我查示例苑12栋101室电量", "person", "alice", "12 度"),
+    ("帮我查示例苑12栋101室电量", "group", "alice", "请在私聊"),
+    ("电费 示例苑12 101照明", "person", "", "无法确认"),
+    ("帮我查示例苑12栋101室电量，再看看课表", "person", "alice", None),
+])
+def test_electricity_normal_message_bypasses_storage_and_model(harness, monkeypatch, tmp_path,
+                                                               text, kind, sender, expected):
+    from langbot_plugin.api.entities import events
+
+    from campus_core import electricity_client
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    query = Mock(return_value=[{"campus": "示例", "building": "示例苑12栋", "room": "101",
+                               "floor": "1层", "meter": "lighting", "quantity": 12, "unit": "度"}])
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    monkeypatch.setattr(electricity_client, "query_saved", query)
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "electricity.json"))
+
+    async def run():
+        harness.plugin.service = HardenedHenuPluginService(tmp_path)
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = harness.plugin
+        await listener.initialize()
+        ctx = harness.context(1, text, sender)
+        ctx.event.text_message = text
+        ctx.event.launcher_type = kind
+        ctx.event.launcher_id = "alice" if kind == "person" else "group"
+        event_type = events.PersonNormalMessageReceived if kind == "person" else events.GroupNormalMessageReceived
+        for handle in listener.registered_handlers[event_type]:
+            await handle(ctx)
+            if ctx.prevent_postorder.called:
+                break
+        harness.plugin.get_plugin_storage.assert_not_awaited()
+        harness.plugin.set_plugin_storage.assert_not_awaited()
+        if expected is None:
+            ctx.prevent_default.assert_not_called()
+            ctx.reply.assert_not_called()
+        else:
+            ctx.prevent_default.assert_called_once()
+            ctx.prevent_postorder.assert_called_once()
+            assert expected in ctx.reply.call_args.args[0].root[0].text
+        if expected == "12 度":
+            assert "1层 101室" in ctx.reply.call_args.args[0].root[0].text
+            assert query.call_count == 1
+            assert query.call_args.kwargs["deadline"] is not None
+        else:
+            query.assert_not_called()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("status", "reason", "failure_step"), [
+    (429, "限制请求频率", "pay"),
+    (500, "服务内部故障", "pay"),
+    (502, "网关收到无效的后端响应", "redirect"),
+    (503, "服务暂不可用", "pay"),
+    (504, "网关等待后端响应超时", "verify"),
+    (599, "上游服务出错", "pay"),
+    (None, "未收到 HTTP 状态码", "pay"),
+    (None, "未收到 HTTP 状态码", "verify"),
+    (200, "未返回可用会话", "pay"),
+])
+def test_electricity_exchange_failure_reaches_qq_and_cli_without_token_rotation(
+        harness, monkeypatch, tmp_path, capsys, status, reason, failure_step):
+    import io
+    import sys
+
+    import httpx
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    path = tmp_path / "electricity.json"
+    saved = {
+        "cookie": "SESSION=synthetic-old", "referer": ec.ORIGIN + "/CloudPayment/bill/selectPayProject.do",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "session_id": "synthetic-session", "login_token": "synthetic-token", "user_id": "synthetic-user",
+        "login_name": "synthetic-name", "device_id": "synthetic-device",
+    }
+    atomic_write_json(path, saved)
+    before = path.read_bytes()
+    stages = []
+    def handle(request):
+        if request.url.path == "/CloudPayment/user/checkRoomCount.do":
+            if "SESSION=fresh" not in request.headers["Cookie"]:
+                return httpx.Response(200, json={"returncode": "-600", "returnmsg": "idserial为空"})
+            stage = "verify"
+        else:
+            stage = "redirect" if request.url.path == "/confirmed" else "pay"
+        stages.append(stage)
+        if stage == failure_step:
+            if status is None:
+                raise httpx.ReadTimeout("synthetic-private", request=request)
+            return httpx.Response(status, text="synthetic-private")
+        if stage == "pay":
+            return httpx.Response(302, headers={"Location": "/confirmed", "Set-Cookie": "SESSION=fresh; Path=/"})
+        assert stage == "redirect"
+        return httpx.Response(200)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(handle), **kw))
+    refresh = Mock(side_effect=RuntimeError("synthetic-private"))
+    monkeypatch.setattr(ec, "login_and_refresh", refresh)
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(path))
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    harness.plugin.service = HardenedHenuPluginService(tmp_path)
+
+    async def run():
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = harness.plugin
+        ctx = harness.context(1)
+        ctx.event.text_message = "电费 示例苑12 101照明"
+        assert await listener._maybe_handle_electricity(ctx, is_group=False)
+        return ctx.reply.call_args.args[0].root[0].text
+
+    qq_text = asyncio.run(run())
+    monkeypatch.setattr(sys, "stdin", io.StringIO("示例苑12 101照明"))
+    assert ec.main(["--context", str(path)]) == 1
+    cli_text = capsys.readouterr().err
+    assert path.read_bytes() == before
+    refresh.assert_not_called()
+    assert stages == {"pay": ["pay"], "redirect": ["pay", "redirect"],
+                      "verify": ["pay", "redirect", "verify"]}[failure_step] * 2
+    for text in (qq_text, cli_text):
+        assert "刷新电费登录态" in text and reason in text and "稍后再试" in text
+        if status is not None:
+            assert f"HTTP {status}" in text
+        assert "synthetic-" not in text

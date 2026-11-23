@@ -1,0 +1,1 @@
+11-17 13:58:39.487  4913  4913 E AndroidRuntime: javax.net.ssl.SSLHandshakeException: java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.
