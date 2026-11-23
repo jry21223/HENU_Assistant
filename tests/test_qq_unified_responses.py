@@ -638,3 +638,57 @@ def test_electricity_timeout_keeps_worker_slot_until_it_exits(harness, monkeypat
             await asyncio.wrap_future(service_module._ELECTRICITY_WORKER.submit(lambda: None))
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(("text", "kind", "sender", "expected"), [
+    ("电费 示例苑12 101照明", "person", "alice", "12 度"),
+    ("帮我查示例苑12栋101室电量", "person", "alice", "12 度"),
+    ("帮我查示例苑12栋101室电量", "group", "alice", "请在私聊"),
+    ("电费 示例苑12 101照明", "person", "", "无法确认"),
+    ("帮我查示例苑12栋101室电量，再看看课表", "person", "alice", None),
+])
+def test_electricity_normal_message_bypasses_storage_and_model(harness, monkeypatch, tmp_path,
+                                                               text, kind, sender, expected):
+    from langbot_plugin.api.entities import events
+
+    from campus_core import electricity_client
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    query = Mock(return_value=[{"campus": "示例", "building": "示例苑12栋", "room": "101",
+                               "floor": "1层", "meter": "lighting", "quantity": 12, "unit": "度"}])
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    monkeypatch.setattr(electricity_client, "query_saved", query)
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "electricity.json"))
+
+    async def run():
+        harness.plugin.service = HardenedHenuPluginService(tmp_path)
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = harness.plugin
+        await listener.initialize()
+        ctx = harness.context(1, text, sender)
+        ctx.event.text_message = text
+        ctx.event.launcher_type = kind
+        ctx.event.launcher_id = "alice" if kind == "person" else "group"
+        event_type = events.PersonNormalMessageReceived if kind == "person" else events.GroupNormalMessageReceived
+        for handle in listener.registered_handlers[event_type]:
+            await handle(ctx)
+            if ctx.prevent_postorder.called:
+                break
+        harness.plugin.get_plugin_storage.assert_not_awaited()
+        harness.plugin.set_plugin_storage.assert_not_awaited()
+        if expected is None:
+            ctx.prevent_default.assert_not_called()
+            ctx.reply.assert_not_called()
+        else:
+            ctx.prevent_default.assert_called_once()
+            ctx.prevent_postorder.assert_called_once()
+            assert expected in ctx.reply.call_args.args[0].root[0].text
+        if expected == "12 度":
+            assert query.call_count == 1
+            assert query.call_args.kwargs["deadline"] is not None
+        else:
+            query.assert_not_called()
+
+    asyncio.run(run())

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.provider import message as provider_message
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
+from campus_core.electricity_meter import MeterLookupError, parse_meter_text
 from components.event_listener.identity_capture import IdentityCaptureListener
 from henu_plugin.account_login import AccountLoginCoordinator
 from henu_plugin.cli import inspect_cli_command
@@ -94,11 +96,13 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
 
         @self.handler(events.PersonNormalMessageReceived)
         async def on_private_sensitive_command(ctx: context.EventContext):
-            await self._maybe_handle_sensitive_command(ctx, is_group=False)
+            if not await self._maybe_handle_electricity(ctx, is_group=False):
+                await self._maybe_handle_sensitive_command(ctx, is_group=False)
 
         @self.handler(events.GroupNormalMessageReceived)
         async def on_group_sensitive_command(ctx: context.EventContext):
-            await self._maybe_handle_sensitive_command(ctx, is_group=True)
+            if not await self._maybe_handle_electricity(ctx, is_group=True):
+                await self._maybe_handle_sensitive_command(ctx, is_group=True)
 
         @self.handler(events.NormalMessageResponded)
         async def on_campus_reply(ctx: context.EventContext):
@@ -264,6 +268,45 @@ class SafeIdentityCaptureListener(IdentityCaptureListener):
                 "Use henu_cli for campus data; external writes require a later user confirmation token.",
             ]
         )
+
+    async def _maybe_handle_electricity(self, ctx: context.EventContext, *, is_group: bool) -> bool:
+        event = ctx.event
+        text = str(getattr(event, "text_message", "") or "").strip()
+        spec = inspect_cli_command(text)
+        address = None
+        if spec.resolved_tool != "electricity_query":
+            phrase = re.fullmatch(r"(?:帮我查|查询|查)\s*(.+?)(?:的)?(?:电量|电费)", text)
+            if phrase is None:
+                return False
+            try:
+                address = parse_meter_text(phrase[1])
+            except MeterLookupError:
+                return False
+            spec = inspect_cli_command(f"electricity {phrase[1]}")
+            if spec.resolved_tool != "electricity_query":
+                return False
+
+        ctx.prevent_default()
+        ctx.prevent_postorder()
+        if is_group:
+            await ctx.reply(card_chain("请在私聊中查询电量。"))
+            return True
+        launcher = str(getattr(event, "launcher_id", "") or "").strip()
+        sender = str(getattr(event, "sender_id", "") or "").strip()
+        if {launcher, sender} & {"", "0", "unknown", "None"}:
+            await ctx.reply(card_chain("无法确认当前私聊身份。"))
+            return True
+        service = getattr(self.plugin, "service", None)
+        if service is None:
+            await ctx.reply(card_chain("电费服务暂不可用，请稍后再试。"))
+            return True
+
+        session = provider_session.Session(
+            launcher_type=provider_session.LauncherTypes.PERSON, launcher_id=launcher, sender_id=sender,
+        )
+        result = await service.run_electricity_cli(spec, session, {}, address=address)
+        await ctx.reply(card_chain(str(result.get("reply_text") or result.get("msg") or "电费查询暂时失败。")))
+        return True
 
     async def _maybe_handle_sensitive_command(
         self,

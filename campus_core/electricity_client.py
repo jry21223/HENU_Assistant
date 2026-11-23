@@ -434,7 +434,7 @@ def _query_once(context: dict, address: dict | MeterAddress, deadline: float | N
     return outcomes, cookie
 
 
-def query_saved(path: Path, address: dict | str, *, auto_refresh: bool = True,
+def query_saved(path: Path, address: dict | str | MeterAddress, *, auto_refresh: bool = True,
                 deadline: float | None = None) -> list[dict]:
     """用私有上下文文件查询；会话过期时先 pay.do 换票重试一次，有读数时回写 Cookie。"""
     if isinstance(address, str):

@@ -1007,7 +1007,8 @@ class HenuPluginService:
         )
 
     async def run_electricity_cli(self, spec: CliCommandSpec, session: provider_session.Session,
-                                  identity_hint: dict[str, Any]) -> dict[str, Any]:
+                                  identity_hint: dict[str, Any], *,
+                                  address: electricity_client.MeterAddress | None = None) -> dict[str, Any]:
         identity = self._resolve_identity(session, identity_hint)
         if identity.launcher_type != "person":
             return {"success": False, "error_code": "private_reply_required", "msg": "请在私聊中查询电量。"}
@@ -1017,7 +1018,7 @@ class HenuPluginService:
         deadline = time.monotonic() + _ELECTRICITY_QUERY_SECONDS
         try:
             future = _ELECTRICITY_WORKER.submit(
-                self._electricity_query, spec.params, deadline=deadline, openid=identity.qq,
+                self._electricity_query, spec.params, deadline=deadline, openid=identity.qq, address=address,
             )
         except RuntimeError:
             _ELECTRICITY_SLOT.release()
@@ -1033,7 +1034,7 @@ class HenuPluginService:
         return self._cli_result(spec, result, redact_cli_command(spec.raw))
 
     def _electricity_query(self, params: dict[str, Any], *, deadline: float | None = None,
-                           openid: str = "") -> dict[str, Any]:
+                           openid: str = "", address: electricity_client.MeterAddress | None = None) -> dict[str, Any]:
         path = _electricity_context_path()
         if path is None:
             return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
@@ -1041,7 +1042,7 @@ class HenuPluginService:
         if openid and _ELECTRICITY_COOLDOWN.get(openid):
             return {"success": False, "msg": "查询太快，请 10 秒后再试。"}
         try:
-            outcomes = electricity_client.query_saved(path, _text(params.get("text")), deadline=deadline)
+            outcomes = electricity_client.query_saved(path, address or _text(params.get("text")), deadline=deadline)
         except electricity_client.ElectricityLookupError as exc:
             lines = [str(exc)]
             lines += [f"{index}. {candidate.command_text}"
