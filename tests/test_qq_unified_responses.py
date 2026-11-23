@@ -692,3 +692,85 @@ def test_electricity_normal_message_bypasses_storage_and_model(harness, monkeypa
             query.assert_not_called()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(("status", "reason", "failure_step"), [
+    (429, "限制请求频率", "pay"),
+    (500, "服务内部故障", "pay"),
+    (502, "网关收到无效的后端响应", "redirect"),
+    (503, "服务暂不可用", "pay"),
+    (504, "网关等待后端响应超时", "verify"),
+    (599, "上游服务出错", "pay"),
+    (None, "未收到 HTTP 状态码", "pay"),
+    (None, "未收到 HTTP 状态码", "verify"),
+    (200, "未返回可用会话", "pay"),
+])
+def test_electricity_exchange_failure_reaches_qq_and_cli_without_token_rotation(
+        harness, monkeypatch, tmp_path, capsys, status, reason, failure_step):
+    import io
+    import sys
+
+    import httpx
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+    from components.event_listener.identity_capture_safe import SafeIdentityCaptureListener
+    from henu_plugin import service as service_module
+    from henu_plugin.hardened_service import HardenedHenuPluginService
+
+    path = tmp_path / "electricity.json"
+    saved = {
+        "cookie": "SESSION=synthetic-old", "referer": ec.ORIGIN + "/CloudPayment/bill/selectPayProject.do",
+        "schoolcode": "school", "payProId": "project", "businesstype": "electricity",
+        "session_id": "synthetic-session", "login_token": "synthetic-token", "user_id": "synthetic-user",
+        "login_name": "synthetic-name", "device_id": "synthetic-device",
+    }
+    atomic_write_json(path, saved)
+    before = path.read_bytes()
+    stages = []
+    def handle(request):
+        if request.url.path == "/CloudPayment/user/checkRoomCount.do":
+            if "SESSION=fresh" not in request.headers["Cookie"]:
+                return httpx.Response(200, json={"returncode": "-600", "returnmsg": "idserial为空"})
+            stage = "verify"
+        else:
+            stage = "redirect" if request.url.path == "/confirmed" else "pay"
+        stages.append(stage)
+        if stage == failure_step:
+            if status is None:
+                raise httpx.ReadTimeout("synthetic-private", request=request)
+            return httpx.Response(status, text="synthetic-private")
+        if stage == "pay":
+            return httpx.Response(302, headers={"Location": "/confirmed", "Set-Cookie": "SESSION=fresh; Path=/"})
+        assert stage == "redirect"
+        return httpx.Response(200)
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(handle), **kw))
+    refresh = Mock(side_effect=RuntimeError("synthetic-private"))
+    monkeypatch.setattr(ec, "login_and_refresh", refresh)
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(path))
+    monkeypatch.setattr(service_module, "_ELECTRICITY_COOLDOWN", service_module.TTLCache(default_ttl=10))
+    harness.plugin.service = HardenedHenuPluginService(tmp_path)
+
+    async def run():
+        listener = SafeIdentityCaptureListener()
+        listener.plugin = harness.plugin
+        ctx = harness.context(1)
+        ctx.event.text_message = "电费 示例苑12 101照明"
+        assert await listener._maybe_handle_electricity(ctx, is_group=False)
+        return ctx.reply.call_args.args[0].root[0].text
+
+    qq_text = asyncio.run(run())
+    monkeypatch.setattr(sys, "stdin", io.StringIO("示例苑12 101照明"))
+    assert ec.main(["--context", str(path)]) == 1
+    cli_text = capsys.readouterr().err
+    assert path.read_bytes() == before
+    refresh.assert_not_called()
+    assert stages == {"pay": ["pay"], "redirect": ["pay", "redirect"],
+                      "verify": ["pay", "redirect", "verify"]}[failure_step] * 2
+    for text in (qq_text, cli_text):
+        assert "刷新电费登录态" in text and reason in text and "稍后再试" in text
+        if status is not None:
+            assert f"HTTP {status}" in text
+        assert "synthetic-" not in text

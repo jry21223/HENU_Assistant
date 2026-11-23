@@ -66,6 +66,10 @@ class ElectricityAuthError(ElectricityError):
     pass
 
 
+class ElectricityExpiredError(ElectricityAuthError):
+    """官方选房接口明确认定会话过期。"""
+
+
 class ElectricityAccessDenied(ElectricityError):
     """服务端暂未允许选房或额度受限；不是登录失效，不要触发 token 轮换。"""
 
@@ -107,15 +111,23 @@ def _session_headers(cookie: str, referer: str) -> dict[str, str]:
     return {"Cookie": cookie, "Referer": referer, "X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
 
 
-def _get_json(http: httpx.Client, url: str, params: dict[str, str], headers: dict[str, str]) -> dict:
+def _get_json(http: httpx.Client, url: str, params: dict[str, str], headers: dict[str, str], *,
+              verify_exchange: bool = False) -> dict:
     try:
-        response = http.get(url, params=params, headers=headers, follow_redirects=False)
+        if verify_exchange:
+            response = _exchange_get(http, url, params=params, headers=headers, follow_redirects=False)
+        else:
+            response = http.get(url, params=params, headers=headers, follow_redirects=False)
     except httpx.TimeoutException:
         raise ElectricityNetworkError("电量查询超时。") from None
     except httpx.DecodingError:
         raise ElectricityProtocolError("无法解码云缴费响应。") from None
     except httpx.RequestError:
         raise ElectricityNetworkError("无法连接云缴费查询接口。") from None
+    if verify_exchange and response.status_code != 200:
+        raise ElectricityProtocolError(
+            f"刷新电费登录态失败（HTTP {response.status_code}）。上游未返回选房验证结果，请稍后再试。"
+        )
     if response.status_code in (401, 403):
         raise ElectricityAuthError(f"云缴费会话需要重新认证或授权（HTTP {response.status_code}）。")
     if response.has_redirect_location:
@@ -191,13 +203,13 @@ def _building_aliases(campus: str, building: str, aliases: dict[str, dict[str, s
     return tuple(alias for alias, official in scope.items() if _normalize(official) == numbered[0])
 
 
-def _room_access(http: httpx.Client, context: dict, cookie: str) -> None:
+def _room_access(http: httpx.Client, context: dict, cookie: str, *, verify_exchange: bool = False) -> None:
     """选房权限接口同时是会话是否仍被识别的探针。"""
     access = _get_json(http, ROOM_ACCESS, {"schoolCode": context["schoolcode"]},
-                       _session_headers(cookie, context["referer"]))
+                       _session_headers(cookie, context["referer"]), verify_exchange=verify_exchange)
     # 2026-11-19 实测：会话空闲过期后返回 returncode=-600「idserial为空」。
-    if "idserial" in str(access.get("returnmsg")):
-        raise ElectricityAuthError("云缴费会话已过期，需要重新导入登录态。")
+    if "idserial为空" in str(access.get("returnmsg")):
+        raise ElectricityExpiredError("云缴费会话已过期，需要重新导入登录态。")
     business = access.get("businessData")
     flag = business.get("useFlag") if isinstance(business, dict) else None
     if str(flag) == "0":
@@ -450,7 +462,10 @@ def query_saved(path: Path, address: dict | str | MeterAddress, *, auto_refresh:
         except ElectricityAuthError:
             if not auto_refresh or not context.get("session_id"):
                 raise
-            if not refresh_saved(path, deadline=deadline)["recognized"]:
+            report = refresh_saved(path, deadline=deadline)
+            if not report["recognized"]:
+                if not report.get("session_expired") and report.get("reason"):
+                    raise ElectricityProtocolError(report["reason"]) from None
                 raise
             context = _load_context(path)
             outcomes, cookie = _query_once(context, address, deadline)
@@ -466,13 +481,31 @@ def _drop_cookies(header: str, names: set[str]) -> str:
     )
 
 
+_EXCHANGE_HTTP_REASONS = {
+    401: "上游身份认证未通过",
+    403: "上游拒绝本次请求",
+    429: "上游限制请求频率",
+    500: "上游服务内部故障",
+    502: "网关收到无效的后端响应",
+    503: "上游服务暂不可用",
+    504: "网关等待后端响应超时",
+}
+
+
 def _exchange_get(http: httpx.Client, url, **kwargs) -> httpx.Response:
     try:
-        return http.get(url, **kwargs)
-    except httpx.TimeoutException:
-        raise ElectricityNetworkError("云缴费换票超时。") from None
+        response = http.get(url, **kwargs)
+    except (httpx.TimeoutException, ElectricityNetworkError):
+        raise ElectricityNetworkError("刷新电费登录态超时，未收到 HTTP 状态码，请稍后再试。") from None
+    except httpx.DecodingError:
+        raise ElectricityProtocolError("刷新电费登录态失败，无法解码云缴费响应，请稍后再试。") from None
     except httpx.RequestError:
-        raise ElectricityNetworkError("无法连接云缴费换票接口。") from None
+        raise ElectricityNetworkError("刷新电费登录态失败，无法连接云缴费换票接口，请稍后再试。") from None
+    if response.is_error:
+        code = response.status_code
+        reason = _EXCHANGE_HTTP_REASONS.get(code, "上游服务出错" if response.is_server_error else "上游拒绝本次请求")
+        raise ElectricityProtocolError(f"刷新电费登录态失败（HTTP {code}）。{reason}，请稍后再试。")
+    return response
 
 
 def _exchange_destination(base: httpx.URL, location: str) -> httpx.URL:
@@ -497,7 +530,12 @@ def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) 
     jar = {item.name: item.value for item in http.cookies.jar}
     report = {"page_status": page.status_code, "issued": sorted(jar)}
     if not jar.get("SESSION") or not page.has_redirect_location:
-        return report | {"recognized": False}
+        if page.status_code == 200 and "出错啦" in page.text:
+            return report | {"recognized": False, "session_expired": True,
+                             "reason": "校园会话已失效（HTTP 200），云缴费未接受本次换票。"}
+        return report | {"recognized": False, "reason": (
+            f"刷新电费登录态失败（HTTP {page.status_code}）。上游未返回可用会话，请稍后再试。"
+        )}
     merged = _merge_jar(base, http.cookies.jar)
     current = httpx.URL(PAY_EXCHANGE)
     for _ in range(3):
@@ -509,11 +547,14 @@ def _exchange_cookie(http: httpx.Client, context: dict, session_id: str | None) 
     else:
         raise ElectricityProtocolError("云缴费换票跳转次数超限。")
     if page.status_code != 200 or not any(c.name == "SESSION" and c.value for c in http.cookies.jar):
-        return report | {"recognized": False, "follow_status": page.status_code}
+        return report | {"recognized": False, "follow_status": page.status_code, "reason": (
+            f"刷新电费登录态失败（HTTP {page.status_code}）。上游未返回可用会话，请稍后再试。"
+        )}
     try:
-        _room_access(http, context, merged)
-    except ElectricityAuthError as exc:
-        return report | {"recognized": False, "reason": str(exc)}
+        _room_access(http, context, merged, verify_exchange=True)
+    except ElectricityExpiredError:
+        return report | {"recognized": False, "session_expired": True,
+                         "reason": "换票后的会话未通过选房验证（HTTP 200）。"}
     return report | {"recognized": True, "follow_status": page.status_code, "cookie": merged}
 
 
@@ -523,7 +564,7 @@ def _login_device(context: dict) -> dict:
 
 
 def refresh_saved(path: Path, *, deadline: float | None = None) -> dict:
-    """换票：先用现有 session_id；不可用时用 token 续期得到新会话，再换一次。"""
+    """先用现有 session_id 换票；明确过期时才用 token 续期一次。"""
     with file_transaction(path, timeout=_seconds_left(deadline, 30)):
         context = _load_context(path)
         validate_context(context)
@@ -533,7 +574,9 @@ def refresh_saved(path: Path, *, deadline: float | None = None) -> dict:
             cookie = report.pop("cookie")
             atomic_write_json(path, {**context, "cookie": cookie})
             return report
-        if not all(context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")):
+        if not report.get("session_expired") or not all(
+            context.get(field) for field in ("login_token", "user_id", "login_name", "device_id")
+        ):
             return report
         try:
             # 认证域和两次云缴费换票分别用独立 Cookie jar。

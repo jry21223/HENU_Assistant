@@ -142,7 +142,9 @@ def test_reimport_waits_for_refresh_and_keeps_latest_token(monkeypatch, tmp_path
         return result
 
     monkeypatch.setattr(ec, "login_and_refresh", rotate_token)
-    monkeypatch.setattr(ec, "_exchange_cookie", lambda http, context, session_id: {"recognized": False})
+    monkeypatch.setattr(ec, "_exchange_cookie", lambda http, context, session_id: {
+        "recognized": False, "session_expired": True,
+    })
     monkeypatch.setattr(ec, "_import_curl", parse_import)
     monkeypatch.setattr(sys, "stdin", io.StringIO("synthetic"))
     with ThreadPoolExecutor(max_workers=2) as pool:
