@@ -218,3 +218,14 @@ printf '%s\n' '东苑25 534照明' | "$PY" -B -m campus_core.electricity_client 
   tests/test_electricity_client.py tests/test_electricity_meter.py tests/test_cli_surface.py \
   tests/test_qq_unified_responses.py tests/test_packaged_images.py
 ```
+
+## 2026 年 11 月 23 日简写修复验收
+
+用 `e25160e` 的本地客户端和同一份授权会话，对同一间宿舍各发一笔只读照明查询。比对官方目录电表 ID 确认两种写法读的是同一块表。两笔都在 20 秒预算内返回读数。
+
+| 地址写法 | 耗时 | HTTP 请求总数 | 官方目录请求 |
+| --- | ---: | ---: | ---: |
+| 楼号、房号分开 | 8.89 秒 | 16 | 10 |
+| 楼号、房号连写 | 6.72 秒 | 12 | 10 |
+
+第一笔遇到云缴费 Cookie 过期，自动换票、保存 Cookie 并重查，多发 4 笔会话相关请求。校园 Token 未轮换。实测进程单独使用物理网卡和该网卡配置的 DNS，保留官方 HTTPS 证书校验。系统默认 DNS 路径当时在 TLS 握手阶段中断。QQ 消息入口通过合成事件验收。
