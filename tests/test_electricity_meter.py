@@ -131,3 +131,21 @@ def test_explicit_campus_cannot_match_another_campus_building_with_same_prefix()
     neighbor = FloorDirectory("乙校区", "甲校区测试苑12号公寓", "6层", floor.rooms)
     resolved = resolve_meter_text((neighbor, floor), "甲校区 测试苑12 418照明 --floor 6")
     assert [meter.campus for meter in resolved] == ["甲校区"]
+
+
+def test_compact_address_checks_overlapping_prefixes_and_requires_building_when_none_match():
+    one = FloorDirectory("甲校区", "测试苑1栋", "1层", (
+        RoomOption("one-air", "1101"), RoomOption("one-light", "11101"),
+    ))
+    eleven = FloorDirectory("甲校区", "测试苑11栋", "1层", (
+        RoomOption("eleven-air", "101"), RoomOption("eleven-light", "11101"),
+    ))
+    four = FloorDirectory("甲校区", "测试苑4栋", "1层", (
+        RoomOption("four-air", "11101"), RoomOption("four-light", "411101"),
+    ))
+    with pytest.raises(MeterLookupError, match="匹配多个") as exc:
+        resolve_meter_text((one, eleven, four), "测试苑11101照明", require_pair=True)
+    assert {c.building for c in exc.value.candidates} == {"测试苑1栋", "测试苑11栋"}
+
+    with pytest.raises(MeterLookupError, match="补楼号"):
+        resolve_meter_text((eleven, four), "测试苑999")

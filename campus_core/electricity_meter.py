@@ -101,6 +101,15 @@ class MeterAddress:
             return False
         stem, number = numbered
         return (self.building_number in (None, number) and matches_area(self.place, campus, stem, aliases))
+    def compact_building_prefixes(self, buildings: Sequence[str]) -> set[str]:
+        numbers = [_numbered_building(building) for building in buildings]
+        prefixes = {
+            entry[1] for entry in numbers
+            if entry is not None and len(entry[1]) < len(self.number) and self.number.startswith(entry[1])
+        }
+        if not prefixes and len(buildings) > 1:
+            raise MeterLookupError("该园区有多个楼栋，请补楼号。")
+        return prefixes
 
 
 def parse_meter_text(text: str) -> MeterAddress:
@@ -151,15 +160,22 @@ def _similarity(place: str, names: Sequence[str]) -> float:
 
 
 def _matching_rooms(directory: tuple[FloorDirectory, ...], address: MeterAddress) -> Iterator[tuple[FloorDirectory, str]]:
+    entries = tuple(
+        entry for entry in directory if address.matches_building(entry.campus, entry.building, entry.aliases)
+    )
+    prefixes = set()
+    if address.building_number is None:
+        buildings = dict.fromkeys((_normalize(entry.campus), _building(entry.building)) for entry in entries)
+        prefixes = address.compact_building_prefixes([building for _, building in buildings])
     seen = set()
-    for entry in directory:
-        if not address.matches_building(entry.campus, entry.building, entry.aliases):
-            continue
+    for entry in entries:
         if address.floor is not None and _floor(entry.floor) != address.floor:
             continue
         building = _numbered_building(entry.building)
         assert building is not None  # matches_building() requires a numbered building.
         _, prefix = building
+        if prefixes and prefix not in prefixes:
+            continue
         labels = [_room_label(item.name) for item in entry.rooms]
         room = address.number
         if address.building_number:

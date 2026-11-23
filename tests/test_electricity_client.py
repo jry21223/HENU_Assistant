@@ -246,7 +246,7 @@ def test_cli_shunhe_uses_live_directory(monkeypatch, tmp_path, capsys, text, met
         )
     assert PRIVATE not in output and "-from-server" not in output
     assert tuple(queried) == meters
-    assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 5), *([ROOM_STATE] * len(meters))]
+    assert requests == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), *([ROOM_STATE] * len(meters))]
 
 
 def test_cli_reports_expired_session_from_room_access(monkeypatch, tmp_path, capsys):

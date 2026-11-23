@@ -246,6 +246,10 @@ def _official_directory(http: httpx.Client, address: dict | MeterAddress, contex
                 nicknames = _building_aliases(campus.name, building.name, aliases)
                 if address.matches_building(campus.name, building.name, nicknames):
                     candidates.append((campus, building, nicknames))
+        if address.building_number is None:
+            prefixes = address.compact_building_prefixes([building.name for _, building, _ in candidates])
+            if prefixes:
+                candidates = [row for row in candidates if _numbered_building(row[1].name)[1] in prefixes]
         requested_floor = address.floor
     else:
         campus_key = _normalize(address["campus"]).removesuffix("校区")
