@@ -37,8 +37,9 @@ ROOM_FIELDS = {"businesstype", "payProId", "roomverify", "schoolcode"}
 ADDRESS_FIELDS = {"campus", "building", "room"}
 PROJECT_FIELDS = {"schoolcode", "payProId", "businesstype"}
 CONTEXT_FIELDS = PROJECT_FIELDS | {"cookie", "referer"}
-CONTEXT_EXTRAS = {"directory", "session_id", "custom_id", "login_token", "user_id", "login_name",
+RENEWAL_FIELDS = {"session_id", "custom_id", "login_token", "user_id", "login_name",
                   "device_id", "device_model", "device_product", "device_release"}
+CONTEXT_EXTRAS = RENEWAL_FIELDS | {"directory"}
 
 # httpx 的 INFO 请求日志含完整 URL，云缴费查询参数里有电表 ID，不进宿主日志。
 logging.getLogger("httpx").addFilter(lambda record: ORIGIN not in str(record.args))
@@ -605,7 +606,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--context", type=Path, help="含有效授权会话及缴费项目的私有 JSON 文件")
     parser.add_argument("--import-curl", action="store_true", help="从标准输入的 getRoomState.do cURL 写入 --context")
     parser.add_argument("--refresh", action="store_true", help="用上下文里的长寿命 Cookie 尝试换发新会话")
+    parser.add_argument("--keep-renewal", action="store_true", help="重导入同一账号时保留原生续期信息")
     args = parser.parse_args(argv)
+    if args.keep_renewal and (not args.import_curl or args.refresh):
+        parser.error("--keep-renewal 只用于 --import-curl")
     if args.refresh:
         try:
             if args.context is None:
@@ -627,7 +631,12 @@ def main(argv: list[str] | None = None) -> int:
             with file_transaction(args.context):
                 if args.context.exists():
                     previous = _load_context(args.context)
-                    if any(previous.get(key) != context[key] for key in PROJECT_FIELDS):
+                    cookie_changed = previous.get("cookie") != context["cookie"]
+                    school_changed = previous.get("schoolcode") != context["schoolcode"]
+                    if school_changed or (cookie_changed and not args.keep_renewal):
+                        for field in RENEWAL_FIELDS:
+                            previous.pop(field, None)
+                    if cookie_changed or any(previous.get(key) != context[key] for key in PROJECT_FIELDS):
                         previous.pop("directory", None)
                     context = {**previous, **context}
                 atomic_write_json(args.context, context)

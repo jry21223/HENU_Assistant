@@ -437,11 +437,11 @@ def test_cli_import_curl_saves_private_context(monkeypatch, tmp_path, capsys):
     }
     assert PRIVATE not in "".join(capsys.readouterr())
 
-    # 重新导入只换会话，保留已有目录快照。
+    # 重新导入不同会话时废弃原目录快照。
     context.write_text(json.dumps({**data, "cookie": "OLD=1", "directory": []}), encoding="utf-8")
     monkeypatch.setattr(sys, "stdin", io.StringIO(CURL))
     assert main(["--context", str(context), "--import-curl"]) == 0
-    assert json.loads(context.read_text(encoding="utf-8")) == {**data, "directory": []}
+    assert json.loads(context.read_text(encoding="utf-8")) == data
 
     monkeypatch.setattr(sys, "stdin", io.StringIO(CURL.replace("getRoomState", "getRoom")))
     assert main(["--context", str(context), "--import-curl"]) == 1

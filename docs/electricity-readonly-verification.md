@@ -55,7 +55,7 @@ printf '%s\n' '{"campus":"金明","building":"东苑26栋","room":"638","meter":
 本地 AVD 只负责取得会话。服务器读取私有上下文文件后直接发 HTTP 请求，不运行 AVD。
 
 1. 在本地 AVD 的官方 App「用电支出」查询一间已授权房间。Chrome 打开 `chrome://inspect`，进入该 WebView 的 DevTools → Network，右键 `getRoomState.do`，选 Copy → Copy as cURL (bash)。
-2. 经剪贴板管道导入，命令不进 shell 历史。生成的文件权限为 `0600`；重新导入替换会话和项目字段。学校、缴费项目或业务类型变化时清除旧 `directory`。
+2. 经剪贴板管道导入，命令不进 shell 历史。生成的文件权限为 `0600`；重新导入替换会话和项目字段。Cookie 变化时默认清除旧续期信息，确认是同一账号才加 `--keep-renewal`。换学校始终清除续期信息。Cookie、学校、缴费项目或业务类型变化时清除旧目录。
 
    ```bash
    pbpaste | python -m campus_core.electricity_client --import-curl \

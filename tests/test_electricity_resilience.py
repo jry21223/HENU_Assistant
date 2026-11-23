@@ -137,7 +137,7 @@ def test_reimport_waits_for_refresh_and_keeps_latest_token(monkeypatch, tmp_path
         return {**_context(), "cookie": "SESSION=imported"}
 
     def import_context():
-        result = ec.main(["--context", str(path), "--import-curl"])
+        result = ec.main(["--context", str(path), "--import-curl", "--keep-renewal"])
         imported.set()
         return result
 
@@ -205,3 +205,41 @@ def test_exchange_origin_policy_and_same_origin_hop_limit():
         with pytest.raises(ElectricityProtocolError, match="跳转次数超限"):
             _exchange_cookie(http, _context(), "synthetic-session")
     assert len(requests) == 4
+
+
+@pytest.mark.parametrize(("overrides", "keep_option", "keeps_renewal", "keeps_directory"), [
+    ({}, False, True, True),
+    ({"cookie": "SESSION=other"}, False, False, False),
+    ({"cookie": "SESSION=same-account"}, True, True, False),
+    ({"schoolcode": "new-school"}, True, False, False),
+    ({"cookie": "SESSION=same-account", "payProId": "new-project"}, True, True, False),
+    ({"businesstype": "new-business"}, False, True, False),
+])
+def test_reimport_separates_credentials_and_cached_directory(monkeypatch, tmp_path, overrides,
+                                                            keep_option, keeps_renewal, keeps_directory):
+    import io
+    import sys
+
+    from campus_core import electricity_client as ec
+    from campus_core.atomic_io import atomic_write_json
+
+    path = tmp_path / "context.json"
+    credentials = {
+        "login_token": "old-token", "session_id": "old-session", "custom_id": "old-customer",
+        "user_id": "old-user", "login_name": "old-name", "device_id": "old-device",
+        "device_model": "old-model", "device_product": "old-product", "device_release": "old-release",
+    }
+    atomic_write_json(path, {**_context(), **credentials, "directory": []})
+    new_context = {**_context(), **overrides}
+    monkeypatch.setattr(ec, "_import_curl", lambda text: new_context)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("synthetic cURL"))
+    args = ["--import-curl", "--context", str(path)]
+    if keep_option:
+        args.append("--keep-renewal")
+    assert ec.main(args) == 0
+    expected = new_context.copy()
+    if keeps_renewal:
+        expected.update(credentials)
+    if keeps_directory:
+        expected["directory"] = []
+    assert ec._load_context(path) == expected
