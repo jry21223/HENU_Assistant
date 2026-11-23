@@ -107,7 +107,41 @@ def test_service_reply_lists_candidates(monkeypatch, tmp_path):
     monkeypatch.setattr(electricity_client, "query_saved", fake_query)
     result = HenuPluginService(tmp_path)._henu_cli({"command": "电费 东区26 638"})
     assert result["success"] is False
-    assert "1. 金明 东苑26 638" in result["reply_text"]
-    assert "2. 金明 东苑25 638" in result["reply_text"]
+    assert "电费 金明 东苑26 638" in result["reply_text"]
+    assert "电费 金明 东苑25 638" in result["reply_text"]
     assert [item["command_text"] for item in result["candidates"]] == [
         "金明 东苑26 638", "金明 东苑25 638"]
+
+
+@pytest.mark.parametrize(("meter", "types"), [("lighting", ["lighting"]), ("both", ["aircon", "lighting"])])
+def test_json_floor_candidates_can_be_repeated_as_text(meter, types):
+    from campus_core.electricity_client import ROOM_STATE
+
+    context = {**_context(), "directory": [
+        {"campus": "甲校区", "building": "测试苑12栋", "floor": f"{floor}层", "rooms": [
+            {"id": f"air-{floor}", "name": "418房间"},
+            {"id": f"light-{floor}", "name": "12418房间"},
+        ]} for floor in (6, 7)
+    ]}
+    seen = []
+
+    def handle(request):
+        assert request.url.path == httpx.URL(ROOM_STATE).path
+        seen.append(request.url.params["roomverify"])
+        return httpx.Response(200, json={"returncode": "100", "quantity": "12", "quantityunit": "度"})
+
+    with _client(handle) as http:
+        with pytest.raises(ElectricityLookupError, match="补楼层") as exc:
+            query_address(http, {"campus": "甲", "building": "测试苑12栋", "room": "418", "meter": meter},
+                          context=context)
+        assert seen == []
+        choices = exc.value.candidates
+        assert [(choice.floor, choice.room, choice.meter) for choice in choices] == [
+            ("6层", "418", meter), ("7层", "418", meter),
+        ]
+        for choice in choices:
+            readings = query_address(http, choice.command_text, context=context)
+            assert [reading["meter"] for reading in readings] == types
+            assert {reading["floor"] for reading in readings} == {choice.floor}
+    expected = ["light"] if meter == "lighting" else ["air", "light"]
+    assert seen == [f"{label}-{floor}" for floor in (6, 7) for label in expected]

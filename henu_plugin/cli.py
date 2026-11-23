@@ -231,7 +231,7 @@ def build_help_payload(topic: str) -> dict[str, Any]:
             "commands": ["electricity <园区楼号 房号>[空调|照明] [--floor 楼层号]"],
             "examples": ["electricity 东苑26 638", "electricity 东苑26638照明", "electricity 顺河15345空调"],
             "tips": ["未指定表型时空调、照明都查。", "照明表也可写成楼号接房号，例如 26638。",
-                     "查不到或多处匹配时会给出最接近的宿舍候选，回复编号即可。"],
+                     "查不到或多处匹配时会给出宿舍候选，复制电费命令重查。"],
         }
 
     if normalized == "preferences":

@@ -88,7 +88,7 @@ def _area(value: str) -> str:
 class MeterAddress:
     place: str
     number: str
-    meter: Literal["aircon", "lighting"] | None
+    meter: Literal["aircon", "lighting", "both"] | None
     building_number: str | None = None
     floor: str | None = None
     campus: str | None = None
@@ -129,13 +129,13 @@ def parse_meter_text(text: str) -> MeterAddress:
     match = re.fullmatch(
         r"([^0-9]+)(?:([0-9]+)(?: |号(?:公寓|宿舍|楼|栋)?|栋|幢))?"
         r"([0-9]+)(?:房间|房|室)?"
-        r"(?:(?:的)?(?:(空调|照明)(?:电量|电费|电|表)?|空调和照明|照明和空调|两块都查|都查))?",
+        r"(?:(?:的)?(?:(空调|照明)(?:电量|电费|电|表)?|(空调和照明|照明和空调|两块都查|都查)))?",
         address,
     )
     if not match:
         raise MeterLookupError("请提供园区和房间编号。")
-    place, building_number, number, meter = match.groups()
-    kind = {"空调": "aircon", "照明": "lighting"}.get(meter)
+    place, building_number, number, meter, both = match.groups()
+    kind = "both" if both else {"空调": "aircon", "照明": "lighting"}.get(meter)
     return MeterAddress(_area(place), number, kind, building_number, floor_number, campus)
 
 
@@ -201,7 +201,7 @@ def _matching_rooms(directory: tuple[FloorDirectory, ...], address: MeterAddress
 
 def _candidate(campus: str, building: str, room: str, meter: str | None, floor: str | None = None) -> LookupCandidate:
     campus_label = _normalize(campus).removesuffix("校区") + "校区"
-    suffix = {"lighting": "照明", "aircon": "空调"}.get(meter, "")
+    suffix = {"lighting": "照明", "aircon": "空调", "both": "空调和照明"}.get(meter, "")
     command = f"{campus_label} {_building(building)} {room}{suffix}"
     if floor is not None:
         command += f" --floor {_floor(floor)}"
@@ -309,13 +309,19 @@ def resolve_meters(
                     raise MeterLookupError("官方目录未提供电表 ID。")
                 options[kind] = ResolvedMeter(kind, entry.campus, entry.building, entry.floor, room_number, option.name, option.id)
         if options:
-            matches.append(options)
+            matches.append((entry, options))
 
     if not matches:
         raise MeterLookupError("官方目录里没有匹配的房间或电表。", reason="no_match")
     if len(matches) > 1:
-        raise MeterLookupError("多个楼层有匹配项，请补楼层。", reason="ambiguous")
-    options = matches[0]
+        if len({_floor(entry.floor) for entry, _ in matches}) != len(matches):
+            raise MeterLookupError("官方目录有重复电表项，请核对房间。")
+        candidates = tuple(
+            _candidate(entry.campus, entry.building, room_number, meter, entry.floor)
+            for entry, _ in matches[:3]
+        )
+        raise MeterLookupError("多个楼层有匹配项，请补楼层。", candidates, reason="ambiguous")
+    _, options = matches[0]
     if len({item.roomverify for item in options.values()}) != len(options):
         raise MeterLookupError("空调和照明指向同一目录 ID，请核对表型。")
     if require_pair and len(options) != 2:

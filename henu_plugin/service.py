@@ -1045,10 +1045,9 @@ class HenuPluginService:
             outcomes = electricity_client.query_saved(path, address or _text(params.get("text")), deadline=deadline)
         except electricity_client.ElectricityLookupError as exc:
             lines = [str(exc)]
-            lines += [f"{index}. {candidate.command_text}"
-                      for index, candidate in enumerate(exc.candidates, 1)]
+            lines.extend(f"电费 {candidate.command_text}" for candidate in exc.candidates)
             if exc.candidates:
-                lines.append("回复编号，或直接发正确写法。")
+                lines.append("复制一条电费命令重查。")
             return {
                 "success": False, "msg": str(exc), "reply_text": "\n".join(lines),
                 "candidates": [{"campus": item.campus, "building": item.building, "room": item.room,
@@ -1060,7 +1059,11 @@ class HenuPluginService:
         except electricity_client.ElectricityError as exc:
             return {"success": False, "msg": str(exc)}
         first = outcomes[0]
-        lines = [f"{first['campus']} {first['building']} {first['room']}"]
+        floor = _text(first.get("floor"))
+        if floor.lstrip("+-").isdigit():
+            floor = f"{floor}层"
+        location = (first["campus"], first["building"], floor, f"{first['room']}室")
+        lines = [" ".join(part for part in location if part)]
         for item in outcomes:
             kind = "空调" if item["meter"] == "aircon" else "照明"
             lines.append(f"{kind}：{item['error']}" if "error" in item

@@ -686,6 +686,7 @@ def test_electricity_normal_message_bypasses_storage_and_model(harness, monkeypa
             ctx.prevent_postorder.assert_called_once()
             assert expected in ctx.reply.call_args.args[0].root[0].text
         if expected == "12 度":
+            assert "1层 101室" in ctx.reply.call_args.args[0].root[0].text
             assert query.call_count == 1
             assert query.call_args.kwargs["deadline"] is not None
         else:

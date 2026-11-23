@@ -507,7 +507,7 @@ def test_bot_command_uses_operator_context(monkeypatch, tmp_path, caplog, status
     result = HenuPluginService(tmp_path)._henu_cli({"command": "electricity 东苑26 638"})
     if status == 200:
         assert result["success"] is True
-        assert result["reply_text"] == "金明校区 东苑26号公寓 638\n空调：剩余 42.18 度\n照明：剩余 12.35 度"
+        assert result["reply_text"] == "金明校区 东苑26号公寓 6层 638室\n空调：剩余 42.18 度\n照明：剩余 12.35 度"
     else:
         assert result["success"] is False and "重新导入" in result["msg"]
     assert "dir-" not in json.dumps(result, ensure_ascii=False) and PRIVATE not in json.dumps(result)
