@@ -21,7 +21,8 @@ import httpx
 from .atomic_io import atomic_write_json, file_transaction
 from .wmxy_auth import AuthError, login_and_refresh
 from .electricity_meter import (
-    FloorDirectory, MeterAddress, MeterLookupError, RoomOption, _building, _floor, _normalize, _numbered_building,
+    FloorDirectory, MeterAddress, MeterLookupError, RoomOption, _building_key, _campus_key, _floor, _normalize,
+    _numbered_building,
     matches_area, parse_meter_text, resolve_meter_text, resolve_meters, suggest_targets,
 )
 
@@ -253,25 +254,25 @@ def _official_directory(http: httpx.Client, address: dict | MeterAddress, contex
             if any(matches_area(address.place, campus, official, (alias,)) for alias, official in names.items())
         }
         for campus in campuses:
-            if scoped and _normalize(campus.name).removesuffix("校区") not in scoped:
+            if scoped and _campus_key(campus.name) not in scoped:
                 continue
             for building in _level(http, context, "2", areaid=campus.id):
                 nicknames = _building_aliases(campus.name, building.name, aliases)
                 if address.matches_building(campus.name, building.name, nicknames):
                     candidates.append((campus, building, nicknames))
-        if address.building_number is None:
+        if address.building_number is None and not address.is_longzihu_dorm:
             prefixes = address.compact_building_prefixes([building.name for _, building, _ in candidates])
             if prefixes:
                 candidates = [row for row in candidates if _numbered_building(row[1].name)[1] in prefixes]
         requested_floor = address.floor
     else:
-        campus_key = _normalize(address["campus"]).removesuffix("校区")
-        building_key = _building(address["building"])
+        campus_key = _campus_key(address["campus"])
+        building_key = _building_key(campus_key, address["building"])
         for campus in campuses:
-            if _normalize(campus.name).removesuffix("校区") != campus_key:
+            if _campus_key(campus.name) != campus_key:
                 continue
             for building in _level(http, context, "2", areaid=campus.id):
-                if _building(building.name) == building_key:
+                if _building_key(campus_key, building.name) == building_key:
                     candidates.append((campus, building, ()))
         requested_floor = address.get("floor")
 

@@ -1065,6 +1065,10 @@ class HenuPluginService:
         location = (first["campus"], first["building"], floor, f"{first['room']}室")
         lines = [" ".join(part for part in location if part)]
         for item in outcomes:
+            if item["meter"] == "unknown":
+                reading = f"剩余 {item['quantity']} {item['unit'] or ''}".rstrip()
+                lines.append(f"{reading}（表型待确认）")
+                continue
             kind = "空调" if item["meter"] == "aircon" else "照明"
             lines.append(f"{kind}：{item['error']}" if "error" in item
                          else f"{kind}：剩余 {item['quantity']} {item['unit'] or ''}".rstrip())

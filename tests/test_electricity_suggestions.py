@@ -145,3 +145,79 @@ def test_json_floor_candidates_can_be_repeated_as_text(meter, types):
             assert {reading["floor"] for reading in readings} == {choice.floor}
     expected = ["light"] if meter == "lighting" else ["air", "light"]
     assert seen == [f"{label}-{floor}" for floor in (6, 7) for label in expected]
+
+
+@pytest.mark.parametrize("address", [
+    "龙子湖校区 二斋 2301 --floor 三",
+    "郑州校区 2斋 2301 --floor 三",
+    "二斋2301 --floor 三",
+    {"campus": "郑州", "building": "2斋", "room": "2301", "floor": "三层"},
+])
+def test_longzihu_reads_exact_catalog_entry_without_guessing_type(address):
+    from campus_core.electricity_client import ROOM_STATE
+
+    rows = {
+        "1": [{"id": "campus", "name": "龙子湖校区"}, {"id": "other", "name": "金明校区"}],
+        "2": [{"id": "building", "name": "二斋"}, {"id": "neighbor", "name": "三斋"}],
+        "3": [{"id": "floor", "name": "三层"}, {"id": "other-floor", "name": "四层"}],
+        "4": [{"id": "exact", "name": "2301房间"}, {"id": "short", "name": "301"}],
+    }
+    seen = []
+
+    def handle(request):
+        url = str(request.url).split("?", 1)[0]
+        seen.append(url)
+        if url == ROOM_ACCESS:
+            return httpx.Response(200, json={"businessData": {"useFlag": "1"}})
+        if url == ROOM_CATALOG:
+            params = request.url.params
+            for level, key, expected in (("2", "areaid", "campus"), ("3", "buildid", "building"),
+                                         ("4", "levelid", "floor")):
+                if params["optype"] == level:
+                    assert params[key] == expected
+            return httpx.Response(200, json={"code": "SUCCESS", "roomlist": rows[params["optype"]]})
+        assert url == ROOM_STATE
+        assert request.url.params["roomverify"] == "exact"
+        return httpx.Response(200, json={"returncode": "100", "quantity": "12.5", "quantityunit": "度"})
+
+    with _client(handle) as http:
+        reading, = query_address(http, address, context=_context())
+    assert (reading["campus"], reading["building"], reading["room"], reading["meter"]) == (
+        "龙子湖校区", "二斋", "2301", "unknown",
+    )
+    assert float(reading["quantity"]) == 12.5
+    assert seen == [ROOM_ACCESS, *([ROOM_CATALOG] * 4), ROOM_STATE]
+
+
+def test_longzihu_ambiguity_requires_floor_and_explicit_type_has_no_reading():
+    from campus_core.electricity_meter import FloorDirectory, MeterLookupError, RoomOption, resolve_meter_text
+
+    directory = tuple(FloorDirectory("龙子湖校区", "八斋", floor,
+                                     (RoomOption(f"room-{floor}", "4301房间"),))
+                      for floor in ("三层", "四层"))
+    with pytest.raises(MeterLookupError, match="补楼层") as ambiguous:
+        resolve_meter_text(directory, "郑州校区 8斋4301", require_pair=True)
+    commands = [entry.command_text for entry in ambiguous.value.candidates]
+    assert commands == ["龙子湖校区 八斋 4301 --floor 三", "龙子湖校区 八斋 4301 --floor 四"]
+    assert [resolve_meter_text(directory, command)[0].roomverify for command in commands] == [
+        "room-三层", "room-四层",
+    ]
+    with pytest.raises(MeterLookupError, match="无法确认.*表型"):
+        resolve_meter_text(directory, "八斋 4301照明 --floor 三", require_pair=True)
+    duplicate = FloorDirectory("龙子湖校区", "八斋", "三层", (*directory[0].rooms,
+                              RoomOption("duplicate", "4301")))
+    with pytest.raises(MeterLookupError, match="重复电表项"):
+        resolve_meter_text((duplicate,), "八斋4301", require_pair=True)
+
+
+def test_qq_labels_unknown_meter_without_calling_it_lighting(monkeypatch, tmp_path):
+    from campus_core import electricity_client
+    from henu_plugin.service import HenuPluginService
+
+    monkeypatch.setenv("HENU_ELECTRICITY_CONTEXT", str(tmp_path / "context.json"))
+    monkeypatch.setattr(electricity_client, "query_saved", lambda *args, **kwargs: [
+        {"campus": "龙子湖校区", "building": "二斋", "floor": "三层", "room": "2301",
+         "meter": "unknown", "quantity": 12.5, "unit": "度"},
+    ])
+    result = HenuPluginService(tmp_path)._henu_cli({"command": "电费 郑州校区 2斋 2301"})
+    assert result["reply_text"] == "龙子湖校区 二斋 三层 2301室\n剩余 12.5 度（表型待确认）"

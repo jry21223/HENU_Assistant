@@ -1,10 +1,15 @@
-"""从官方房间目录选空调表或照明表。适用于已确认分表的楼栋。"""
+"""从官方房间目录定位电表，按楼栋已确认的规则区分表型。"""
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 import re
 import unicodedata
 from typing import Iterator, Literal, Sequence
+
+
+_LONGZIHU_CAMPUS = "龙子湖"
+_LONGZIHU_DORMS = tuple(f"{number}斋" for number in "一二三四五六七八")
+_LONGZIHU_DORM_ALIASES = {f"{i}斋": name for i, name in enumerate(_LONGZIHU_DORMS, 1)}
 
 
 class MeterLookupError(ValueError):
@@ -44,7 +49,7 @@ class FloorDirectory:
 
 @dataclass(frozen=True)
 class ResolvedMeter:
-    kind: Literal["aircon", "lighting"]
+    kind: Literal["aircon", "lighting", "unknown"]
     campus: str
     building: str
     floor: str
@@ -65,6 +70,16 @@ def _normalize(value: str) -> str:
 
 def _building(value: str) -> str:
     return re.sub(r"(?:号(?:公寓|宿舍|楼|栋)?|栋|幢)$", "", _normalize(value))
+
+
+def _campus_key(value: str) -> str:
+    name = _normalize(value).removesuffix("校区")
+    return _LONGZIHU_CAMPUS if name == "郑州" else name
+
+
+def _building_key(campus: str, value: str) -> str:
+    name = _building(value)
+    return _LONGZIHU_DORM_ALIASES.get(name, name) if campus == _LONGZIHU_CAMPUS else name
 
 
 def _floor(value: str) -> str:
@@ -93,14 +108,22 @@ class MeterAddress:
     floor: str | None = None
     campus: str | None = None
 
+    @property
+    def is_longzihu_dorm(self) -> bool:
+        return self.campus == _LONGZIHU_CAMPUS and self.place in _LONGZIHU_DORMS and self.building_number is None
+
     def matches_building(self, campus: str, building: str, aliases: tuple[str, ...]) -> bool:
-        if self.campus is not None and _normalize(campus).removesuffix("校区") != self.campus:
+        campus_key = _campus_key(campus)
+        if self.campus is not None and campus_key != self.campus:
             return False
+        if self.is_longzihu_dorm:
+            return _building_key(campus_key, building) == self.place
         numbered = _numbered_building(building)
         if numbered is None:
             return False
         stem, number = numbered
-        return (self.building_number in (None, number) and matches_area(self.place, campus, stem, aliases))
+        return self.building_number in (None, number) and matches_area(self.place, campus, stem, aliases)
+
     def compact_building_prefixes(self, buildings: Sequence[str]) -> set[str]:
         numbers = [_numbered_building(building) for building in buildings]
         prefixes = {
@@ -119,10 +142,14 @@ def parse_meter_text(text: str) -> MeterAddress:
     if option and (not floor[:1].isspace() or len(floor.split()) != 1 or not floor_number
                    or floor_number.startswith("--")):
         raise MeterLookupError("楼层格式无效，请使用 --floor <楼层号>。")
-    campus_match = re.match(r"^([^0-9]+?)校区\s*(?=[^0-9\s])", address)
-    campus = _normalize(campus_match[1]) if campus_match else None
+    campus_match = re.match(r"^([^0-9]+?)校区\s*(?=[^0-9\s]|[1-8]斋)", address)
+    campus = _campus_key(campus_match[1]) if campus_match else None
     if campus_match:
         address = address[campus_match.end():]
+    dorm = re.match(r"^\s*([1-8一二三四五六七八]斋)(?=\s*[0-9])", address)
+    if dorm and campus in (None, _LONGZIHU_CAMPUS):
+        campus = _LONGZIHU_CAMPUS
+        address = _building_key(campus, dorm[1]) + address[dorm.end():]
     # 保留两个数字段之间的分隔，其余空格可由用户自由输入。
     address = re.sub(r"(?<=[0-9])\s+(?=[0-9])", " ", address.strip())
     address = re.sub(r"(?<![0-9])\s+|\s+(?![0-9])", "", address)
@@ -219,7 +246,7 @@ def suggest_targets(
             return ()
     scored = []
     for campus, building, aliases in buildings:
-        if address.campus is not None and _normalize(campus).removesuffix("校区") != address.campus:
+        if address.campus is not None and _campus_key(campus) != address.campus:
             continue
         numbered = _numbered_building(building)
         if numbered is None:
@@ -245,6 +272,10 @@ def resolve_meter_text(
 ) -> tuple[ResolvedMeter, ...]:
     if isinstance(address, str):
         address = parse_meter_text(address)
+    if address.is_longzihu_dorm:
+        return resolve_meters(directory, campus=_LONGZIHU_CAMPUS, building=address.place,
+                              room=address.number, floor=address.floor, meter=address.meter,
+                              require_pair=require_pair)
     matches = list(_matching_rooms(directory, address))
     if not matches:
         raise MeterLookupError("官方目录未收录该园区的这个编号，请更新目录或核对编号。", reason="no_match")
@@ -269,8 +300,8 @@ def resolve_meters(
     """directory 包含该分表楼栋的候选楼层，ID 来自每层官方 roomlist。"""
     if not all(isinstance(item, str) for item in (campus, building, room)):
         raise MeterLookupError("请给出校区、楼栋和实际房号。")
-    campus_key = _normalize(campus).removesuffix("校区")
-    building_key = _building(building)
+    campus_key = _campus_key(campus)
+    building_key = _building_key(campus_key, building)
     room_number = re.sub(r"(?:房间|房|室)$", "", _normalize(room))
     if not campus_key or not building_key or not re.fullmatch(r"[0-9]+", room_number):
         raise MeterLookupError("请给出校区、楼栋和实际房号。")
@@ -281,22 +312,29 @@ def resolve_meters(
 
     floors = [
         entry for entry in directory
-        if _normalize(entry.campus).removesuffix("校区") == campus_key
-        and _building(entry.building) == building_key
+        if _campus_key(entry.campus) == campus_key
+        and _building_key(campus_key, entry.building) == building_key
         and (floor is None or _floor(entry.floor) == _floor(floor))
     ]
     if not floors:
         raise MeterLookupError("官方目录中未匹配到该校区、楼栋或楼层。", reason="no_match")
-    numbered_building = _numbered_building(floors[0].building)
-    if numbered_building is None:
-        raise MeterLookupError("官方楼栋没有唯一楼号，无法按分表规则匹配。")
-    _, prefix = numbered_building
-    names = {"aircon": room_number, "lighting": prefix + room_number}
+    if campus_key == _LONGZIHU_CAMPUS and building_key in _LONGZIHU_DORMS:
+        if meter is not None:
+            raise MeterLookupError("暂无法确认龙子湖该房间的表型，去掉空调或照明选项后可查官方读数。")
+        prefix = None
+        names = {"unknown": room_number}
+    else:
+        numbered_building = _numbered_building(floors[0].building)
+        if numbered_building is None:
+            raise MeterLookupError("官方楼栋没有唯一楼号，无法按分表规则匹配。")
+        _, prefix = numbered_building
+        names = {"aircon": room_number, "lighting": prefix + room_number}
 
     matches = []
     for entry in floors:
         labels = [_room_label(item.name) for item in entry.rooms]
-        if room_number in labels and room_number.startswith(prefix) and room_number[len(prefix):] in labels:
+        if (prefix is not None and room_number in labels and room_number.startswith(prefix)
+                and room_number[len(prefix):] in labels):
             raise MeterLookupError("该编号可能是照明表，请填写实际房号并另选表型。")
         options = {}
         for kind, number in names.items():
@@ -324,7 +362,7 @@ def resolve_meters(
     _, options = matches[0]
     if len({item.roomverify for item in options.values()}) != len(options):
         raise MeterLookupError("空调和照明指向同一目录 ID，请核对表型。")
-    if require_pair and len(options) != 2:
+    if require_pair and prefix is not None and len(options) != 2:
         raise MeterLookupError("目录未确认该房间为空调、照明分表，请核对表型。")
     if meter in (None, "both"):
         if meter == "both" and len(options) != 2:
