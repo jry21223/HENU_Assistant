@@ -44,22 +44,3 @@ Thumbs.db
 *.json
 !campus_core/config/
 !campus_core/config/*.json
-# 脱敏证据与文档需要版本化
-!docs/**/*.json
-!tests/**/*.json
-output/
-logs/
-data/
-.tmp_inspect/
-.env
-build_out/
-*.lbpkg
-
-# Sensitive data
-henu_cookies.json
-henu_library_cookies.json
-henu_profile.json
-period_time_*.json
-xiqueer_*.json
-.food-drafts/
-.ruff_cache/
