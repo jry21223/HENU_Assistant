@@ -1,0 +1,7 @@
+attempt,host,remote_ip,host_interface,tcp_s,tls_completed_s,first_byte_s,http_status,error
+1,app.17wanxiao.com,198.18.1.225,utun7,0.002940,1.241321,1.567522,404,
+1,app.59wanmei.com,198.18.1.231,utun7,0.003481,,,0,SSL connection timeout
+2,app.17wanxiao.com,198.18.1.225,utun7,0.002940,1.447637,1.968412,404,
+2,app.59wanmei.com,198.18.1.231,utun7,0.004982,2.372001,3.145413,405,
+3,app.17wanxiao.com,198.18.1.225,utun7,0.004363,1.400544,1.809358,404,
+3,app.59wanmei.com,198.18.1.231,utun7,0.004899,2.199007,2.806270,405,

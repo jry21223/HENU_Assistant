@@ -1,0 +1,3 @@
+status=200
+cipher=TLS_AES_256_GCM_SHA384
+issuer=O=mitmproxy, CN=mitmproxy

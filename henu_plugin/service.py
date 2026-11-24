@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import hashlib
+import os
 import re
+import shlex
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +17,7 @@ from typing import Any, Callable
 from langbot_plugin.api.entities.builtin.provider import session as provider_session
 
 import mcp_server
+from campus_core import electricity_client
 from henu_mcp import runtime as henu_runtime
 from henu_mcp.tools import server_impl
 from henu_plugin.cache import (
@@ -22,12 +27,14 @@ from henu_plugin.cache import (
     SCHEDULE_CACHE,
     SEMINAR_QUERY_CACHE,
     SERVER_TIME_CACHE,
+    TTLCache,
     get_cache_stats,
     invalidate_account_cache,
     invalidate_schedule_cache,
     invalidate_user_cache,
 )
 from henu_plugin.cli import (
+    CliCommandSpec,
     build_help_payload,
     build_next_commands,
     inspect_cli_command,
@@ -41,12 +48,18 @@ from henu_plugin.storage_adapter import (
 )
 from henu_plugin import yuketang_config
 from henu_plugin import bridge_client
+from henu_plugin.kit_client import ENV_FILE
 from henu_plugin.yuketang_catalog import CatalogError, RainCatalog, resolve_classroom
 from henu_plugin.yuketang_quiz import QUIZ_WRITE_AUTH, QuizError, RainQuiz
 
 
 _RUNTIME_STATE_LOCK = threading.RLock()
 _CURRENT_IDENTITY: threading.local = threading.local()
+_ELECTRICITY_COOLDOWN = TTLCache[bool](default_ttl=10)
+# ponytail: 一个运营会话共用一个工作线程。实例内忙时直接退回，避免占用课表线程。
+_ELECTRICITY_WORKER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="electricity")
+_ELECTRICITY_SLOT = threading.BoundedSemaphore(1)
+_ELECTRICITY_QUERY_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -140,6 +153,18 @@ def _clean_session_id(value: Any) -> str:
     return "" if text in {"", "0", "None", "none"} else text
 
 
+def _electricity_context_path() -> Path | None:
+    """运营者导入的云缴费上下文；相对路径以插件根目录为准。"""
+    value = os.environ.get("HENU_ELECTRICITY_CONTEXT", "")
+    if not value:
+        with contextlib.suppress(FileNotFoundError):
+            for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                key, sep, raw = line.partition("=")
+                if sep and key.strip() == "HENU_ELECTRICITY_CONTEXT":
+                    value = (shlex.split(raw, comments=True) or [""])[0]
+    return ENV_FILE.parent / Path(value.strip()).expanduser() if value.strip() else None
+
+
 class HenuPluginService:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
@@ -182,6 +207,7 @@ class HenuPluginService:
             "empty_classroom_sync": self._empty_classroom_sync,
             "resource_registry_query": self._resource_registry_query,
             "resource_registry_sync": self._resource_registry_sync,
+            "electricity_query": self._electricity_query,
             "yuketang_status": self._yuketang_status,
             "yuketang_courses": self._yuketang_courses,
             "yuketang_exam_list": self._yuketang_exam_list,
@@ -489,7 +515,10 @@ class HenuPluginService:
                 "next_commands": ["help"],
             }
 
-        result = handler(spec.params)
+        return self._cli_result(spec, handler(spec.params), safe_command)
+
+    @staticmethod
+    def _cli_result(spec: CliCommandSpec, result: Any, safe_command: str) -> dict[str, Any]:
         if not isinstance(result, dict):
             result = {
                 "success": False,
@@ -976,6 +1005,77 @@ class HenuPluginService:
             scope=_text(params.get("scope")) or "all",
             force_refresh=_bool(params.get("force_refresh"), False),
         )
+
+    async def run_electricity_cli(self, spec: CliCommandSpec, session: provider_session.Session,
+                                  identity_hint: dict[str, Any], *,
+                                  address: electricity_client.MeterAddress | None = None) -> dict[str, Any]:
+        identity = self._resolve_identity(session, identity_hint)
+        if identity.launcher_type != "person":
+            return {"success": False, "error_code": "private_reply_required", "msg": "请在私聊中查询电量。"}
+        if not _ELECTRICITY_SLOT.acquire(blocking=False):
+            return {"success": False, "error_code": "electricity_busy", "msg": "电费查询正忙，请稍后再试。"}
+
+        deadline = time.monotonic() + _ELECTRICITY_QUERY_SECONDS
+        try:
+            future = _ELECTRICITY_WORKER.submit(
+                self._electricity_query, spec.params, deadline=deadline, openid=identity.qq, address=address,
+            )
+        except RuntimeError:
+            _ELECTRICITY_SLOT.release()
+            return {"success": False, "msg": "电费服务暂不可用，请稍后再试。"}
+        # 等工作线程实际退出才放行下一笔，不能由 QQ 等待超时触发放行。
+        future.add_done_callback(lambda _: _ELECTRICITY_SLOT.release())
+        try:
+            result = await asyncio.wait_for(asyncio.wrap_future(future), max(0, deadline - time.monotonic()))
+        except TimeoutError:
+            result = {"success": False, "error_code": "electricity_timeout", "msg": "电费查询超时，请稍后再试。"}
+        except Exception:
+            result = {"success": False, "msg": "电费查询暂时失败，请稍后再试。"}
+        return self._cli_result(spec, result, redact_cli_command(spec.raw))
+
+    def _electricity_query(self, params: dict[str, Any], *, deadline: float | None = None,
+                           openid: str = "", address: electricity_client.MeterAddress | None = None) -> dict[str, Any]:
+        path = _electricity_context_path()
+        if path is None:
+            return {"success": False, "msg": "电费查询未配置，需要管理员设置 HENU_ELECTRICITY_CONTEXT。"}
+        openid = openid or self._current_openid()
+        if openid and _ELECTRICITY_COOLDOWN.get(openid):
+            return {"success": False, "msg": "查询太快，请 10 秒后再试。"}
+        try:
+            outcomes = electricity_client.query_saved(path, address or _text(params.get("text")), deadline=deadline)
+        except electricity_client.ElectricityLookupError as exc:
+            lines = [str(exc)]
+            lines.extend(f"电费 {candidate.command_text}" for candidate in exc.candidates)
+            if exc.candidates:
+                lines.append("复制一条电费命令重查。")
+            return {
+                "success": False, "msg": str(exc), "reply_text": "\n".join(lines),
+                "candidates": [{"campus": item.campus, "building": item.building, "room": item.room,
+                                "floor": item.floor, "meter": item.meter, "command_text": item.command_text}
+                               for item in exc.candidates],
+            }
+        except electricity_client.ElectricityAuthError:
+            return {"success": False, "msg": "电费查询的登录态已失效，请联系管理员重新导入。"}
+        except electricity_client.ElectricityError as exc:
+            return {"success": False, "msg": str(exc)}
+        first = outcomes[0]
+        floor = _text(first.get("floor"))
+        if floor.lstrip("+-").isdigit():
+            floor = f"{floor}层"
+        location = (first["campus"], first["building"], floor, f"{first['room']}室")
+        lines = [" ".join(part for part in location if part)]
+        for item in outcomes:
+            if item["meter"] == "unknown":
+                reading = f"剩余 {item['quantity']} {item['unit'] or ''}".rstrip()
+                lines.append(f"{reading}（表型待确认）")
+                continue
+            kind = "空调" if item["meter"] == "aircon" else "照明"
+            lines.append(f"{kind}：{item['error']}" if "error" in item
+                         else f"{kind}：剩余 {item['quantity']} {item['unit'] or ''}".rstrip())
+        success = any("error" not in item for item in outcomes)
+        if success and openid:
+            _ELECTRICITY_COOLDOWN.set(openid, True)
+        return {"success": success, "reply_text": "\n".join(lines)}
 
     def _yuketang_config_path(self) -> Path:
         paths = get_current_user_paths()

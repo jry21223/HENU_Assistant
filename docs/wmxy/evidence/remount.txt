@@ -1,0 +1,2 @@
+adbd is already running as root
+remount succeeded

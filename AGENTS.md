@@ -18,6 +18,7 @@ Single context: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
 
 - 本目录是 Git 根目录；此交付形态为 `langbot-plugin`，依赖 LangBot 宿主。
 - 开始前核对当前分支和未提交改动。`main`、`mcp-server`、`agent-skill` 是不同交付形态，跨分支移植需明确核对接口。
+- 电费功能开发、评审或交接前，先读 `docs/electricity-readonly-collaboration.md`。
 - 普通交流与新增说明使用中文。输出、预览和临时产物统一放在本仓库 `output/` 下。
 - 版本以 `manifest.yaml` 为准；README 中的版本示例可能滞后。
 

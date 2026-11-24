@@ -106,7 +106,9 @@ class BaseHenuTool(Tool):
                 result.setdefault("server_time_snapshot", server_time)
 
         await sync_after_commit(self.plugin, storage_key, result)
+        return await self._finish_delivery(result, params, session, query_id)
 
+    async def _finish_delivery(self, result, params, session, query_id):
         card_captured = await self._publish_delivery_result(result, session, query_id)
         self._prepare_delivery_result(result)
         await self._refresh_after_sensitive_success(query_id, params, result)
