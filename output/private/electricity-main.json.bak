@@ -1,0 +1,7 @@
+{
+  "cookie": "SESSION=640976a9-5f2f-464e-a6c3-c3fb6fd9ff52; sid=dHhHYkNHQ3gtQUN2UC1ZQ3JXLVpZR2ItWDY5UDlZUGJHeHhX; b_host=eyJmbGFnIjoid2FueGlhbyIsInNjaGVtZUFuZHJpb2QiOiIiLCJzY2hlbWVJT1MiOiIifQ==; standardH5_token=0867a6a8-ba12-4a3f-9467-5ce2e427688f; scanHost=jinmifeng; schoolid=817; schoolName=5rKz5Y2X5aSn5a2m",
+  "referer": "https://h5cloud.17wanxiao.com:18443/CloudPayment/bill/selectPayProject.do?txcode=2&interurl=substituted_pay&payProId=2868&amtflag=0&payamt=0&payproname=%E7%94%A8%E7%94%B5%E6%94%AF%E5%87%BA&img=https://payicons.59wanmei.com/cloudpayment/images/project/img-nav_2.png&subPayProId=&fixamtlist=",
+  "schoolcode": "817",
+  "payProId": "2868",
+  "businesstype": "2"
+}
