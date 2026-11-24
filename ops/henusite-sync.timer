@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily HenuSite knowledge refresh
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=5min
+Unit=henusite-sync.service
+
+[Install]
+WantedBy=timers.target
