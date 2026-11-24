@@ -1,0 +1,16 @@
+{
+  "cookie": "HWWAFSESTIME=1795161385869; HWWAFSESID=ae61894843eb5c96ed; acw_tc=0a18aace17951613866643945e3e151213f449729c15c7bb79ed6f813bf1c4; SESSION=939a350c-d32a-45ec-a613-0972445028d3",
+  "referer": "https://h5cloud.17wanxiao.com:18443/CloudPayment/bill/selectPayProject.do?txcode=2&interurl=substituted_pay&payProId=2868&amtflag=0&payamt=0&payproname=%E7%94%A8%E7%94%B5%E6%94%AF%E5%87%BA&img=https://payicons.59wanmei.com/cloudpayment/images/project/img-nav_2.png&subPayProId=&fixamtlist=",
+  "schoolcode": "817",
+  "payProId": "2868",
+  "businesstype": "2",
+  "session_id": "f7971165-c9cb-4924-9cde-85c35aae4a47",
+  "custom_id": "817",
+  "login_token": "ede1add0-ff64-4221-80f6-32cd7d6c7b6f_AUTO3",
+  "user_id": "69469063",
+  "login_name": "13539015801",
+  "device_id": "413a627a-595f-45af-b7f9-408283d6fe03",
+  "device_model": "sdk_gphone_arm64",
+  "device_product": "sdk_gphone_arm64",
+  "device_release": "11"
+}
